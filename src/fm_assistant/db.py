@@ -119,6 +119,60 @@ class AuditEventORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+
+class WhatsAppChannelORM(Base):
+    __tablename__ = "assistant_whatsapp_channels"
+
+    channel_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    unit_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    phone_number_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    business_account_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    access_token_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    app_secret_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    verify_token_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    graph_api_version: Mapped[str] = mapped_column(String(32), nullable=False, default="v23.0")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_assistant_whatsapp_scope",
+            "tenant_id",
+            "unit_id",
+            "enabled",
+        ),
+    )
+
+
+class WhatsAppInboundORM(Base):
+    __tablename__ = "assistant_whatsapp_inbound"
+
+    channel_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("assistant_whatsapp_channels.channel_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    message_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    sender_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    message_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    outbound_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_assistant_whatsapp_inbound_status",
+            "channel_id",
+            "status",
+            "updated_at",
+        ),
+    )
+
+
 def create_session_factory(database_url: str):
     kwargs = {}
     if database_url.lower().startswith("sqlite"):
