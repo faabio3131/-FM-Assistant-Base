@@ -34,6 +34,8 @@ class Settings:
     model_base_url: str | None
     model_api_key: str | None
     model_name: str | None
+    core_base_url: str | None
+    core_service_key: str | None
     auto_create_schema: bool
 
     @property
@@ -51,7 +53,7 @@ class Settings:
             raise RuntimeError("FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY obrigatório")
 
         backend = self.model_backend.strip().casefold()
-        if backend not in {"development", "openai_compatible"}:
+        if backend not in {"development", "openai_compatible", "core"}:
             raise RuntimeError("FM_ASSISTANT_MODEL_BACKEND inválido")
 
         if self.production_like:
@@ -78,6 +80,20 @@ class Settings:
                 raise RuntimeError(
                     "MODEL_BASE_URL, MODEL_API_KEY e MODEL_NAME são obrigatórios "
                     "para openai_compatible"
+                )
+
+        if backend == "core":
+            if not all(
+                value and value.strip()
+                for value in (self.core_base_url, self.core_service_key)
+            ):
+                raise RuntimeError(
+                    "FM_ASSISTANT_CORE_BASE_URL e FM_ASSISTANT_CORE_SERVICE_KEY "
+                    "são obrigatórios para backend core"
+                )
+            if self.production_like and len(self.core_service_key or "") < 32:
+                raise RuntimeError(
+                    "FM_ASSISTANT_CORE_SERVICE_KEY deve ter ao menos 32 caracteres"
                 )
         return self
 
@@ -109,6 +125,8 @@ def load_settings() -> Settings:
         model_base_url=os.getenv("FM_ASSISTANT_MODEL_BASE_URL"),
         model_api_key=os.getenv("FM_ASSISTANT_MODEL_API_KEY"),
         model_name=os.getenv("FM_ASSISTANT_MODEL_NAME"),
+        core_base_url=os.getenv("FM_ASSISTANT_CORE_BASE_URL"),
+        core_service_key=os.getenv("FM_ASSISTANT_CORE_SERVICE_KEY"),
         auto_create_schema=_bool(
             "FM_ASSISTANT_AUTO_CREATE_SCHEMA",
             default=environment in {Environment.DEVELOPMENT, Environment.TEST},

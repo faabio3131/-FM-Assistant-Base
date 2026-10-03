@@ -19,6 +19,8 @@ def client(tmp_path):
         model_base_url=None,
         model_api_key=None,
         model_name=None,
+        core_base_url=None,
+        core_service_key=None,
         auto_create_schema=True,
     ).validate()
     app = create_app(settings)

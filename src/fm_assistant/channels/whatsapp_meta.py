@@ -76,12 +76,28 @@ class WhatsAppInboundMessage:
 
 
 class AudioTranscriber(Protocol):
-    def transcribe(self, *, content: bytes, mime_type: str) -> str: ...
+    def transcribe(
+        self,
+        *,
+        tenant_id: str,
+        unit_id: str,
+        correlation_id: str,
+        content: bytes,
+        mime_type: str,
+    ) -> str: ...
 
 
 class UnavailableAudioTranscriber:
-    def transcribe(self, *, content: bytes, mime_type: str) -> str:
-        del content, mime_type
+    def transcribe(
+        self,
+        *,
+        tenant_id: str,
+        unit_id: str,
+        correlation_id: str,
+        content: bytes,
+        mime_type: str,
+    ) -> str:
+        del tenant_id, unit_id, correlation_id, content, mime_type
         raise AudioTranscriptionUnavailable("audio_transcriber_unavailable")
 
 

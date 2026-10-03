@@ -11,9 +11,10 @@ from pydantic import BaseModel, Field, SecretStr
 from .capabilities import KnowledgeCapabilityProvider
 from .channel_secrets import ChannelSecretBox
 from .channels.whatsapp_meta import WhatsAppProviderError
+from .core_client import CoreAIClient, CoreAudioTranscriber
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
-from .gateways import DevelopmentModelGateway, OpenAICompatibleGateway
+from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .repositories import (
     ConversationSQLAlchemyRepository,
     CredentialRepository,
@@ -157,7 +158,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     knowledge = KnowledgeRepository(session_factory)
     audit = SQLAuditSink(session_factory)
 
-    if cfg.model_backend.casefold() == "openai_compatible":
+    audio_transcriber = None
+    backend = cfg.model_backend.casefold()
+    if backend == "core":
+        assert cfg.core_base_url is not None
+        assert cfg.core_service_key is not None
+        core_client = CoreAIClient(
+            base_url=cfg.core_base_url,
+            service_key=cfg.core_service_key,
+        )
+        model = CoreModelGateway(core_client)
+        audio_transcriber = CoreAudioTranscriber(core_client)
+    elif backend == "openai_compatible":
         assert cfg.model_base_url is not None
         assert cfg.model_api_key is not None
         assert cfg.model_name is not None
@@ -185,6 +197,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         inbound=whatsapp_inbound,
         assistant=service,
         sender_pepper=cfg.credential_pepper,
+        audio_transcriber=audio_transcriber,
     )
 
     @asynccontextmanager

@@ -130,6 +130,9 @@ class WhatsAppRuntime:
                     )
                     try:
                         user_text = self._audio_transcriber.transcribe(
+                            tenant_id=config.tenant_id,
+                            unit_id=config.unit_id,
+                            correlation_id=incoming.message_id,
                             content=content,
                             mime_type=mime_type,
                         )

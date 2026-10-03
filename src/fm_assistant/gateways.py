@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 
+from .core_client import CoreAIClient
 from .domain import AssistantPersona, Conversation, Message, MessageRole
 
 
@@ -50,11 +51,41 @@ class DevelopmentModelGateway:
         )
 
 
-class OpenAICompatibleGateway:
-    """Adapter temporário para providers compatíveis com /chat/completions.
+class CoreModelGateway:
+    """Gateway oficial: toda seleção de provider/modelo fica no FM Core Base."""
 
-    O destino arquitetural é um adapter para o FM Core Base; o contrato ModelGateway
-    permite essa troca sem alterar o domínio da Assistente.
+    def __init__(self, client: CoreAIClient) -> None:
+        self._client = client
+
+    def generate(
+        self,
+        *,
+        persona: AssistantPersona,
+        conversation: Conversation,
+        history: tuple[Message, ...],
+        user_message: Message,
+        capability_context: str,
+    ) -> str:
+        messages: list[dict[str, str]] = []
+        for item in history[-20:]:
+            if item.message_id == user_message.message_id:
+                continue
+            role = "assistant" if item.role is MessageRole.ASSISTANT else "user"
+            messages.append({"role": role, "content": item.content})
+        messages.append({"role": "user", "content": user_message.content})
+        return self._client.generate_text(
+            tenant_id=conversation.tenant_id,
+            unit_id=conversation.unit_id,
+            system_prompt=_system_prompt(persona, capability_context),
+            messages=messages,
+            correlation_id=user_message.message_id,
+        )
+
+
+class OpenAICompatibleGateway:
+    """Adapter temporário de compatibilidade.
+
+    Produção deve preferir CoreModelGateway para concentrar routing/fallback/FinOps no Core.
     """
 
     def __init__(
