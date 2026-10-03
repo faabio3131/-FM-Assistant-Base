@@ -188,6 +188,30 @@ class ConversationSQLAlchemyRepository:
             )
             return self._domain(row) if row is not None else None
 
+    def get_by_external_ref(
+        self,
+        context: TenantContext,
+        *,
+        channel: Channel,
+        external_ref: str,
+    ) -> Conversation | None:
+        reference = external_ref.strip()
+        if not reference:
+            raise ValueError("external_ref_required")
+        with self._session_factory() as session:
+            row = session.scalar(
+                select(ConversationORM)
+                .where(
+                    ConversationORM.tenant_id == context.tenant_id,
+                    ConversationORM.unit_id == context.unit_id,
+                    ConversationORM.channel == channel.value,
+                    ConversationORM.external_ref == reference,
+                )
+                .order_by(ConversationORM.updated_at.desc())
+                .limit(1)
+            )
+            return self._domain(row) if row is not None else None
+
     def save_message(self, context: TenantContext, message: Message) -> Message:
         if message.tenant_id != context.tenant_id or message.unit_id != context.unit_id:
             raise PermissionError("message_fora_do_escopo")
