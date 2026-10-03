@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from enum import StrEnum
 
+from dotenv import load_dotenv
+
 
 class Environment(StrEnum):
     DEVELOPMENT = "development"
@@ -76,6 +78,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    load_dotenv(override=False)
     raw_env = os.getenv("FM_ASSISTANT_ENV", "development").strip().casefold()
     try:
         environment = Environment(raw_env)
