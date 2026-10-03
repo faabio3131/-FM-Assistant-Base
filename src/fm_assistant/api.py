@@ -223,6 +223,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             api_key=api_key,
         )
 
+    @app.delete(
+        "/v1/admin/credentials/{credential_id}",
+        status_code=204,
+        dependencies=[Depends(require_admin)],
+    )
+    def revoke_credential(
+        credential_id: str,
+        request: Request,
+    ) -> None:
+        revoked = request.app.state.credentials.revoke(credential_id)
+        if not revoked:
+            raise HTTPException(status_code=404, detail="credential_not_found")
+        return None
+
     @app.get("/v1/persona", response_model=PersonaResponse)
     def get_persona(
         request: Request,
