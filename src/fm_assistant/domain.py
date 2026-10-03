@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
@@ -48,7 +48,7 @@ class AssistantPersona:
     tone: str = "profissional"
     instructions: str = ""
     enabled: bool = True
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
         if not self.public_name.strip():
@@ -78,8 +78,8 @@ class Conversation:
         unit_id: str,
         channel: Channel,
         external_ref: str | None = None,
-    ) -> "Conversation":
-        now = datetime.now(timezone.utc)
+    ) -> Conversation:
+        now = datetime.now(UTC)
         return cls(
             conversation_id=str(uuid4()),
             tenant_id=tenant_id,
@@ -111,7 +111,7 @@ class Message:
         unit_id: str,
         role: MessageRole,
         content: str,
-    ) -> "Message":
+    ) -> Message:
         text = content.strip()
         if not text:
             raise ValueError("message_content_obrigatorio")
@@ -122,5 +122,5 @@ class Message:
             unit_id=unit_id,
             role=role,
             content=text,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )

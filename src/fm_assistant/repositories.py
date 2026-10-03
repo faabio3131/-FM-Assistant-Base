@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -103,7 +103,7 @@ class PersonaSQLAlchemyRepository:
                 tone=row.tone,
                 instructions=row.instructions,
                 enabled=row.enabled,
-                updated_at=row.updated_at.replace(tzinfo=row.updated_at.tzinfo or timezone.utc),
+                updated_at=row.updated_at.replace(tzinfo=row.updated_at.tzinfo or UTC),
             )
 
     def upsert(
@@ -151,8 +151,8 @@ class ConversationSQLAlchemyRepository:
             channel=Channel(row.channel),
             status=ConversationStatus(row.status),
             external_ref=row.external_ref,
-            created_at=row.created_at.replace(tzinfo=row.created_at.tzinfo or timezone.utc),
-            updated_at=row.updated_at.replace(tzinfo=row.updated_at.tzinfo or timezone.utc),
+            created_at=row.created_at.replace(tzinfo=row.created_at.tzinfo or UTC),
+            updated_at=row.updated_at.replace(tzinfo=row.updated_at.tzinfo or UTC),
         )
 
     def create(self, context: TenantContext, conversation: Conversation) -> Conversation:
@@ -244,7 +244,7 @@ class ConversationSQLAlchemyRepository:
                 unit_id=row.unit_id,
                 role=MessageRole(row.role),
                 content=row.content,
-                created_at=row.created_at.replace(tzinfo=row.created_at.tzinfo or timezone.utc),
+                created_at=row.created_at.replace(tzinfo=row.created_at.tzinfo or UTC),
             )
             for row in rows
         )
@@ -265,7 +265,7 @@ class ConversationSQLAlchemyRepository:
             if row is None:
                 raise LookupError("conversation_not_found")
             row.status = ConversationStatus.HUMAN_HANDOFF.value
-            row.updated_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(UTC)
             session.commit()
             return self._domain(row)
 
@@ -280,7 +280,7 @@ class KnowledgeRepository:
         if not title or not content:
             raise ValueError("knowledge_title_content_required")
         document_id = str(uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with self._session_factory() as session:
             session.add(
                 KnowledgeDocumentORM(
@@ -345,7 +345,7 @@ class SQLAuditSink:
                     resource_id=resource_id,
                     outcome=outcome,
                     metadata_json=json.dumps(metadata or {}, sort_keys=True, ensure_ascii=False),
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
             session.commit()

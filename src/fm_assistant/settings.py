@@ -39,7 +39,7 @@ class Settings:
     def production_like(self) -> bool:
         return self.environment in {Environment.STAGING, Environment.PRODUCTION}
 
-    def validate(self) -> "Settings":
+    def validate(self) -> Settings:
         if not self.database_url.strip():
             raise RuntimeError("FM_ASSISTANT_DATABASE_URL obrigatório")
         if not self.admin_key.strip():

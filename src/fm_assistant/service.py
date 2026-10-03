@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .domain import (
     AssistantPersona,
@@ -59,7 +59,7 @@ class AssistantService:
             tone=tone,
             instructions=instructions,
             enabled=enabled,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         saved = self._personas.upsert(context, persona)
         self._audit.record(

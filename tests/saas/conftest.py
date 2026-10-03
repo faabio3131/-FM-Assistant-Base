@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from fm_assistant.api import create_app
 from fm_assistant.settings import Environment, Settings
