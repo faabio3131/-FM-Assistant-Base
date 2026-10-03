@@ -1,4 +1,4 @@
-"""Orquestração universal do canal WhatsApp sobre o FM Assistant Base."""
+﻿"""OrquestraÃ§Ã£o universal do canal WhatsApp sobre o FM Assistant Base."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class WhatsAppRuntime:
     def _sender_hash(self, *, channel_id: str, sender: str) -> str:
         return hmac.new(
             self._sender_pepper.encode("utf-8"),
-            f"{channel_id}:{sender}".encode("utf-8"),
+            f"{channel_id}:{sender}".encode(),
             hashlib.sha256,
         ).hexdigest()
 
@@ -143,8 +143,8 @@ class WhatsAppRuntime:
                             outbound_id = client.send_text(
                                 recipient=incoming.sender,
                                 text=(
-                                    "Recebi seu áudio, mas este atendimento ainda não "
-                                    "possui transcrição automática configurada. "
+                                    "Recebi seu Ã¡udio, mas este atendimento ainda nÃ£o "
+                                    "possui transcriÃ§Ã£o automÃ¡tica configurada. "
                                     "Vou encaminhar a conversa para atendimento humano."
                                 ),
                                 correlation_id=incoming.message_id,
@@ -209,7 +209,7 @@ class WhatsAppRuntime:
                     outbound_id=outbound_id,
                 )
                 processed += 1
-            except Exception as exc:
+            except (LookupError, PermissionError, RuntimeError, ValueError) as exc:
                 self._inbound.mark_failed(
                     channel_id=channel_id,
                     message_id=incoming.message_id,
@@ -223,3 +223,4 @@ class WhatsAppRuntime:
             failed=failed,
             reconcile_required=reconcile_required,
         )
+

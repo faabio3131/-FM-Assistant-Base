@@ -5,7 +5,6 @@ import hmac
 
 from fm_assistant.channels.whatsapp_meta import MetaWhatsAppClient
 
-
 APP_SECRET = "app-secret-test"
 VERIFY_TOKEN = "verify-token-test"
 
