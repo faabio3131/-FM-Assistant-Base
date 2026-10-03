@@ -54,6 +54,14 @@ class Settings:
                 raise RuntimeError("SQLite não é permitido em staging/production")
             if backend == "development":
                 raise RuntimeError("Model gateway de desenvolvimento não é permitido em produção")
+            if self.admin_key == "change-me-development":
+                raise RuntimeError("FM_ASSISTANT_ADMIN_KEY padrão é proibida em produção")
+            if self.credential_pepper == "change-me-development-pepper":
+                raise RuntimeError("FM_ASSISTANT_CREDENTIAL_PEPPER padrão é proibido em produção")
+            if len(self.admin_key) < 24:
+                raise RuntimeError("FM_ASSISTANT_ADMIN_KEY deve ter ao menos 24 caracteres")
+            if len(self.credential_pepper) < 32:
+                raise RuntimeError("FM_ASSISTANT_CREDENTIAL_PEPPER deve ter ao menos 32 caracteres")
 
         if backend == "openai_compatible":
             if not all(
