@@ -5,10 +5,12 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel, Field, SecretStr
 
 from .capabilities import KnowledgeCapabilityProvider
+from .channel_secrets import ChannelSecretBox
+from .channels.whatsapp_meta import WhatsAppProviderError
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .gateways import DevelopmentModelGateway, OpenAICompatibleGateway
@@ -22,6 +24,8 @@ from .repositories import (
 from .security import generate_api_key, hash_api_key
 from .service import AssistantService
 from .settings import Settings, load_settings
+from .whatsapp_repository import WhatsAppChannelRepository, WhatsAppInboundRepository
+from .whatsapp_runtime import WhatsAppRuntime
 
 
 class ProvisionCredentialRequest(BaseModel):
@@ -85,6 +89,23 @@ class MessageResponse(BaseModel):
 
 class HandoffRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
+
+
+class WhatsAppChannelRequest(BaseModel):
+    phone_number_id: str = Field(min_length=1, max_length=128)
+    business_account_id: str | None = Field(default=None, max_length=128)
+    access_token: SecretStr
+    app_secret: SecretStr
+    verify_token: SecretStr
+    graph_api_version: str = Field(default="v23.0", pattern=r"^v\d+\.\d+$")
+
+
+class WhatsAppChannelResponse(BaseModel):
+    channel_id: str
+    phone_number_id: str
+    business_account_id: str | None
+    graph_api_version: str
+    webhook_path: str
 
 
 def _persona_response(persona: AssistantPersona) -> PersonaResponse:
@@ -156,6 +177,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         audit=audit,
     )
 
+    secret_box = ChannelSecretBox(cfg.channel_encryption_key)
+    whatsapp_channels = WhatsAppChannelRepository(session_factory, secret_box)
+    whatsapp_inbound = WhatsAppInboundRepository(session_factory)
+    whatsapp_runtime = WhatsAppRuntime(
+        channels=whatsapp_channels,
+        inbound=whatsapp_inbound,
+        assistant=service,
+        sender_pepper=cfg.credential_pepper,
+    )
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if cfg.auto_create_schema:
@@ -164,6 +195,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.credentials = credentials
         app.state.knowledge = knowledge
         app.state.assistant_service = service
+        app.state.whatsapp_channels = whatsapp_channels
+        app.state.whatsapp_runtime = whatsapp_runtime
         yield
         engine.dispose()
 
@@ -365,5 +398,98 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except LookupError as exc:
             raise HTTPException(status_code=404, detail="conversation_not_found") from exc
         return _conversation_response(conversation)
+
+    @app.put("/v1/channels/whatsapp", response_model=WhatsAppChannelResponse)
+    def configure_whatsapp(
+        payload: WhatsAppChannelRequest,
+        request: Request,
+        context: TenantContext = Depends(tenant_context),
+    ) -> WhatsAppChannelResponse:
+        config = request.app.state.whatsapp_channels.configure(
+            context,
+            phone_number_id=payload.phone_number_id,
+            business_account_id=payload.business_account_id,
+            access_token=payload.access_token.get_secret_value(),
+            app_secret=payload.app_secret.get_secret_value(),
+            verify_token=payload.verify_token.get_secret_value(),
+            graph_api_version=payload.graph_api_version,
+        )
+        audit.record(
+            context=context,
+            action="assistant.channel.whatsapp.configure",
+            resource_type="whatsapp_channel",
+            resource_id=config.channel_id,
+            outcome="success",
+        )
+        return WhatsAppChannelResponse(
+            channel_id=config.channel_id,
+            phone_number_id=config.phone_number_id,
+            business_account_id=config.business_account_id,
+            graph_api_version=config.graph_api_version,
+            webhook_path=f"/webhooks/meta/whatsapp/{config.channel_id}",
+        )
+
+    @app.get("/v1/channels/whatsapp", response_model=WhatsAppChannelResponse)
+    def get_whatsapp(
+        request: Request,
+        context: TenantContext = Depends(tenant_context),
+    ) -> WhatsAppChannelResponse:
+        config = request.app.state.whatsapp_channels.get_for_context(context)
+        if config is None:
+            raise HTTPException(status_code=404, detail="whatsapp_channel_not_found")
+        return WhatsAppChannelResponse(
+            channel_id=config.channel_id,
+            phone_number_id=config.phone_number_id,
+            business_account_id=config.business_account_id,
+            graph_api_version=config.graph_api_version,
+            webhook_path=f"/webhooks/meta/whatsapp/{config.channel_id}",
+        )
+
+    @app.get("/webhooks/meta/whatsapp/{channel_id}")
+    def verify_whatsapp_webhook(
+        channel_id: str,
+        hub_mode: str = Query(alias="hub.mode"),
+        hub_verify_token: str = Query(alias="hub.verify_token"),
+        hub_challenge: str = Query(alias="hub.challenge"),
+    ) -> Response:
+        if hub_mode != "subscribe":
+            raise HTTPException(status_code=400, detail="meta_mode_invalid")
+        try:
+            challenge = whatsapp_runtime.verify_challenge(
+                channel_id=channel_id,
+                verify_token=hub_verify_token,
+                challenge=hub_challenge,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="whatsapp_channel_not_found") from exc
+        except WhatsAppProviderError as exc:
+            raise HTTPException(status_code=401, detail="meta_verification_failed") from exc
+        return Response(content=challenge, media_type="text/plain")
+
+    @app.post("/webhooks/meta/whatsapp/{channel_id}", status_code=204)
+    async def receive_whatsapp_webhook(
+        channel_id: str,
+        request: Request,
+        x_hub_signature_256: str | None = Header(
+            default=None,
+            alias="X-Hub-Signature-256",
+        ),
+    ) -> Response:
+        if not x_hub_signature_256:
+            raise HTTPException(status_code=401, detail="meta_signature_missing")
+        body = await request.body()
+        try:
+            result = whatsapp_runtime.process_webhook(
+                channel_id=channel_id,
+                body=body,
+                signature=x_hub_signature_256,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="whatsapp_channel_not_found") from exc
+        except WhatsAppProviderError as exc:
+            raise HTTPException(status_code=401, detail="meta_signature_invalid") from exc
+        if result.failed:
+            raise HTTPException(status_code=503, detail="whatsapp_processing_failed")
+        return Response(status_code=204)
 
     return app
