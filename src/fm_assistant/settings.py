@@ -29,6 +29,7 @@ class Settings:
     database_url: str
     admin_key: str
     credential_pepper: str
+    channel_encryption_key: str
     model_backend: str
     model_base_url: str | None
     model_api_key: str | None
@@ -46,6 +47,8 @@ class Settings:
             raise RuntimeError("FM_ASSISTANT_ADMIN_KEY obrigatório")
         if not self.credential_pepper.strip():
             raise RuntimeError("FM_ASSISTANT_CREDENTIAL_PEPPER obrigatório")
+        if not self.channel_encryption_key.strip():
+            raise RuntimeError("FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY obrigatório")
 
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible"}:
@@ -60,6 +63,8 @@ class Settings:
                 raise RuntimeError("FM_ASSISTANT_ADMIN_KEY padrão é proibida em produção")
             if self.credential_pepper == "change-me-development-pepper":
                 raise RuntimeError("FM_ASSISTANT_CREDENTIAL_PEPPER padrão é proibido em produção")
+            if self.channel_encryption_key == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=":
+                raise RuntimeError("FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY padrão é proibida em produção")
             if len(self.admin_key) < 24:
                 raise RuntimeError("FM_ASSISTANT_ADMIN_KEY deve ter ao menos 24 caracteres")
             if len(self.credential_pepper) < 32:
@@ -95,6 +100,10 @@ def load_settings() -> Settings:
         credential_pepper=os.getenv(
             "FM_ASSISTANT_CREDENTIAL_PEPPER",
             "change-me-development-pepper",
+        ),
+        channel_encryption_key=os.getenv(
+            "FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         ),
         model_backend=os.getenv("FM_ASSISTANT_MODEL_BACKEND", "development"),
         model_base_url=os.getenv("FM_ASSISTANT_MODEL_BASE_URL"),
