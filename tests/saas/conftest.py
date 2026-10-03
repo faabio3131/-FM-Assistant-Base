@@ -14,6 +14,7 @@ def client(tmp_path):
         database_url=f"sqlite:///{tmp_path / 'assistant-test.db'}",
         admin_key="admin-test-key",
         credential_pepper="pepper-test-very-long",
+        channel_encryption_key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         model_backend="development",
         model_base_url=None,
         model_api_key=None,
