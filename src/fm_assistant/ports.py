@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .domain import AssistantPersona, Conversation, Message, TenantContext
+from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 
 
 class PersonaRepository(Protocol):
@@ -15,6 +15,13 @@ class PersonaRepository(Protocol):
 class ConversationRepository(Protocol):
     def create(self, context: TenantContext, conversation: Conversation) -> Conversation: ...
     def get(self, context: TenantContext, conversation_id: str) -> Conversation | None: ...
+    def get_by_external_ref(
+        self,
+        context: TenantContext,
+        *,
+        channel: Channel,
+        external_ref: str,
+    ) -> Conversation | None: ...
     def save_message(self, context: TenantContext, message: Message) -> Message: ...
     def list_messages(
         self,
