@@ -98,6 +98,26 @@ class AssistantService:
         )
         return saved
 
+    def get_or_create_external_conversation(
+        self,
+        *,
+        context: TenantContext,
+        channel: Channel,
+        external_ref: str,
+    ) -> Conversation:
+        existing = self._conversations.get_by_external_ref(
+            context,
+            channel=channel,
+            external_ref=external_ref,
+        )
+        if existing is not None:
+            return existing
+        return self.create_conversation(
+            context=context,
+            channel=channel,
+            external_ref=external_ref,
+        )
+
     def get_conversation(
         self,
         *,
