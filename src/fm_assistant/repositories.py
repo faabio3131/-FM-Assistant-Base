@@ -76,6 +76,15 @@ class CredentialRepository:
                 active=row.active,
             )
 
+    def revoke(self, credential_id: str) -> bool:
+        with self._session_factory() as session:
+            row = session.get(TenantCredentialORM, credential_id)
+            if row is None:
+                return False
+            row.active = False
+            session.commit()
+            return True
+
 
 class PersonaSQLAlchemyRepository:
     def __init__(self, session_factory) -> None:
