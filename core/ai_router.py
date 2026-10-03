@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 from time import perf_counter
@@ -151,7 +151,7 @@ class AIUsageEvent:
         object.__setattr__(
             self,
             "timestamp",
-            self.timestamp.astimezone(timezone.utc),
+            self.timestamp.astimezone(UTC),
         )
 
 
@@ -198,7 +198,7 @@ class AIModelRouter:
         executor: ExecutorModeloIA,
         metering: MedidorUsoIA,
         monotonic: Callable[[], float] = perf_counter,
-        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._rotas = tuple(rotas)
         self._executor = executor

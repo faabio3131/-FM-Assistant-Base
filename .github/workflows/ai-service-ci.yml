@@ -1,0 +1,33 @@
+name: AI Service CI
+
+on:
+  push:
+    branches:
+      - main
+      - feat/**
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff new AI service
+        run: >
+          ruff check
+          core/ai_router.py
+          core/ai_service_contracts.py
+          core/ai_service_settings.py
+          core/ai_providers.py
+          core/ai_service_runtime.py
+          core/ai_service_api.py
+          core/ai_service_main.py
+          tests/service
+      - name: AI service tests
+        run: pytest tests/unit/ai_router tests/service
