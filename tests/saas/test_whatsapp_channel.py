@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 
+import httpx
+
 from fm_assistant.channels.whatsapp_meta import MetaWhatsAppClient
 
 APP_SECRET = "app-secret-test"
@@ -173,3 +175,39 @@ def test_audio_without_transcriber_enters_safe_handoff(
     assert response.status_code == 204
     assert len(sent) == 1
     assert "atendimento humano" in sent[0]
+
+
+def test_uncertain_delivery_is_not_blindly_retried(
+    client,
+    provision_credential,
+    monkeypatch,
+):
+    _key, channel_id = _setup_channel(client, provision_credential)
+    calls = 0
+
+    def uncertain_post(url, *, headers, json, timeout):
+        nonlocal calls
+        del url, headers, json, timeout
+        calls += 1
+        raise httpx.ReadTimeout("provider timeout")
+
+    monkeypatch.setattr(
+        "fm_assistant.channels.whatsapp_meta.httpx.post",
+        uncertain_post,
+    )
+
+    body = _text_payload("wamid-uncertain")
+    first = client.post(
+        f"/webhooks/meta/whatsapp/{channel_id}",
+        content=body,
+        headers={"X-Hub-Signature-256": _signature(body)},
+    )
+    second = client.post(
+        f"/webhooks/meta/whatsapp/{channel_id}",
+        content=body,
+        headers={"X-Hub-Signature-256": _signature(body)},
+    )
+
+    assert first.status_code == 204
+    assert second.status_code == 204
+    assert calls == 1
