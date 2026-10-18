@@ -442,3 +442,24 @@ EVIDENCIA:
 GATE: correção de F3.5 GREEN, mantendo F3 = IN_PROGRESS.
 PROXIMO PASSO: F3.6 admin API governada (autoridade de plataforma e auditoria), depois demais gates F3.
 NAO: merge antes de F3/criterios completos, deploy, migration em producao.
+
+
+2026-10-18 — F3.6.1 OPERATOR READONLY
+FASE: F3 — EM ANDAMENTO. F3.6.1 = GREEN INTERMEDIARIO, NAO F3 COMPLETO.
+CORE HEAD CERTIFICADO: 98694f0f788dc415d662cfc7ab4222103ceabf1f
+ACOES:
+- criadas APIs read-only /v1/admin/ai/providers/health, /v1/admin/ai/routes, /v1/admin/ai/usage;
+- protecao obrigatoria com X-Core-Admin-Key distinta da X-Core-Service-Key dos consumidores;
+- sem admin key, endpoints tecnicos ficam desabilitados; somente leitura, nenhum POST administrativo publicado;
+- respostas nao divulgam secret_reference, api_key, base_url ou raw conversation;
+- consultas FinOps exigem tenant/unit e mantem desconhecimento de custos;
+- identidade humana platform_admin e mutation audit AINDA NAO IMPLEMENTADAS; proibido autorizar mutacoes apenas pela admin service key;
+- Ruff corrigido com ajuste cirurgico de imports.
+EVIDENCIAS:
+- core commits ac876c63a100f2375aeb65232d4a093e99ba5da4, 98694f0f788dc415d662cfc7ab4222103ceabf1f;
+- Core push CI #39105011331 SUCCESS;
+- Core PR CI #39105014625 SUCCESS;
+- Ruff GREEN, pytest 52 PASS, 0 FAIL, 1 warning de terceiro.
+GATE: F3.6.1 GREEN; F3 GLOBAL IN_PROGRESS, F4 NOT_STARTED.
+PROXIMO PASSO: F3.6.2 autenticacao/autorizacao de autoridade humana e auditoria append-only para mutacoes, F3.7 BYOK shared vault, quota/circuit, PostgreSQL integration e contract tests Assistant -> Core.
+RESTRICOES: sem merge das PRs até gates e fase final aplicaveis verdes; sem deploy/migration de producao; Kordena read-only.
