@@ -180,3 +180,32 @@ def test_request_finops_reconciliation_marks_fully_known_attempts(ledger):
     assert complete.known_total == Decimal("0.05")
     with pytest.raises(ValueError, match="invalid_request_scope"):
         store.reconcile_request(tenant_id="a", unit_id="u", request_id=" ")
+
+
+def test_distinct_fallback_routes_using_same_provider_model_are_not_deduped(ledger):
+    store, _ = ledger
+    store.add_price_snapshot(price())
+    first = event(request="multi-route")
+    second = replace(
+        first,
+        route_reason="capability=text;priority=90",
+        fallback_used=True,
+        fallback_reason="primary_timeout",
+    )
+    third = replace(
+        first,
+        route_reason="capability=text;priority=80",
+        fallback_used=True,
+        fallback_reason="secondary_timeout",
+    )
+    store.registrar(first)
+    store.registrar(second)
+    store.registrar(third)
+    store.registrar(second)  # replay of the same attempt stays idempotent
+    summary = store.reconcile_request(
+        tenant_id="a", unit_id="u", request_id="multi-route",
+    )
+    assert summary.total_attempts == 3
+    assert summary.fallback_attempts == 2
+    assert summary.known_total == Decimal("0.15")
+    assert summary.all_recorded_costs_known is True
