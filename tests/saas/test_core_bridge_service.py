@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.api import create_app
-from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
+from fm_assistant.command_bridge_control_models import (CommandBridgeControlEventORM, CommandBridgeStatusNonceORM)
 from fm_assistant.command_bridge_control_service import STATUS_PATH, sign_command_control
 from fm_assistant.core_bridge_models import (
     CoreBridgeAccessORM,
@@ -562,3 +562,34 @@ def test_duplicate_command_request_id_cannot_perform_second_mutation(bridge_clie
         assert identity.active and identity.revoked_at is None
         rows = db.scalars(select(CommandBridgeControlEventORM)).all()
         assert len(rows) == 1
+
+
+def test_signed_status_nonce_is_consumed_once_even_when_outcome_unknown(bridge_client):
+    client, sessions = bridge_client
+    body, _ = command_request("grant")
+    headers = _status_headers(body)
+    first = client.post(STATUS_PATH, content=body, headers=headers)
+    assert first.status_code == 200
+    assert first.json() == {"status": "unknown", "outcome": None}
+    assert client.post(STATUS_PATH, content=body, headers=headers).status_code == 401
+    # A new legitimate signed read with a fresh nonce is permitted.
+    again = client.post(STATUS_PATH, content=body, headers=_status_headers(body))
+    assert again.status_code == 200
+    assert again.json()["status"] == "unknown"
+    with sessions() as db:
+        nonces = db.scalars(select(CommandBridgeStatusNonceORM)).all()
+        assert len(nonces) == 2
+        assert len({row.nonce for row in nonces}) == 2
+        assert len(db.scalars(select(CommandBridgeControlEventORM)).all()) == 0
+
+
+def test_status_invalid_signature_does_not_consume_nonce(bridge_client):
+    client, sessions = bridge_client
+    body, _ = command_request("grant")
+    headers = _status_headers(body)
+    invalid = dict(headers)
+    invalid["X-FM-Command-Signature"] = "0" * 64
+    assert client.post(STATUS_PATH, content=body, headers=invalid).status_code == 401
+    assert client.post(STATUS_PATH, content=body, headers=headers).status_code == 200
+    with sessions() as db:
+        assert len(db.scalars(select(CommandBridgeStatusNonceORM)).all()) == 1
