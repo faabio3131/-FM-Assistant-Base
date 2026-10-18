@@ -8,6 +8,7 @@ do segredo dentro de uma transação governada.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -42,6 +43,7 @@ class CoreBYOKReleasePolicy:
         connection_id: str,
         capability: str,
         now: datetime | None = None,
+        db=None,
     ) -> bool:
         if not all(
             isinstance(value, str) and 0 < len(value.strip()) <= 160
@@ -49,7 +51,7 @@ class CoreBYOKReleasePolicy:
         ):
             return False
         current = _utc(now or datetime.now(UTC))
-        with self._sessions() as db:
+        with (nullcontext(db) if db is not None else self._sessions()) as db:
             tenant = db.get(TenantORM, tenant_id)
             unit = db.get(UnitORM, (tenant_id, unit_id))
             license_row = db.get(TenantLicenseORM, tenant_id)
