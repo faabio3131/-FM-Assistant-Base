@@ -72,3 +72,7 @@ para BYOK sem isolamento por credencial; não há fallback BYOK→FM implícito.
 
 **Classificação:** implementação parcial, testável em CI; não marcar F3.8
 completa, não iniciar F4, não mergear PR de F3 com dependências abertas.
+
+## Estado de reservas nao conciliadas
+
+`QuotaReservations.pending_for_reconciliation` fornece consulta somente leitura, com restricao por tenant, unidade, capability e data-limite. A consulta nao reembolsa quotas nem repete uma chamada ao provedor. A resolucao ainda depende de evidencias canonicas de consumo, revisao humana e politica autorizada; a ausencia dessas provas nao significa custo zero.
