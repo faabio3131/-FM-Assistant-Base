@@ -28,7 +28,7 @@
 
 ## F0 — Reconciliação institucional
 
-**Status:** BLOCKED_EXTERNAL
+**Status:** GREEN
 
 ### Concluído
 
@@ -63,7 +63,7 @@ F1 não pode ser declarada fase ativa/fechável enquanto o gate obrigatório de 
 
 ## F1 — Identity / RBAC / Tenant / License Control Plane
 
-**Status:** NOT_STARTED
+**Status:** IN_PROGRESS
 
 ## F2 — Integration & Credential Control Plane
 
@@ -220,3 +220,21 @@ PRÓXIMO PASSO:
 - tornar FM Core Base público ou regularizar Billing/Plans;
 - rerodar AI Service CI do Core;
 - se Core GREEN e nenhum outro gate pendente, marcar F0 GREEN e iniciar F1 automaticamente.
+
+
+2026-10-17 23:35+ BRT
+FASE: F0 -> F1
+HEAD ASSISTANT VALIDADO F0: b5d0f4d3bd2a75357181c5d2945b16e787c16bf1
+HEAD CORE VALIDADO F0: bd6a93e64a92f327a576aa72c578d90378e294e5
+EVIDÊNCIA:
+- Assistant workflow 39090563065: SUCCESS no HEAD b5d0f4d3...;
+- Core workflow 39089193385 attempt 3: SUCCESS no HEAD bd6a93e...;
+- Core steps: checkout/install/Ruff/AI service tests/complete job = SUCCESS.
+RESULTADO:
+- F0 = GREEN 100%;
+- F1 promovida para IN_PROGRESS conforme AGENTS.md.
+PRÓXIMO PASSO:
+- F1.1 ADR de identidade/sessão;
+- F1.2 contratos de domínio;
+- F1.3 migration 0003;
+- enforcement ADR-002 em runtime comercial.
