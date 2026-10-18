@@ -300,6 +300,9 @@ def test_postgres_status_nonce_concurrent_replay_allows_one_read(postgres_bridge
         body=body, path=STATUS_PATH,
     )
     barrier = Barrier(2)
+    with sessions() as db:
+        # Previous tests may leave immutable control events: measure delta.
+        baseline_events = len(db.scalars(select(CommandBridgeControlEventORM)).all())
 
     def attempt() -> str:
         barrier.wait(timeout=5)
@@ -319,8 +322,8 @@ def test_postgres_status_nonce_concurrent_replay_allows_one_read(postgres_bridge
         rows = db.scalars(select(CommandBridgeStatusNonceORM)).all()
         assert len(rows) == 1
         assert rows[0].command_request_id == payload["command_request_id"]
-        # No mutations can originate from read-only status inquiries.
-        assert db.scalars(select(CommandBridgeControlEventORM)).all() == []
+        # No mutation events are added by read-only status inquiries.
+        assert len(db.scalars(select(CommandBridgeControlEventORM)).all()) == baseline_events
         grant = db.get(
             CoreBridgeGrantORM, (CORE_KEY_ID, TENANT_ID, UNIT_ID, CAPABILITY)
         )
