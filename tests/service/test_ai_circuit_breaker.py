@@ -12,6 +12,7 @@ from core.ai_circuit_breaker import (
     CircuitPolicy,
     CircuitState,
     admit,
+    expire_probe,
     settle,
 )
 
@@ -115,3 +116,18 @@ def test_open_state_cannot_be_settled_and_state_must_be_consistent():
         )
     with pytest.raises(CircuitDenied, match="invalid_state"):
         CircuitState(phase=CircuitPhase.HALF_OPEN, failures=2, until=NOW)
+
+
+def test_expired_half_open_lease_reopens_with_new_cooldown():
+    opened = CircuitState(phase=CircuitPhase.OPEN, failures=2, until=NOW)
+    half, token = admit(opened, POLICY, now=NOW, probe_id="old-probe")
+    with pytest.raises(CircuitDenied, match="probe_active"):
+        expire_probe(half, POLICY, now=NOW + timedelta(seconds=4))
+    recovered = expire_probe(half, POLICY, now=NOW + timedelta(seconds=5))
+    assert recovered.phase is CircuitPhase.OPEN
+    assert recovered.until == NOW + timedelta(seconds=35)
+    with pytest.raises(CircuitDenied, match="open"):
+        admit(recovered, POLICY, now=NOW + timedelta(seconds=6), probe_id="new")
+    with pytest.raises(CircuitDenied, match="invalid_outcome"):
+        settle(recovered, POLICY, now=NOW + timedelta(seconds=6),
+               outcome=CircuitOutcome.SUCCESS, probe_id=token)
