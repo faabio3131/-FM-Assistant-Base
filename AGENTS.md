@@ -521,3 +521,13 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - Foi corrigido o fixture sem afrouxar FK, autenticação ou testes. Histórico RED permanece no tracker.
 - **Isso certifica apenas F3.7.4**; NÃO certifica F3 inteira, Command PR #90, provider/Vault real nem produção. Gate do Command continua bloqueado por jobs encerrados sem executar etapas.
 - Próxima tarefa permitida dentro de F3: desbloquear CI Command, revisão independente e E2E Node Command→Python Assistant; depois Vault/rede/provider/quotas/circuit gates. Sem avanço a F4 enquanto F3 não estiver 100% GREEN.
+
+
+## 21. F3.7.5 — GATE COMMAND NODE/PYTHON (2026-10-18)
+
+- **Fonte de autoridade:** o FM Command interno `faabio3131/FM-CONTROL-CENTER` PR #90 Draft; nunca `fm-command-v2`.
+- Branch Command contém auditoria de tentativas 403/400, testes negativos e um novo contrato cruzado que usa o **cliente assinador Node real** e o **FastAPI ASGI real** do Assistant.
+- Suite `tests/f3_command_assistant_cross_runtime.py` vive no Command; Foundation Gate faz checkout pinado do Assistant público em `45b35a6900c59825a987d9db47e98ad18073dec2`. Rede/TLS de produção não são cobertos por essa simulação de transporte.
+- **CI Command permanece NOT_TESTED/BLOCKED_EXTERNAL:** os jobs encerraram sem steps, inclusive Foundation `39141786529`, F21 `39141786535` e Cognitive `39141786543`; não declarar teste Node/Python executado.
+- **Risco em aberto:** reconciliar mutação commitada no Assistant com eventual falha da auditoria do Command por `command_request_id`; sem repetir operação automaticamente.
+- Exigir 100% GREEN real, revisão independente e infra/Vault/provider/quotas antes de merge. F3 global `IN_PROGRESS`, F4 `NOT_STARTED`. Sem deploy, credenciais reais ou migrations produtivas.
