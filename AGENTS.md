@@ -338,3 +338,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - O runtime só poderá habilitar a guarda obrigatória depois de receber plan policies assinadas do Assistant, teto de tokens efetivamente aplicado nos adapters, expiração/revogação de licença, settlement por tentativa/fallback e CI interno completo. Não confundir engine transacional de quota com funcionalidade comercial inteiramente conectada.
 - Catálogo comercial é configurável e versionado, sem valores comerciais fixados no código. Referência de autoridade: Assistant `docs/governance/F3_F9_PLAN_QUOTAS_AND_AI_USAGE_ARCHITECTURE.md`.
 - Homologação externa ao final; testes unitários e PostgreSQL efêmero obrigatórios durante construção, sem deploy ou credenciais reais.
+
+## ADR-009 ASSISTANT — LIMITAR CONSUMO, NUNCA FUNÇÕES (18/10/2026)
+
+- Planos comerciais VendeAtendeIA terão 100% das funcionalidades disponíveis a todos os tiers. O Core NÃO deve usar `plan_code` para negar acesso a módulo ou feature. Aplicar apenas teto quantitativo do consumo autorizado, RBAC/segurança/licença igualmente para todos.
+- Limites e preços são cadastrados exclusivamente pela FM no Command, revisionados e publicados por autoridade corporativa; o Assistant mantém entitlement de consumo do tenant e envia projeção assinada; Core impõe limite transacional e mede gasto próprio da FM.
+- Para FinOps, copiar conceitualmente do Kordena read-model/projector/dashboard, NÃO copiar lógica de autorização: metering agregador não substitui quota/reserva `SELECT FOR UPDATE`. Custo e pricing de providers já possuem conteúdo idêntico a `core/ai_cost.py` e `core/ai_pricing.py`. Exigir custo/token desconhecido explicitamente desconhecido e IDs de attempt que não colidam em fallback.
+- Referência principal: `faabio3131/-FM-Assistant-Base/docs/governance/ADR-009-ALL-FEATURES-PLAN-CONSUMPTION-AND-KORDENA-FINOPS.md`.
+- Construção antes de provas externas; nenhuma chamada provider real, merge com deploy indireto, segredo real ou migração não descartável sem aprovação específica.
