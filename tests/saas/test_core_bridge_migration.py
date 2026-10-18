@@ -31,7 +31,7 @@ def test_bridge_migration_preserves_existing_integrations_and_has_no_active_iden
         ))
     _upgrade(url, "head")
     with engine.connect() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261018_0005"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261018_0006"
         assert db.scalar(text(
             "SELECT COUNT(*) FROM assistant_integration_providers "
             "WHERE provider_key='test-ai'"
@@ -39,6 +39,7 @@ def test_bridge_migration_preserves_existing_integrations_and_has_no_active_iden
         assert db.scalar(text("SELECT COUNT(*) FROM assistant_core_bridge_identities")) == 0
         assert db.scalar(text("SELECT COUNT(*) FROM assistant_core_bridge_grants")) == 0
         assert db.scalar(text("SELECT COUNT(*) FROM assistant_core_bridge_access")) == 0
+        assert db.scalar(text("SELECT COUNT(*) FROM assistant_command_bridge_control_events")) == 0
         names = set(inspect(db).get_table_names())
         assert {
             "assistant_core_bridge_identities",
