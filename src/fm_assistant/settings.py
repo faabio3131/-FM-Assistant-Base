@@ -74,7 +74,7 @@ class Settings:
                 raise RuntimeError("FM_ASSISTANT_CORE_BRIDGE_CONFIG_INVALID")
             if self.core_bridge_signing_key in {
                 self.admin_key, self.credential_pepper, self.session_pepper,
-                self.core_service_key,
+                self.core_service_key, self.channel_encryption_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_CORE_BRIDGE_KEY_REUSED")
         command_fields = (
@@ -96,7 +96,7 @@ class Settings:
             if self.command_control_signing_key in {
                 self.core_bridge_signing_key, self.admin_key,
                 self.credential_pepper, self.session_pepper,
-                self.core_service_key,
+                self.core_service_key, self.channel_encryption_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_KEY_REUSED")
         backend = self.model_backend.strip().casefold()
