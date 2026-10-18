@@ -51,12 +51,12 @@ class CoreBYOKReleasePolicy:
         ):
             return False
         current = _utc(now or datetime.now(UTC))
-        with (nullcontext(db) if db is not None else self._sessions()) as db:
-            tenant = db.get(TenantORM, tenant_id)
+        with (nullcontext(db) if db is not None else self._sessions()) as session:
+            tenant = session.get(TenantORM, tenant_id)
             unit = db.get(UnitORM, (tenant_id, unit_id))
             license_row = db.get(TenantLicenseORM, tenant_id)
             entitlement = db.get(EntitlementORM, (tenant_id, "ai.byok"))
-            connection = db.scalar(
+            connection = session.scalar(
                 select(IntegrationConnectionORM).where(
                     IntegrationConnectionORM.connection_id == connection_id,
                     IntegrationConnectionORM.tenant_id == tenant_id,
