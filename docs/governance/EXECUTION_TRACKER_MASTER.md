@@ -579,3 +579,31 @@ PENDÊNCIAS OBRIGATÓRIAS:
 PROIBIÇÕES:
 - não executar migrations no banco real, deploy/cutover ou ativar credencial real sem autorização humana;
 - não alterar Kordena; não tratar simulação E2E como homologação produtiva.
+
+
+2026-10-18 — F3.7.3 COMMAND-GOVERNED CORE SERVICE IDENTITIES
+STATUS: F3 IN_PROGRESS; IMPLEMENTAÇÃO/TESTES SINTÉTICOS ASSISTANT GREEN INTERMEDIÁRIO; COMMAND CI BLOCKED_EXTERNAL.
+CÓDIGO E FONTES:
+- Command corporativo verdadeiro: faabio3131/FM-CONTROL-CENTER, branch feat/f3-command-core-bridge-governance, PR #90 Draft;
+- Assistant: src/fm_assistant/command_bridge_control_service.py, API interna governada, ORM audit;
+- Assistant migration aditiva 20261018_0006, sem provisionamento automático.
+FEATURES:
+- Command exige Better Auth da organização corporativa FM + owner/admin + password step-up matching human;
+- Command assina HMAC exclusivo S2S ao Assistant; actor e target core ID são server-side e não input cliente;
+- Assistant verifica organização, step-up recente, HMAC, TTL, nonce, identidade alvo exata;
+- ações provision/grant/revoke_grant/revoke_identity com isolamento tenant/unit/capability;
+- auditoria append-only única/transactional e revogação irreversível de identity/grant; sem chaves reais;
+- segredos de Command, Core e Vault não podem ser reutilizados.
+TESTES:
+- Assistant CI SaaS + bridge E2E verde no SHA funcional a2c312f4b37a73b54c82a78b7982e1fd6219fec2;
+- HMAC interlinguagem Node/Python test vector, forged key, old step-up, cross-org, replay, revoke e provision;
+- Command tests: tests/f3-command-core-bridge-*.
+BLOCKER EXTERNO:
+- Command PR #90 GitHub Actions FMCC Foundation Gate/F21 Operational Readiness encerram sem steps, sem executar lint/typecheck/test/build. NÃO contar como GREEN nem realizar merge.
+PENDENTE:
+- CI Command efetivamente executado, revisão independente de segurança, Node Command→Assistant E2E;
+- PostgreSQL real concurrency/revocation, secret manager, TLS/ACL, runbook rotation;
+- autorização específica para deploy/migration/segredos reais.
+STATUS GLOBAL: F3 IN_PROGRESS, F4 NOT_STARTED.
+MERGE: BLOQUEADO POR CI COMMAND NÃO VERDE E DEMAIS GATES.
+KORDENA: READ-ONLY. NENHUM DEPLOY REAL.
