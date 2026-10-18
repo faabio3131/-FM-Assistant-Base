@@ -379,6 +379,173 @@ class EntitlementORM(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class IntegrationProviderORM(Base):
+    __tablename__ = "assistant_integration_providers"
+
+    provider_key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    integration_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class IntegrationConnectionORM(Base):
+    __tablename__ = "assistant_integration_connections"
+
+    connection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    unit_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_key: Mapped[str] = mapped_column(
+        String(120),
+        ForeignKey("assistant_integration_providers.provider_key"),
+        nullable=False,
+        index=True,
+    )
+    integration_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "unit_id"],
+            ["assistant_units.tenant_id", "assistant_units.unit_id"],
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ix_assistant_integration_scope",
+            "tenant_id",
+            "unit_id",
+            "provider_key",
+            "status",
+        ),
+    )
+
+
+class IntegrationSecretVersionORM(Base):
+    __tablename__ = "assistant_integration_secret_versions"
+
+    connection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("assistant_integration_connections.connection_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    secret_name: Mapped[str] = mapped_column(String(120), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    storage_backend: Mapped[str] = mapped_column(String(64), nullable=False)
+    ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secret_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_assistant_integration_secret_active",
+            "connection_id",
+            "secret_name",
+            "active",
+        ),
+    )
+
+
+class IntegrationCapabilityORM(Base):
+    __tablename__ = "assistant_integration_capabilities"
+
+    connection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("assistant_integration_connections.connection_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    capability: Mapped[str] = mapped_column(String(160), primary_key=True)
+
+
+class IntegrationInboundORM(Base):
+    __tablename__ = "assistant_integration_inbound"
+
+    channel_id: Mapped[str] = mapped_column(
+        "connection_id",
+        String(64),
+        ForeignKey("assistant_integration_connections.connection_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    message_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    sender_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    message_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    outbound_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_assistant_integration_inbound_status",
+            "connection_id",
+            "status",
+            "updated_at",
+        ),
+    )
+
+
+class IntegrationValidationORM(Base):
+    __tablename__ = "assistant_integration_validations"
+
+    validation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("assistant_integration_connections.connection_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    code: Mapped[str] = mapped_column(String(160), nullable=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_assistant_integration_validation_latest",
+            "connection_id",
+            "created_at",
+        ),
+    )
+
+
+class IntegrationEventORM(Base):
+    __tablename__ = "assistant_integration_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("assistant_integration_connections.connection_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    unit_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_assistant_integration_event_scope",
+            "tenant_id",
+            "unit_id",
+            "created_at",
+        ),
+    )
+
+
 def create_session_factory(database_url: str):
     kwargs = {}
     if database_url.lower().startswith("sqlite"):

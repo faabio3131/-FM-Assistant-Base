@@ -296,3 +296,38 @@ PRÓXIMO PASSO:
 - executar Current Discovery do WhatsApp/segredos/configuração;
 - desenhar e implementar Integration & Credential Control Plane universal;
 - migrar WhatsApp preservando HMAC/idempotência/reconcile_required/no-blind-retry.
+
+
+2026-10-18 ? F2 IMPLEMENTATION LOCAL GATE
+FASE: F2
+BASELINE: e580ee3cc36f979d633c0618b329a025f01fa6bd
+A??O:
+- Integration & Credential Control Plane universal implementado;
+- provider catalog inicial whatsapp_meta;
+- Credential Vault abstraction + db_encrypted/Fernet backend;
+- lifecycle DRAFT/VALIDATING/ACTIVE/DEGRADED/DISABLED/REVOKED;
+- connect/config/validate/activate/rotate/disable/revoke/list/catalog API;
+- secret metadata sem disclosure de valor/ciphertext;
+- secret versioning e revoga??o integral;
+- migration 0004 aditiva com backfill do WhatsApp sem recriptografia;
+- WhatsAppChannelRepository migrado para facade sobre Integration Fabric;
+- inbound idempotency migrado para ledger universal;
+- workflow atualizado para lintar migration 0004.
+EVID?NCIA LOCAL:
+- secret scan: NO_SECRET_PATTERN_MATCHES;
+- pip check: PASS;
+- Ruff: PASS;
+- git diff --check: PASS;
+- Integration lifecycle/control plane: 5/5 PASS;
+- revoked-state regression adicional: PASS;
+- migration 0004 + WhatsApp regression: 6/6 PASS.
+FALHA CORRIGIDA:
+- revoke marcava revoked_at apenas na vers?o ativa;
+- corrigido para revogar todas as vers?es ainda n?o formalmente revogadas.
+RESULTADO:
+- implementa??o F2 local espec?fica = GREEN;
+- F2 geral permanece IN_PROGRESS at? CI remoto executar pytest tests/saas integral no SHA publicado.
+PR?XIMO PASSO:
+- commit/push;
+- CI remoto integral;
+- se GREEN 100%, atualizar documenta??o Current, fechar F2 e promover F3.

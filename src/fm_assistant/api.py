@@ -19,9 +19,9 @@ from fastapi import (
 from pydantic import BaseModel, Field, SecretStr
 
 from .capabilities import KnowledgeCapabilityProvider
-from .channel_secrets import ChannelSecretBox
 from .channels.whatsapp_meta import WhatsAppProviderError
 from .core_client import CoreAIClient, CoreAudioTranscriber
+from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
@@ -36,6 +36,9 @@ from .identity import (
 )
 from .identity_repository import IdentityRepository, SessionPrincipal
 from .identity_service import IdentityService
+from .integration import CredentialSource, IntegrationConnection
+from .integration_repository import IntegrationRepository
+from .integration_service import IntegrationService
 from .repositories import (
     ConversationSQLAlchemyRepository,
     CredentialRepository,
@@ -209,6 +212,61 @@ class EntitlementResponse(BaseModel):
     limit_value: int | None
 
 
+class IntegrationConnectRequest(BaseModel):
+    provider_key: str = Field(min_length=1, max_length=120)
+    config: dict[str, str | None] = Field(default_factory=dict)
+    secrets: dict[str, SecretStr]
+    source: CredentialSource = CredentialSource.TENANT_MANAGED
+
+
+class IntegrationConfigRequest(BaseModel):
+    config: dict[str, str | None]
+
+
+class IntegrationRotateRequest(BaseModel):
+    secrets: dict[str, SecretStr]
+    source: CredentialSource = CredentialSource.TENANT_MANAGED
+
+
+class IntegrationProviderResponse(BaseModel):
+    provider_key: str
+    integration_type: str
+    display_name: str
+    definition_version: int
+    config_fields: list[str]
+    required_config_fields: list[str]
+    secret_fields: list[str]
+    capabilities: list[str]
+
+
+class IntegrationResponse(BaseModel):
+    connection_id: str
+    provider_key: str
+    integration_type: str
+    status: str
+    config: dict[str, str | None]
+    revision: int
+    capabilities: list[str]
+
+
+class IntegrationValidationResponse(BaseModel):
+    validation_id: str
+    connection_id: str
+    revision: int
+    success: bool
+    code: str
+
+
+class IntegrationSecretMetadataResponse(BaseModel):
+    secret_name: str
+    version: int
+    source: str
+    storage_backend: str
+    active: bool
+    expires_at: str | None
+    revoked_at: str | None
+
+
 class WhatsAppChannelRequest(BaseModel):
     phone_number_id: str = Field(min_length=1, max_length=128)
     business_account_id: str | None = Field(default=None, max_length=128)
@@ -224,6 +282,18 @@ class WhatsAppChannelResponse(BaseModel):
     business_account_id: str | None
     graph_api_version: str
     webhook_path: str
+
+
+def _integration_response(connection: IntegrationConnection) -> IntegrationResponse:
+    return IntegrationResponse(
+        connection_id=connection.connection_id,
+        provider_key=connection.provider_key,
+        integration_type=connection.integration_type,
+        status=connection.status.value,
+        config=connection.config,
+        revision=connection.revision,
+        capabilities=list(connection.capabilities),
+    )
 
 
 def _persona_response(persona: AssistantPersona) -> PersonaResponse:
@@ -312,8 +382,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         audit=audit,
     )
 
-    secret_box = ChannelSecretBox(cfg.channel_encryption_key)
-    whatsapp_channels = WhatsAppChannelRepository(session_factory, secret_box)
+    integration_repository = IntegrationRepository(session_factory)
+    integration_service = IntegrationService(
+        repository=integration_repository,
+        vault=FernetCredentialVault(cfg.channel_encryption_key),
+    )
+    whatsapp_channels = WhatsAppChannelRepository(integration_service)
     whatsapp_inbound = WhatsAppInboundRepository(session_factory)
     whatsapp_runtime = WhatsAppRuntime(
         channels=whatsapp_channels,
@@ -327,12 +401,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         if cfg.auto_create_schema:
             create_schema(engine)
+        integration_service.ensure_catalog()
         app.state.settings = cfg
         app.state.credentials = credentials
         app.state.identity_repository = identity_repository
         app.state.identity_service = identity_service
         app.state.knowledge = knowledge
         app.state.assistant_service = service
+        app.state.integration_repository = integration_repository
+        app.state.integration_service = integration_service
         app.state.whatsapp_channels = whatsapp_channels
         app.state.whatsapp_runtime = whatsapp_runtime
         yield
@@ -884,6 +961,241 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except LookupError as exc:
             raise HTTPException(status_code=404, detail="conversation_not_found") from exc
         return _conversation_response(conversation)
+
+
+
+    @app.get("/v1/integrations/catalog", response_model=list[IntegrationProviderResponse])
+    def integration_catalog(
+        request: Request,
+        _context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_READ)
+        ),
+    ) -> list[IntegrationProviderResponse]:
+        return [
+            IntegrationProviderResponse(
+                provider_key=item.provider_key,
+                integration_type=item.integration_type,
+                display_name=item.display_name,
+                definition_version=item.definition_version,
+                config_fields=list(item.config_fields),
+                required_config_fields=list(item.required_config_fields),
+                secret_fields=list(item.secret_fields),
+                capabilities=list(item.capabilities),
+            )
+            for item in request.app.state.integration_service.catalog()
+        ]
+
+    @app.get("/v1/integrations", response_model=list[IntegrationResponse])
+    def list_integrations(
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_READ)
+        ),
+    ) -> list[IntegrationResponse]:
+        return [
+            _integration_response(item)
+            for item in request.app.state.integration_service.list(context)
+        ]
+
+    @app.post("/v1/integrations", response_model=IntegrationResponse)
+    def connect_integration(
+        payload: IntegrationConnectRequest,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        try:
+            connection = request.app.state.integration_service.connect(
+                context,
+                provider_key=payload.provider_key,
+                config=payload.config,
+                secrets={
+                    name: value.get_secret_value()
+                    for name, value in payload.secrets.items()
+                },
+                source=payload.source,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _integration_response(connection)
+
+    @app.put(
+        "/v1/integrations/{connection_id}/config",
+        response_model=IntegrationResponse,
+    )
+    def update_integration_config(
+        connection_id: str,
+        payload: IntegrationConfigRequest,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        try:
+            connection = request.app.state.integration_service.update_config(
+                context,
+                connection_id,
+                config=payload.config,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _integration_response(connection)
+
+    @app.post(
+        "/v1/integrations/{connection_id}/rotate",
+        response_model=IntegrationResponse,
+    )
+    def rotate_integration_credentials(
+        connection_id: str,
+        payload: IntegrationRotateRequest,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        try:
+            connection = request.app.state.integration_service.rotate(
+                context,
+                connection_id,
+                secrets={
+                    name: value.get_secret_value()
+                    for name, value in payload.secrets.items()
+                },
+                source=payload.source,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _integration_response(connection)
+
+    @app.post(
+        "/v1/integrations/{connection_id}/validate",
+        response_model=IntegrationValidationResponse,
+    )
+    def validate_integration(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationValidationResponse:
+        try:
+            result = request.app.state.integration_service.validate(
+                context,
+                connection_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return IntegrationValidationResponse(
+            validation_id=result.validation_id,
+            connection_id=result.connection_id,
+            revision=result.revision,
+            success=result.success,
+            code=result.code,
+        )
+
+    @app.post(
+        "/v1/integrations/{connection_id}/activate",
+        response_model=IntegrationResponse,
+    )
+    def activate_integration(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        try:
+            connection = request.app.state.integration_service.activate(
+                context,
+                connection_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _integration_response(connection)
+
+    @app.post(
+        "/v1/integrations/{connection_id}/disable",
+        response_model=IntegrationResponse,
+    )
+    def disable_integration(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        try:
+            connection = request.app.state.integration_service.disable(
+                context,
+                connection_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _integration_response(connection)
+
+    @app.post(
+        "/v1/integrations/{connection_id}/revoke",
+        response_model=IntegrationResponse,
+    )
+    def revoke_integration(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        try:
+            connection = request.app.state.integration_service.revoke(
+                context,
+                connection_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _integration_response(connection)
+
+    @app.get(
+        "/v1/integrations/{connection_id}/secrets",
+        response_model=list[IntegrationSecretMetadataResponse],
+    )
+    def integration_secret_metadata(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_READ)
+        ),
+    ) -> list[IntegrationSecretMetadataResponse]:
+        try:
+            rows = request.app.state.integration_repository.secret_metadata(
+                context,
+                connection_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return [
+            IntegrationSecretMetadataResponse(
+                secret_name=row.secret_name,
+                version=row.version,
+                source=row.source.value,
+                storage_backend=row.storage_backend.value,
+                active=row.active,
+                expires_at=row.expires_at.isoformat() if row.expires_at else None,
+                revoked_at=row.revoked_at.isoformat() if row.revoked_at else None,
+            )
+            for row in rows
+        ]
 
     @app.put("/v1/channels/whatsapp", response_model=WhatsAppChannelResponse)
     def configure_whatsapp(
