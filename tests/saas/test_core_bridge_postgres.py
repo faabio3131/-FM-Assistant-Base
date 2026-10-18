@@ -19,10 +19,11 @@ import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
-from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
+from fm_assistant.command_bridge_control_models import (CommandBridgeControlEventORM, CommandBridgeStatusNonceORM)
 from fm_assistant.command_bridge_control_service import (
     CommandBridgeControlService,
     CommandBridgeDenied,
+    STATUS_PATH,
     sign_command_control,
 )
 from fm_assistant.core_bridge_models import (
@@ -139,6 +140,7 @@ def postgres_bridge():
     vault = FernetCredentialVault(VAULT_KEY)
     # Disposable assistant_f3 ONLY. Each test gets a clean, migrated schema.
     with engine.begin() as cleanup:
+        cleanup.execute(text("DELETE FROM assistant_command_bridge_status_nonce"))
         cleanup.execute(text(
             "TRUNCATE TABLE assistant_tenants, assistant_integration_providers, "
             "assistant_core_bridge_identities RESTART IDENTITY CASCADE"
@@ -283,3 +285,40 @@ def test_postgres_command_identity_revocation_is_irreversible(postgres_bridge):
         assert not db.get(
             CoreBridgeGrantORM, (CORE_KEY_ID, TENANT_ID, UNIT_ID, CAPABILITY)
         ).active
+
+
+def test_postgres_status_nonce_concurrent_replay_allows_one_read(postgres_bridge):
+    """A signed status lookup cannot be replayed, including concurrently."""
+    sessions, _, command = postgres_bridge
+    headers, body, payload = _signed_command("grant")
+    headers["signature"] = sign_command_control(
+        key=COMMAND_KEY, key_id=COMMAND_KEY_ID,
+        timestamp=headers["timestamp"], nonce=headers["nonce"],
+        body=body, path=STATUS_PATH,
+    )
+    barrier = Barrier(2)
+
+    def attempt() -> str:
+        barrier.wait(timeout=5)
+        try:
+            return command.reconcile_status(
+                raw_body=body, headers=headers, **payload,
+            )["status"]
+        except CommandBridgeDenied:
+            return "denied"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(attempt)
+        b = pool.submit(attempt)
+        outcomes = [a.result(timeout=15), b.result(timeout=15)]
+    assert sorted(outcomes) == ["denied", "unknown"]
+    with sessions() as db:
+        rows = db.scalars(select(CommandBridgeStatusNonceORM)).all()
+        assert len(rows) == 1
+        assert rows[0].command_request_id == payload["command_request_id"]
+        # No mutations can originate from read-only status inquiries.
+        assert db.scalars(select(CommandBridgeControlEventORM)).all() == []
+        grant = db.get(
+            CoreBridgeGrantORM, (CORE_KEY_ID, TENANT_ID, UNIT_ID, CAPABILITY)
+        )
+        assert grant and grant.active
