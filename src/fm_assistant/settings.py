@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from dotenv import load_dotenv
@@ -39,6 +39,8 @@ class Settings:
     core_base_url: str | None
     core_service_key: str | None
     auto_create_schema: bool
+    core_bridge_key_id: str | None = None
+    core_bridge_signing_key: str | None = field(default=None, repr=False)
 
     @property
     def production_like(self) -> bool:
@@ -58,6 +60,20 @@ class Settings:
         if not 15 <= self.session_ttl_minutes <= 10080:
             raise RuntimeError("FM_ASSISTANT_SESSION_TTL_MINUTES inválido")
 
+        if bool(self.core_bridge_key_id) != bool(self.core_bridge_signing_key):
+            raise RuntimeError("FM_ASSISTANT_CORE_BRIDGE_CONFIG_INCOMPLETE")
+        if self.core_bridge_signing_key:
+            if (
+                len(self.core_bridge_signing_key) < 32
+                or not self.core_bridge_key_id
+                or len(self.core_bridge_key_id) > 64
+            ):
+                raise RuntimeError("FM_ASSISTANT_CORE_BRIDGE_CONFIG_INVALID")
+            if self.core_bridge_signing_key in {
+                self.admin_key, self.credential_pepper, self.session_pepper,
+                self.core_service_key,
+            }:
+                raise RuntimeError("FM_ASSISTANT_CORE_BRIDGE_KEY_REUSED")
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible", "core"}:
             raise RuntimeError("FM_ASSISTANT_MODEL_BACKEND inválido")
@@ -140,6 +156,8 @@ def load_settings() -> Settings:
         model_name=os.getenv("FM_ASSISTANT_MODEL_NAME"),
         core_base_url=os.getenv("FM_ASSISTANT_CORE_BASE_URL"),
         core_service_key=os.getenv("FM_ASSISTANT_CORE_SERVICE_KEY"),
+        core_bridge_key_id=os.getenv("FM_ASSISTANT_CORE_BRIDGE_KEY_ID") or None,
+        core_bridge_signing_key=os.getenv("FM_ASSISTANT_CORE_BRIDGE_SIGNING_KEY") or None,
         auto_create_schema=_bool(
             "FM_ASSISTANT_AUTO_CREATE_SCHEMA",
             default=environment in {Environment.DEVELOPMENT, Environment.TEST},
