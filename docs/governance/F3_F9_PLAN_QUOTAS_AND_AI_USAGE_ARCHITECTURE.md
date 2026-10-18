@@ -1,13 +1,13 @@
 # FM Assistant + FM Core — Planos, quotas e consumo de IA
 
 **Data:** 2026-10-18  
-**Status:** arquitetura de implementação em andamento; não define valores comerciais finais  
-**Autoridade:** FM Assistant (plano, licença e entitlements) → FM Core (execução, roteamento, contador e FinOps) → FM Command (visão corporativa e governança).
+**Status:** construção em andamento; sem valores comerciais fixados. ADR-009 obriga acesso a todas as funções em todos os planos.  
+**Autoridade:** FM Command (FM define preços e franquias dos planos) → FM Assistant (licença do tenant e revisão do plano) → FM Core (enforcement técnico, medição e FinOps).
 
 ## Princípio econômico
 
 **A FM Tecnologia fornece e paga pelos modelos de IA.** O cliente adquire uma
-assinatura do software, não uma conta pessoal em cada provedor. O custo técnico
+assinatura do software com **todas as funcionalidades disponíveis**, não uma conta pessoal em cada provedor. O custo técnico
 é interno à FM, rastreado por tenant, unidade, produto, capability, modelo e
 tentativa. A cobrança comercial de mensalidade, overage eventual e planos
 pertence ao Assistant/billing e jamais é confundida com gasto técnico do Core.
@@ -16,10 +16,17 @@ pertence ao Assistant/billing e jamais é confundida com gasto técnico do Core.
 
 O catálogo admite qualquer quantidade de planos (exemplos comerciais a
 definir posteriormente: Essencial / Profissional / Empresarial). Cada
-`plan_code` suporta múltiplas revisões **imutáveis**, para modificar limites,
-recursos habilitados ou prazos sem editar código. Cada cliente fixa
+`plan_code` suporta múltiplas revisões **imutáveis**, para modificar somente
+franquias, limites quantitativos, preço e prazos sem editar código. **Não é
+permitido bloquear funcionalidades por categoria de plano.** Cada cliente fixa
 `plan_code + plan_revision` em sua licença, evitando que uma edição de plano
 mude silenciosamente as regras de assinantes existentes.
+
+**Apenas a FM Tecnologia**, pela autoridade corporativa do Command,
+pode cadastrar e alterar os preços, unidades de franquia, períodos e
+limites quantitativos. As permissões de funções são iguais em TODOS os
+planos. Segurança, RBAC e assinatura válida permanecem obrigatórios
+independentemente do plano.
 
 Métricas candidatas configuráveis, por capacidade e período:
 
@@ -103,8 +110,8 @@ produto e do plano; jamais consumo ilimitado implícito.
   isolado garantia de orçamento máximo.
 
 **PENDÊNCIAS DE CONSTRUÇÃO, executar antes da homologação externa:**
-provisionamento assinado/revisionado Assistant→Core; cadastro e alteração
-de plano protegidos por autoridade FM; vinculação de licença,
+provisionamento assinado/revisionado Command→Assistant→Core; cadastro e alteração
+de preço/limite por FM, sem feature gating e com auditoria; vinculação de licença,
 suspensão/expiração imediata de orçamento; implementação do guard obrigatório
 no composition root; preflight com limites reais nos adapters; conciliação
 oficial de tentativas/tokens/custo, dashboards e alertas; F9 billing/upgrade
@@ -115,3 +122,13 @@ reais, gateways de assinatura, pagamentos reais, rede/TLS e homologação
 com terceiros. Essas pendências **não impedem** a construção integral.
 
 **Não classificar software como 100% concluído antes dos gates internos.**
+
+## Referência FinOps de Kordena (aproveitamento seletivo)
+
+Auditoria de leitura e decisão de negócio em
+`docs/governance/ADR-009-ALL-FEATURES-PLAN-CONSUMPTION-AND-KORDENA-FINOPS.md`.
+O cálculo de custo e o pricing provider-neutral do Kordena já foram reutilizados
+sem diferença de conteúdo no FM Core. O dashboard/projetor são referências
+para consumo e margem, **não** para autorizar requisições. Os limites precisam
+ser garantidos pelo ledger transacional do Core e **apenas a FM** configura
+planos e preços pelo Command. Uma mesma função nunca é exclusiva de um tier.
