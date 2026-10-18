@@ -13,6 +13,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, text
@@ -100,7 +101,7 @@ def _signed_command(action: str) -> tuple[dict[str, str], bytes, dict]:
         "actor_user_id": "fm-admin-fixture",
         "organization_id": ORG,
         "step_up_at": int(datetime.now(UTC).timestamp()),
-        "command_request_id": secrets.token_urlsafe(24),
+        "command_request_id": str(uuid4()),
     }
     body = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
     timestamp = str(int(datetime.now(UTC).timestamp()))
