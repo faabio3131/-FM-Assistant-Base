@@ -663,7 +663,7 @@ REPOSITÓRIOS:
 - fm-command-v2 não é o controlador corporativo; Kordena read-only.
 ALTERAÇÕES NO COMMAND:
 - audit de negativas corporativas e payload inválido: commits ff150ef3 e 021cdef1;
-- cliente REAL Node assina envelope, entregue ao FastAPI ASGI REAL do Assistant com fixture sintética: teste test/f3_command_assistant_cross_runtime.py no Command e helper .mts (commits c5790c9,1693a93);
+- cliente REAL Node assina envelope, entregue ao FastAPI ASGI REAL do Assistant com fixture sintética: teste tests/f3_command_assistant_cross_runtime.py no Command e helper .mts (commits c5790c9,1693a93);
 - Command Foundation workflow estendido para checkout Assistant público PINNED no SHA funcional 45b35a6900c59825a987d9db47e98ad18073dec2, rodar Python 3.12+pytest após suite Node (commit 0451681);
 - docs e AGENTS do Command atualizados; nenhum segredo/credencial real criado.
 ESCOPO DA PROVA PROPOSTA:
