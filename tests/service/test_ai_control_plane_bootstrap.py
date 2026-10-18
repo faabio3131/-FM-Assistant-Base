@@ -12,12 +12,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
-from core.ai_control_plane import AIControlPlaneStore, RouteDefinition
+from core.ai_control_plane import AIControlPlaneStore, ControlPlaneError, RouteDefinition
+from core.ai_control_plane_bootstrap import build_persistent_core
 from core.ai_pricing import PriceSnapshotIA, TarifaIA
 from core.ai_router import CapabilityIA
 from core.ai_service_api import create_app
 from core.ai_service_settings import CoreEnvironment, CoreSettings
 from core.ai_usage_ledger import PersistentAIFinOps
+from core.seguranca.segredos import SecretValue
 
 
 def migrated_db(tmp_path: Path) -> tuple[str, AIControlPlaneStore, PersistentAIFinOps]:
@@ -140,3 +142,71 @@ def test_missing_provider_secret_responds_without_leaking_reference(
     assert response.status_code == 503
     assert response.json()["detail"] == "core_control_plane_dependency_unavailable"
     assert "FM_F3_MISSING_TEST_KEY" not in response.text
+
+
+
+def test_bootstrap_byok_is_disabled_unless_gateway_explicitly_injected(tmp_path):
+    url, _, _ = migrated_db(tmp_path)
+    runtime, engine = build_persistent_core(url)
+    try:
+        with pytest.raises(ControlPlaneError, match="byok_resolver_not_configured"):
+            runtime._credentials.resolve(
+                tenant_id="tenant-a",
+                credential_source="tenant_managed",
+                secret_reference="integration:tenant-a:credential-a",
+            )
+    finally:
+        engine.dispose()
+
+
+def test_bootstrap_explicit_gateway_maintains_tenant_boundary(tmp_path):
+    url, _, _ = migrated_db(tmp_path)
+
+    class ScopedGateway:
+        def __init__(self):
+            self.calls = []
+
+        def resolve_active_secret(self, *, tenant_id, opaque_reference):
+            self.calls.append((tenant_id, opaque_reference))
+            if tenant_id != "tenant-a":
+                raise PermissionError("unrecognized tenant")
+            return SecretValue("isolated-test-byok-token")
+
+    gateway = ScopedGateway()
+    runtime, engine = build_persistent_core(url, tenant_gateway=gateway)
+    try:
+        result = runtime._credentials.resolve(
+            tenant_id="tenant-a",
+            credential_source="tenant_managed",
+            secret_reference="integration:tenant-a:credential-a",
+        )
+        assert result.reveal() == "isolated-test-byok-token"
+        assert gateway.calls == [("tenant-a", "credential-a")]
+
+        with pytest.raises(ControlPlaneError):
+            runtime._credentials.resolve(
+                tenant_id="tenant-b",
+                credential_source="tenant_managed",
+                secret_reference="integration:tenant-a:credential-a",
+            )
+        assert gateway.calls == [("tenant-a", "credential-a")]
+    finally:
+        engine.dispose()
+
+
+def test_bootstrap_rejects_ambiguous_credential_resolvers(tmp_path):
+    url, _, _ = migrated_db(tmp_path)
+
+    class Stub:
+        def resolve(self, **kwargs):
+            return SecretValue("test-token")
+
+        def resolve_active_secret(self, **kwargs):
+            return SecretValue("test-token")
+
+    with pytest.raises(ValueError, match="credential_resolver_ambiguous"):
+        build_persistent_core(
+            url,
+            credential_resolver=Stub(),
+            tenant_gateway=Stub(),
+        )
