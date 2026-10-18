@@ -2,7 +2,7 @@
 ## Identity / RBAC / Tenant / License Control Plane
 
 **Data:** 2026-10-17/18  
-**Status:** IMPLEMENTADO E TESTADO LOCALMENTE — CI REMOTO PENDENTE  
+**Status:** GREEN 100% — IMPLEMENTADO, TESTADO E VALIDADO EM CI  
 **Branch:** `feat/saas-foundation-v1`
 
 ## Escopo entregue
@@ -184,11 +184,15 @@ Comprovado localmente:
 - Core obrigatório em staging/produção;
 - secret scan sem achados.
 
-## Pendente para GREEN final de F1
+## Gate remoto final
 
-- commit/push;
-- GitHub Actions no SHA exato;
-- CI obrigatório 100% verde;
-- registro final no Execution Tracker.
+SHA: `678ea0c7d201af1c61ffcf5cc689b4b2eca8c6d1`
 
-Somente depois disso F1 pode ser marcada `GREEN` e F2 promovida a `IN_PROGRESS`.
+- GitHub Actions pull_request `39091973547`: **SUCCESS**
+- GitHub Actions push `39091970851`: **SUCCESS**
+- Install: **GREEN**
+- Pip check: **GREEN**
+- Ruff: **GREEN**
+- Pytest: **GREEN**
+
+Conclusão: F1 está `GREEN` 100% e F2 foi promovida a `IN_PROGRESS`.
