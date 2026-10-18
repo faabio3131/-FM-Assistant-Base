@@ -8,14 +8,13 @@ from sqlalchemy.orm import sessionmaker
 from core.ai_control_plane import (
     AIControlPlaneStore,
     ControlPlaneBase,
-    ControlPlaneError,
     RouteDefinition,
 )
 from core.ai_control_plane_runtime import (
     CoreControlPlaneAIRuntime,
     FMManagedCredentialResolver,
 )
-from core.ai_router import CapabilityIA, MedidorUsoIAEmMemoria
+from core.ai_router import CapabilityIA, FalhaRotaTransitoria, MedidorUsoIAEmMemoria
 from core.ai_service_contracts import TextMessage
 from core.seguranca.segredos import ReferenceSecretStore, SecretValue
 
@@ -143,7 +142,7 @@ def test_default_resolver_refuses_byok_before_provider_call(monkeypatch):
     )
     called = []
     monkeypatch.setattr("core.ai_providers.httpx.post", lambda *a, **kw: called.append(a))
-    with pytest.raises(ControlPlaneError, match="byok_resolver_not_configured"):
+    with pytest.raises(FalhaRotaTransitoria, match="core_ai_credential_unavailable"):
         _generate(runtime, "tenant-a")
     assert called == []
 
@@ -163,3 +162,39 @@ def test_provider_secret_cannot_leak_through_settings_repr():
         api_key="sensitive-value",
     )
     assert "sensitive-value" not in repr(route)
+
+
+def test_primary_route_succeeds_even_if_fallback_secret_is_unavailable(monkeypatch):
+    from dataclasses import replace
+
+    store = _plane()
+    store.add_route(_policy(identifier="primary", scope="platform"))
+    store.add_route(replace(
+        _policy(identifier="fallback", scope="platform"),
+        priority=90,
+        secret_reference="env:FM_F3_SECRET_NOT_AVAILABLE",
+    ))
+    # Both routes share provider/model but have distinct credentials.
+    # A successful primary request must not resolve the fallback credential.
+    monkeypatch.setenv("FM_PROVIDER_KEY", "primary-test-secret")
+    monkeypatch.delenv("FM_F3_SECRET_NOT_AVAILABLE", raising=False)
+
+    seen = []
+
+    def fake_post(url, **kwargs):
+        seen.append(kwargs["headers"]["Authorization"])
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "ok"}}]},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr("core.ai_providers.httpx.post", fake_post)
+    runtime = CoreControlPlaneAIRuntime(
+        control_plane=store,
+        credentials=FMManagedCredentialResolver(ReferenceSecretStore()),
+    )
+    result = _generate(runtime, "tenant-a")
+    assert result.content == "ok"
+    assert result.fallback_used is False
+    assert seen == ["Bearer primary-test-secret"]

@@ -8,20 +8,26 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from core.ai_control_plane import AIControlPlaneStore, ControlPlaneError
-from core.ai_providers import CompositeAIExecutor
+from core.ai_control_plane import AIControlPlaneStore, ControlPlaneError, ResolvedCoreRoute
+from core.ai_providers import GeminiExecutor, OpenAICompatibleExecutor
 from core.ai_router import (
     AIModelRouter,
     CapabilityIA,
     ConteudoAudioIA,
+    ExecutorModeloIA,
+    FalhaRotaDefinitiva,
+    FalhaRotaTransitoria,
     MedidorUsoIA,
     MedidorUsoIAEmMemoria,
     SolicitacaoIA,
+    RespostaModeloIA,
+    RotaIA,
 )
 from core.ai_service_contracts import CoreAIResult, TextMessage, TextRequestContent
 from core.ai_service_runtime import _result
 from core.ai_service_settings import ProviderRouteSettings
 from core.seguranca.segredos import SecretStore, SecretValue
+from core.seguranca.erros import ReferenciaSegredoInvalida, SegredoAusente
 
 
 class CoreCredentialResolver(Protocol):
@@ -46,6 +52,49 @@ class FMManagedCredentialResolver:
         return self._store.resolve(secret_reference)
 
 
+class ScopedCoreExecutor(ExecutorModeloIA):
+    """Resolve credentials only for the actually attempted route."""
+
+    def __init__(
+        self, *, routes: tuple[ResolvedCoreRoute, ...], credentials: CoreCredentialResolver
+    ) -> None:
+        self._routes = {route.route.configuracao_id: route for route in routes}
+        self._credentials = credentials
+
+    def executar(self, *, rota: RotaIA, solicitacao: SolicitacaoIA) -> RespostaModeloIA:
+        item = self._routes.get(rota.configuracao_id)
+        if item is None:
+            raise FalhaRotaDefinitiva("ai_provider.executor_missing")
+        try:
+            secret = self._credentials.resolve(
+                tenant_id=solicitacao.tenant_id,
+                credential_source=item.credential_source,
+                secret_reference=item.secret_reference,
+            )
+        except (ControlPlaneError, ReferenciaSegredoInvalida, SegredoAusente) as exc:
+            raise FalhaRotaTransitoria("core_ai_credential_unavailable") from exc
+
+        settings = ProviderRouteSettings(
+            configuration_id=rota.configuracao_id,
+            provider=rota.provider,
+            model=rota.model,
+            capability=rota.capability,
+            priority=rota.prioridade,
+            price_snapshot_id=rota.price_snapshot_id,
+            adapter=item.adapter,
+            base_url=item.base_url,
+            api_key=secret.reveal(),
+            timeout_seconds=item.timeout_seconds,
+        )
+        if item.adapter == "gemini":
+            return GeminiExecutor(settings).executar(rota=rota, solicitacao=solicitacao)
+        if item.adapter == "openai_compatible":
+            return OpenAICompatibleExecutor(settings).executar(
+                rota=rota, solicitacao=solicitacao
+            )
+        raise FalhaRotaDefinitiva("core_ai_adapter_invalid")
+
+
 class CoreControlPlaneAIRuntime:
     """Mantem os contratos da API sem duplicar o motor de roteamento."""
 
@@ -66,30 +115,9 @@ class CoreControlPlaneAIRuntime:
         resolved = self._control_plane.resolve(
             tenant_id=tenant_id, unit_id=unit_id, capability=capability
         )
-        settings: list[ProviderRouteSettings] = []
-        for item in resolved:
-            secret = self._credentials.resolve(
-                tenant_id=tenant_id,
-                credential_source=item.credential_source,
-                secret_reference=item.secret_reference,
-            )
-            settings.append(
-                ProviderRouteSettings(
-                    configuration_id=item.route.configuracao_id,
-                    provider=item.route.provider,
-                    model=item.route.model,
-                    capability=capability,
-                    priority=item.route.prioridade,
-                    price_snapshot_id=item.route.price_snapshot_id,
-                    adapter=item.adapter,
-                    base_url=item.base_url,
-                    api_key=secret.reveal(),
-                    timeout_seconds=item.timeout_seconds,
-                )
-            )
         return AIModelRouter(
             rotas=tuple(item.route for item in resolved),
-            executor=CompositeAIExecutor(tuple(settings)),
+            executor=ScopedCoreExecutor(routes=resolved, credentials=self._credentials),
             metering=self._metering,
         )
 
