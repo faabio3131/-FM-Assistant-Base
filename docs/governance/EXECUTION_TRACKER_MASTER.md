@@ -607,3 +607,29 @@ PENDENTE:
 STATUS GLOBAL: F3 IN_PROGRESS, F4 NOT_STARTED.
 MERGE: BLOQUEADO POR CI COMMAND NÃO VERDE E DEMAIS GATES.
 KORDENA: READ-ONLY. NENHUM DEPLOY REAL.
+
+2026-10-18 — F3.7.4 POSTGRESQL CONCURRENCY / REVOKE / REPLAY GATE
+FASE: F3 IN_PROGRESS; F3.7.4 = GREEN INTERMEDIÁRIO. F4 NOT_STARTED.
+ASSISTANT HEAD FUNCIONAL: 6dd2d9f7ebf84fa140ae7380f6f0386387500ca9
+AÇÕES:
+- adicionado workflow .github/workflows/f3-postgres-core-bridge.yml com PostgreSQL 16 descartável;
+- migrations Alembic executadas em banco de teste, não em produção;
+- testes reais com duas requisições simultâneas mesmo nonce (1 liberada sintética, 1 negada);
+- revogação do grant e da identidade pela autoridade Command com verificação da negativa subsequente;
+- audit e constraints reais no banco; sem acesso a segredos reais;
+- corrigido o fixture PostgreSQL preservando FK fortes e request ID UUID no formato do Command.
+EVIDÊNCIA:
+- F3 PG CI push 39139495756 SUCCESS; PR 39139500097 SUCCESS;
+- SaaS Foundation CI push 39139495725 SUCCESS; PR 39139500051 SUCCESS;
+- Core Assistant Contract push 39139495839 SUCCESS; PR 39139500205 SUCCESS;
+- doc docs/governance/F3_7_4_POSTGRES_REPLAY_REVOCATION_CERTIFICATION.md.
+HISTÓRICO RED:
+- regressões de fixture captadas pelo Postgres antes de promover; correções por ordem FK e UUID;
+- não confundir reexecução verde com ocultação da falha anterior.
+BLOCKERS:
+- FM Command corporativo PR #90 (FM-CONTROL-CENTER) CI não executou jobs/steps: BLOCKED_EXTERNAL / NOT_TESTED;
+- E2E Command real→Assistant, segurança independente, Vault externo, TLS/ACL/mTLS/rate limits, provider/quotas/circuit/homologação.
+GATE: F3.7.4 GREEN INTERMEDIÁRIO, F3 GLOBAL IN_PROGRESS.
+MERGE: proibido enquanto gates inter-repositórios obrigatórios não estiverem todos GREEN 100%.
+DEPLOY/SEGREDOS REAIS/MIGRATION PRODUTIVA: sem autorização; não executados.
+KORDENA READ-ONLY; MCP Commander não usado.
