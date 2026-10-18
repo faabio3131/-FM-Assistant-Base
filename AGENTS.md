@@ -549,3 +549,11 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - Assistant CI para esta entrega: `c65f05f73546380f1641611d96d6a3bd74c3a0b3`, 6/6 SUCCESS em SaaS, PG16 e contrato Core↔Assistant.
 - Command PR #90 introduziu consulta corporativa read-only com Better Auth e step-up, mas CI de seu repositório privado ainda termina sem steps; considerá-lo NOT_TESTED/BLOCKED_EXTERNAL. F3 GLOBAL IN_PROGRESS, F4 NOT_STARTED.
 - O ambiente de produção depende de segurança em rede, Vault, rate limit, observabilidade e teste real autorizado pelo proprietário. Sem merge/deploy/segredo real/migration de produção enquanto gates obrigatórios faltarem.
+
+## 24. F3.7.9 — STATUS HMAC NONCE REPLAY GUARD (2026-10-18)
+
+- Assistant passa a persistir nonces válidos de consultas read-only de `/internal/v1/command/core-bridge/status` em `assistant_command_bridge_status_nonce`, com PRIMARY KEY `nonce`, migração aditiva `20261018_0008`.
+- A validação de MAC, trusted organization, actor/escopo, key ID, timestamp e step-up ocorre antes de consumir nonce. Nonce é persistido em transação no lookup (inclusive outcome `unknown`); replay idêntico ou concorrente retorna 401. Um lookup não modifica grants/identities nem gera evento de mutação.
+- Testes SQLite e PostgreSQL 16 (incluindo concorrência) e migration foram certificados no HEAD funcional `303747d8efe33536af796d75c698bf01864409a5`: **6/6 SUCCESS** em push e PR. Os testes intermediários RED por import sorting e asserção de ledger pré-existente foram corrigidos sem desabilitar regras.
+- Nonces de status exigem política de retenção/expurgo auditável e observabilidade antes de escala produtiva; replay nunca deve ser permitido dentro da janela, mesmo após futura limpeza.
+- A homologação de ambiente real (rede TLS/ACL, secret manager, política de quotas, circuit breakers, credenciais e revisão independente) não foi feita. **F3 IN_PROGRESS, F4 NOT_STARTED, sem merge/deploy/segredos reais/migrations não descartáveis.**
