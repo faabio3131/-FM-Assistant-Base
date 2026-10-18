@@ -16,8 +16,8 @@ from fastapi import (
     Response,
     status,
 )
-from pydantic import BaseModel, Field, SecretStr, ValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.whatsapp_meta import WhatsAppProviderError
