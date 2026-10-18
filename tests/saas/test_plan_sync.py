@@ -38,7 +38,7 @@ def document(*, amount=500000, revision=1):
         "product_code": "VENDEATENDEIA",
         "organization_id": "fm-org",
         "actor_user_id": "fm-owner",
-        "step_up_at": int(datetime.now(UTC).timestamp()),
+        "approved_at": int(datetime.now(UTC).timestamp()),
         "plan_code": "VENDE_TEST", "revision": revision,
         "label": "Todos os recursos, franquia controlada",
         "allowances": [
