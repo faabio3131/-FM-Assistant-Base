@@ -9,6 +9,8 @@ from enum import StrEnum
 from typing import Any
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 from core.ai_router import CapabilityIA
 
@@ -56,8 +58,14 @@ class ProviderRouteSettings:
 @dataclass(frozen=True, kw_only=True)
 class CoreSettings:
     environment: CoreEnvironment
-    service_key: str
+    service_key: str = field(repr=False)
     routes: tuple[ProviderRouteSettings, ...]
+    control_plane_database_url: str | None = field(default=None, repr=False)
+    admin_key: str | None = field(default=None, repr=False)
+    
+    @property
+    def persistent_control_plane(self) -> bool:
+        return self.control_plane_database_url is not None
 
     @property
     def production_like(self) -> bool:
@@ -65,14 +73,34 @@ class CoreSettings:
 
     def validate(self) -> CoreSettings:
         if not self.service_key.strip():
-            raise RuntimeError("FM_CORE_SERVICE_KEY obrigatÃ³rio")
-        if not self.routes:
+            raise RuntimeError("FM_CORE_SERVICE_KEY obrigatorio")
+        if self.persistent_control_plane:
+            url = (self.control_plane_database_url or "").strip()
+            if not url:
+                raise RuntimeError("core_control_plane_database_url_required")
+            try:
+                parsed = make_url(url)
+            except ArgumentError as exc:
+                raise RuntimeError("core_control_plane_database_url_invalid") from exc
+            if parsed.get_backend_name() not in {"sqlite", "postgresql"}:
+                raise RuntimeError("core_control_plane_database_backend_invalid")
+            if self.routes:
+                raise RuntimeError("core_control_plane_static_routes_forbidden")
+            if self.production_like and parsed.get_backend_name() != "postgresql":
+                raise RuntimeError("core_control_plane_postgresql_required")
+        elif not self.routes:
             raise RuntimeError("FM_CORE_AI_ROUTES_JSON deve conter ao menos uma rota")
         if self.production_like:
             if self.service_key == "change-me-development-core-key":
-                raise RuntimeError("FM_CORE_SERVICE_KEY padrÃ£o Ã© proibida em produÃ§Ã£o")
+                raise RuntimeError("FM_CORE_SERVICE_KEY default proibida")
             if len(self.service_key) < 32:
-                raise RuntimeError("FM_CORE_SERVICE_KEY deve ter ao menos 32 caracteres")
+                raise RuntimeError("FM_CORE_SERVICE_KEY deve ter 32+ caracteres")
+            if not self.persistent_control_plane:
+                raise RuntimeError("core_control_plane_required_in_commercial_env")
+            if not self.admin_key or len(self.admin_key) < 32:
+                raise RuntimeError("FM_CORE_ADMIN_KEY must have 32+ characters")
+            if self.admin_key == self.service_key:
+                raise RuntimeError("core_admin_service_key_must_differ")
         return self
 
 
@@ -114,17 +142,24 @@ def load_settings() -> CoreSettings:
     except ValueError as exc:
         raise RuntimeError("FM_CORE_ENV invÃ¡lido") from exc
 
+    db_url = os.getenv("FM_CORE_CONTROL_PLANE_DATABASE_URL", "").strip() or None
     raw_routes = os.getenv("FM_CORE_AI_ROUTES_JSON", "")
-    try:
-        payload = json.loads(raw_routes)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("FM_CORE_AI_ROUTES_JSON invÃ¡lido") from exc
-    if not isinstance(payload, list):
-        raise TypeError("FM_CORE_AI_ROUTES_JSON deve ser uma lista")
+    if db_url:
+        if raw_routes.strip():
+            raise RuntimeError("core_control_plane_static_routes_forbidden")
+        payload: list[Any] = []
+    else:
+        try:
+            payload = json.loads(raw_routes)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("FM_CORE_AI_ROUTES_JSON invalido") from exc
+        if not isinstance(payload, list):
+            raise TypeError("FM_CORE_AI_ROUTES_JSON deve ser uma lista")
 
     return CoreSettings(
         environment=environment,
         service_key=os.getenv("FM_CORE_SERVICE_KEY", "change-me-development-core-key"),
         routes=tuple(_route_from_payload(item) for item in payload),
+        control_plane_database_url=db_url,
+        admin_key=os.getenv("FM_CORE_ADMIN_KEY") or None,
     ).validate()
-

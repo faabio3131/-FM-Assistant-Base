@@ -31,10 +31,43 @@ def test_production_rejects_weak_service_key():
         ).validate()
 
 
-def test_production_accepts_strong_service_key():
+def test_production_requires_persisted_control_plane():
+    with pytest.raises(RuntimeError, match="core_control_plane_required_in_commercial_env"):
+        CoreSettings(
+            environment=CoreEnvironment.PRODUCTION,
+            service_key="x" * 48,
+            routes=(_route(),),
+        ).validate()
+
+
+def test_production_accepts_distinct_keys_and_postgres():
     settings = CoreSettings(
         environment=CoreEnvironment.PRODUCTION,
         service_key="x" * 48,
-        routes=(_route(),),
+        routes=(),
+        control_plane_database_url="postgresql+psycopg://core:password@db.example/test",
+        admin_key="y" * 48,
     ).validate()
     assert settings.production_like is True
+    assert settings.persistent_control_plane is True
+    assert "password" not in repr(settings)
+
+
+def test_production_rejects_sqlite_and_same_admin_key():
+    with pytest.raises(RuntimeError, match="postgresql_required"):
+        CoreSettings(
+            environment=CoreEnvironment.PRODUCTION,
+            service_key="x" * 48,
+            routes=(),
+            control_plane_database_url="sqlite:///test.db",
+            admin_key="y" * 48,
+        ).validate()
+
+    with pytest.raises(RuntimeError, match="must_differ"):
+        CoreSettings(
+            environment=CoreEnvironment.PRODUCTION,
+            service_key="x" * 48,
+            routes=(),
+            control_plane_database_url="postgresql://core:password@db.example/test",
+            admin_key="x" * 48,
+        ).validate()

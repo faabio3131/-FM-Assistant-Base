@@ -10,10 +10,15 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from core.ai_control_plane import ControlPlaneError
+from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
 from core.ai_service_contracts import CoreAIResult, TextMessage
 from core.ai_service_runtime import CoreAIRuntime
 from core.ai_service_settings import CoreSettings, load_settings
+from core.seguranca.erros import ReferenciaSegredoInvalida, SegredoAusente
 
 
 class TextMessageRequest(BaseModel):
@@ -64,14 +69,25 @@ def create_app(
     settings: CoreSettings | None = None,
     runtime: CoreAIRuntime | None = None,
 ) -> FastAPI:
-    cfg = settings or load_settings()
-    ai_runtime = runtime or CoreAIRuntime.from_settings(cfg)
+    cfg = (settings or load_settings()).validate()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = cfg
+        db_engine = None
+        if cfg.persistent_control_plane:
+            ai_runtime, db_engine = build_persistent_core(
+                cfg.control_plane_database_url or ""
+            )
+        else:
+            ai_runtime = runtime or CoreAIRuntime.from_settings(cfg)
         app.state.ai_runtime = ai_runtime
-        yield
+        app.state.control_plane_engine = db_engine
+        try:
+            yield
+        finally:
+            if db_engine is not None:
+                db_engine.dispose()
 
     app = FastAPI(
         title="FM Core Base AI Service",
@@ -93,12 +109,27 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict[str, object]:
+        if cfg.persistent_control_plane:
+            return {
+                "status": "ok",
+                "service": "fm-core-base",
+                "mode": "control_plane",
+            }
         return {
             "status": "ok",
             "service": "fm-core-base",
             "routes": len(cfg.routes),
             "providers": sorted({route.provider for route in cfg.routes}),
         }
+
+    @app.get("/ready")
+    def readiness(request: Request) -> dict[str, str]:
+        engine = request.app.state.control_plane_engine
+        if cfg.persistent_control_plane and (
+            engine is None or not control_plane_is_ready(engine)
+        ):
+            raise HTTPException(status_code=503, detail="core_control_plane_not_ready")
+        return {"status": "ready"}
 
     @app.post(
         "/v1/ai/text",
@@ -118,6 +149,12 @@ def create_app(
                     for item in payload.messages
                 ),
             )
+        except (
+            ControlPlaneError, SegredoAusente, ReferenciaSegredoInvalida, SQLAlchemyError
+        ) as exc:
+            raise HTTPException(
+                status_code=503, detail="core_control_plane_dependency_unavailable"
+            ) from exc
         except (SemRotaCompativel, FalhaRotaTransitoria) as exc:
             raise HTTPException(status_code=503, detail=exc.codigo) from exc
         except FalhaRotaDefinitiva as exc:
@@ -146,6 +183,12 @@ def create_app(
                 mime_type=payload.mime_type,
                 instruction=payload.instruction,
             )
+        except (
+            ControlPlaneError, SegredoAusente, ReferenciaSegredoInvalida, SQLAlchemyError
+        ) as exc:
+            raise HTTPException(
+                status_code=503, detail="core_control_plane_dependency_unavailable"
+            ) from exc
         except (SemRotaCompativel, FalhaRotaTransitoria) as exc:
             raise HTTPException(status_code=503, detail=exc.codigo) from exc
         except FalhaRotaDefinitiva as exc:
