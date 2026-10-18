@@ -463,3 +463,30 @@ EVIDENCIAS:
 GATE: F3.6.1 GREEN; F3 GLOBAL IN_PROGRESS, F4 NOT_STARTED.
 PROXIMO PASSO: F3.6.2 autenticacao/autorizacao de autoridade humana e auditoria append-only para mutacoes, F3.7 BYOK shared vault, quota/circuit, PostgreSQL integration e contract tests Assistant -> Core.
 RESTRICOES: sem merge das PRs até gates e fase final aplicaveis verdes; sem deploy/migration de producao; Kordena read-only.
+
+
+2026-10-18 — F3.6.2 SIGNED COMMAND AUTHORITY + TRANSACTIONAL AUDIT
+FASE: F3 — IN_PROGRESS; somente verificador e ledger = GREEN INTERMEDIÁRIO.
+CORE BRANCH: feat/ai-service-v1
+CORE HEAD FUNCIONAL CERTIFICADO: ec95f02b38decffdaf06f6ebc7a8e7a77af5aa5f
+AÇÕES:
+- verificador de identidade humana delegada pelo Command com JWT RS256;
+- audience/issuer/role/permission/scope/session/jti/step-up e TTL validados;
+- negação uniforme para token falso, expirado, sem permissão, token técnico ou assinatura inválida;
+- ledger de auditoria transacional core_ai_admin_mutation_audit, Alembic f3_0002;
+- jti único, digest da requisição e rollback conjunto no caso de replay/falha;
+- readiness passou a exigir f3_0002 e não executa migrations automaticamente;
+- novos testes e CI atualizados.
+EVIDÊNCIA:
+- Core functional SHA ec95f02b38decffdaf06f6ebc7a8e7a77af5aa5f;
+- GitHub Actions push 39128801541 SUCCESS;
+- GitHub Actions PR 39128805551 SUCCESS;
+- Ruff e testes AI service GREEN;
+- documentação detalhada em docs/F3_6_2_COMMAND_HUMAN_AUTHORITY_AUDIT.md no Core.
+LIMITES:
+- NENHUMA API de mutação administrativa foi habilitada;
+- nenhuma identidade real do Command ou credential produtiva foi conectada;
+- faltam contrato de emissão/rotação/revogação, integração do Command, autorização de escrita, PostgreSQL, BYOK, quotas/circuit, regressão Assistant->Core e gates finais.
+GATE: GREEN INTERMEDIÁRIO; F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED.
+PRÓXIMO PASSO: concluir F3.6.2 integrando autoridade real do Command e mutações com auditabilidade, após definição de contrato; continuar F3.7 BYOK/shared vault e demais gates F3.
+RESTRIÇÕES: sem merge da PR enquanto F3 e todos os gates aplicáveis não estiverem 100% verdes; sem deploy ou migration real; Kordena read-only.
