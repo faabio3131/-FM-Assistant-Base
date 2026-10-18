@@ -585,3 +585,11 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - `ProviderRouteSettings.max_output_tokens` é limite opcional explicitamente encaminhado aos adapters OpenAI-compatible e Gemini; ainda não configura o teto de input nem garante cobrança exata sem uso oficial e validação. Criar pré-reserva de pior caso e conciliação.
 - Catálogo de planos tem revisão pinada por licença, não altera clientes anteriores silenciosamente. Tenant desativado/expirado/suspenso ou sem revisão/limite deve falhar fechado ao resolver quota.
 - A sincronização autenticada de plano Assistant→Core e todas as interfaces reais de gestão/monitoramento são tarefas de software pendentes, a construir sem dependência de credenciais externas. Fonte: `docs/governance/F3_F9_PLAN_QUOTAS_AND_AI_USAGE_ARCHITECTURE.md`.
+
+## ADR-009 — TODOS OS PLANOS COM TODAS AS FUNÇÕES (18/10/2026)
+
+- Decisão explícita do proprietário: **nenhuma funcionalidade será bloqueada por tier/plano**. RBAC, segurança e licença válida continuam obrigatórios; diferenças de plano apenas em limites quantitativos/volume de uso, período e preço.
+- **Somente a FM Tecnologia** poderá configurar, publicar e revisar preços comerciais e franquias, mediante autoridade corporativa Command, versionamento, auditoria e step-up. Tenant não pode elevar quota nem editar preço/limites.
+- Reusar seletivamente Kordena FinOps (pricing/cost idênticos ao Core, metering/aggregates e dashboard) mas nunca usar read-model diário para autorizar operações; impedir tokens desconhecidos=0 e dedup equivocado entre tentativas de fallback.
+- Fonte canônica aprovada: `docs/governance/ADR-009-ALL-FEATURES-PLAN-CONSUMPTION-AND-KORDENA-FINOPS.md`. Devem ser corrigidos os anteriores conceitos que associavam feature gating/recursos habilitados ao plano. Todos os tiers têm mesmo conjunto de funções.
+- Construção pendente: painel FM e publisher de preços/franquias, projeção assinada Command→Assistant→Core, hard stop pré-provider, dashboards e alertas. Homologações externas só depois da conclusão integral do software.
