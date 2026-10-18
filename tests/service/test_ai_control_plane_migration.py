@@ -5,7 +5,7 @@ from pathlib import Path
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 
-import core.ai_quota_store  # noqa: F401 - registra metadata
+import core.ai_quota_store
 import core.ai_usage_ledger  # noqa: F401 - registra metadata
 from alembic import command
 from core.ai_control_plane import ControlPlaneBase
