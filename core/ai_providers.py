@@ -59,13 +59,18 @@ class OpenAICompatibleExecutor:
             {"role": "system", "content": content.system_prompt.strip()}
         ]
         messages.extend({"role": item.role, "content": item.content} for item in content.messages)
+        body: dict[str, Any] = {
+            "model": rota.model, "messages": messages, "temperature": 0.2,
+        }
+        if self._settings.max_output_tokens is not None:
+            body["max_tokens"] = self._settings.max_output_tokens
         response = httpx.post(
             self._settings.base_url + "/chat/completions",
             headers={
                 "Authorization": f"Bearer {self._settings.api_key}",
                 "Content-Type": "application/json",
             },
-            json={"model": rota.model, "messages": messages, "temperature": 0.2},
+            json=body,
             timeout=self._settings.timeout_seconds,
         )
         _status_guard(response, provider="openai_compatible")
@@ -115,9 +120,15 @@ class GeminiExecutor:
     def executar(self, *, rota: RotaIA, solicitacao: SolicitacaoIA) -> RespostaModeloIA:
         try:
             if isinstance(solicitacao.conteudo, ConteudoAudioIA):
-                body = self._audio_body(solicitacao.conteudo)
+                body = self._audio_body(
+                    solicitacao.conteudo,
+                    max_output_tokens=self._settings.max_output_tokens,
+                )
             elif isinstance(solicitacao.conteudo, TextRequestContent):
-                body = self._text_body(solicitacao.conteudo)
+                body = self._text_body(
+                    solicitacao.conteudo,
+                    max_output_tokens=self._settings.max_output_tokens,
+                )
             else:
                 raise FalhaRotaDefinitiva("ai_provider.gemini.unsupported_content")
 
@@ -151,7 +162,9 @@ class GeminiExecutor:
         )
 
     @staticmethod
-    def _text_body(content: TextRequestContent) -> dict[str, Any]:
+    def _text_body(
+        content: TextRequestContent, *, max_output_tokens: int | None = None,
+    ) -> dict[str, Any]:
         contents = [
             {
                 "role": "model" if item.role == "assistant" else "user",
@@ -159,15 +172,20 @@ class GeminiExecutor:
             }
             for item in content.messages
         ]
+        generation_config: dict[str, Any] = {"temperature": 0.2}
+        if max_output_tokens is not None:
+            generation_config["maxOutputTokens"] = max_output_tokens
         return {
             "systemInstruction": {"parts": [{"text": content.system_prompt}]},
             "contents": contents,
-            "generationConfig": {"temperature": 0.2},
+            "generationConfig": generation_config,
         }
 
     @staticmethod
-    def _audio_body(content: ConteudoAudioIA) -> dict[str, Any]:
-        return {
+    def _audio_body(
+        content: ConteudoAudioIA, *, max_output_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        result = {
             "contents": [
                 {
                     "role": "user",
@@ -184,6 +202,9 @@ class GeminiExecutor:
             ],
             "generationConfig": {"temperature": 0.0},
         }
+        if max_output_tokens is not None:
+            result["generationConfig"]["maxOutputTokens"] = max_output_tokens
+        return result
 
 
 class CompositeAIExecutor(ExecutorModeloIA):
