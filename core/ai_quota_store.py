@@ -119,7 +119,11 @@ class QuotaReservations:
             key = (*scope, request_id)
             old = db.get(AIQuotaReservationRecord, key)
             if old is not None:
-                if old.period != period or old.reserved_units != units:
+                if (
+                    old.period != period
+                    or old.reserved_units != units
+                    or old.policy_revision != policy.revision
+                ):
                     raise QuotaDenied("core_quota.request_conflict")
                 return old
             consumed = db.scalar(select(func.coalesce(func.sum(
