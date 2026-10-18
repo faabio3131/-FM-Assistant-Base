@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 import core.ai_admin_audit as admin_audit
+import core.ai_circuit_state_store
 import core.ai_quota_store  # noqa: F401 - registers quota reservation tables
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
 from core.ai_control_plane_runtime import (
@@ -25,7 +26,7 @@ from core.ai_tenant_credential_resolver import (
 from core.ai_usage_ledger import PersistentAIFinOps
 from core.seguranca.segredos import ReferenceSecretStore
 
-REQUIRED_REVISION = "f3_0003"
+REQUIRED_REVISION = "f3_0004"
 REQUIRED_TABLES = frozenset(ControlPlaneBase.metadata.tables) | {
     admin_audit.CommandAdminAuditRecord.__tablename__,
     "core_ai_price_snapshots",
