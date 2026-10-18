@@ -106,7 +106,7 @@ class PersistentCircuit:
         with self._sessions.begin() as db:
             record = self._locked(db, provider_id)
             old = self._state(record)
-            if probe_id is not None and version != record.version:
+            if version != record.version:
                 raise CircuitDenied("circuit.stale_fence")
             new = settle(old, self._policy, now=now, outcome=outcome, probe_id=probe_id)
             self._write(record, new)
