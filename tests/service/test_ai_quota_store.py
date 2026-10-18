@@ -12,6 +12,7 @@ from core.ai_quota_store import (
     AIQuotaPolicyRecord,
     AIQuotaReservationRecord,
     QuotaDenied,
+    QuotaRequirement,
     QuotaReservations,
     ReservationState,
 )
@@ -154,3 +155,118 @@ def test_pending_quota_reconciliation_is_scoped_read_only(quota):
     with sessions() as db:
         records = db.scalars(select(AIQuotaReservationRecord)).all()
         assert len(records) == 3  # query did not modify/erase reservations
+
+
+def test_atomic_multimetric_plan_reservation_and_settlement(quota):
+    store, sessions = quota
+    with sessions.begin() as db:
+        for scope, metric, limit in (
+            ("__tenant__", "ai.total_tokens", 1000),
+            ("u1", "ai.requests", 2),
+        ):
+            db.add(AIQuotaPolicyRecord(
+                tenant_id="a", unit_id=scope, capability=metric,
+                limit_units=limit, window_seconds=60, revision=1,
+            ))
+    needs = (
+        QuotaRequirement(
+            tenant_id="a", unit_id="__tenant__",
+            capability="ai.total_tokens", units=600,
+        ),
+        QuotaRequirement(
+            tenant_id="a", unit_id="u1", capability="ai.requests", units=1,
+        ),
+    )
+    store.reserve_bundle(needs=needs, request_id="req-metric", at=NOW)
+    with pytest.raises(QuotaDenied, match="execution_replay_denied"):
+        store.reserve_bundle(needs=needs, request_id="req-metric", at=NOW)
+    with pytest.raises(QuotaDenied, match="limit_exceeded"):
+        store.reserve_bundle(
+            needs=(
+                QuotaRequirement(
+                    tenant_id="a", unit_id="__tenant__",
+                    capability="ai.total_tokens", units=600,
+                ),
+                QuotaRequirement(
+                    tenant_id="a", unit_id="u1", capability="ai.requests", units=1,
+                ),
+            ),
+            request_id="req-over", at=NOW,
+        )
+    with sessions() as db:
+        assert len(db.scalars(
+            select(AIQuotaReservationRecord).where(
+                AIQuotaReservationRecord.request_id == "req-over",
+            ),
+        ).all()) == 0  # failure rolled back every metric
+
+    store.settle_bundle(
+        request_id="req-metric",
+        usage=(
+            QuotaRequirement(
+                tenant_id="a", unit_id="__tenant__",
+                capability="ai.total_tokens", units=350,
+            ),
+            QuotaRequirement(
+                tenant_id="a", unit_id="u1", capability="ai.requests", units=1,
+            ),
+        ),
+    )
+    store.reserve_bundle(
+        needs=(
+            QuotaRequirement(
+                tenant_id="a", unit_id="__tenant__",
+                capability="ai.total_tokens", units=650,
+            ),
+        ),
+        request_id="next-request", at=NOW,
+    )
+    with pytest.raises(QuotaDenied, match="settlement_conflict"):
+        store.settle_bundle(
+            request_id="req-metric",
+            usage=(
+                QuotaRequirement(
+                    tenant_id="a", unit_id="__tenant__",
+                    capability="ai.total_tokens", units=200,
+                ),
+            ),
+        )
+
+
+def test_bundle_cross_tenant_and_partial_settlement_denied(quota):
+    store, sessions = quota
+    with pytest.raises(QuotaDenied, match="bundle_invalid"):
+        store.reserve_bundle(
+            needs=(
+                QuotaRequirement(
+                    tenant_id="a", unit_id="u1", capability="text", units=1,
+                ),
+                QuotaRequirement(
+                    tenant_id="b", unit_id="u1", capability="text", units=1,
+                ),
+            ),
+            request_id="cross-tenant", at=NOW,
+        )
+    store.reserve_bundle(
+        needs=(
+            QuotaRequirement(tenant_id="a", unit_id="u1", capability="text", units=1),
+            QuotaRequirement(tenant_id="a", unit_id="u2", capability="text", units=1),
+        ),
+        request_id="multi-scope", at=NOW,
+    )
+    with pytest.raises(QuotaDenied, match="reservation_unavailable"):
+        store.settle_bundle(
+            request_id="multi-scope",
+            usage=(
+                QuotaRequirement(tenant_id="a", unit_id="u1", capability="text", units=1),
+                QuotaRequirement(tenant_id="a", unit_id="u2", capability="text", units=2),
+            ),
+        )
+    with sessions() as db:
+        records = db.scalars(
+            select(AIQuotaReservationRecord).where(
+                AIQuotaReservationRecord.request_id == "multi-scope",
+            ),
+        ).all()
+        assert len(records) == 2
+        assert all(record.state == ReservationState.RESERVED for record in records)
