@@ -531,3 +531,11 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - **CI Command permanece NOT_TESTED/BLOCKED_EXTERNAL:** os jobs encerraram sem steps, inclusive Foundation `39141786529`, F21 `39141786535` e Cognitive `39141786543`; não declarar teste Node/Python executado.
 - **Risco em aberto:** reconciliar mutação commitada no Assistant com eventual falha da auditoria do Command por `command_request_id`; sem repetir operação automaticamente.
 - Exigir 100% GREEN real, revisão independente e infra/Vault/provider/quotas antes de merge. F3 global `IN_PROGRESS`, F4 `NOT_STARTED`. Sem deploy, credenciais reais ou migrations produtivas.
+
+
+## 22. F3.7.6 — PRÉ-AUDITORIA OBRIGATÓRIA DE MUTATION (2026-10-18)
+
+- No Command corporativo, registrar intent persistente antes de mutation S2S, com UUID `commandRequestId` produzido server-side; usar mesmo UUID no corpo HMAC e nas evidências de outcome. Falha da pré-auditoria impede envio.
+- Assistant é autoridade transacional de grants e mantém `command_request_id` em seu ledger; resultados HTTP ambíguos **não autorizam** retry cego.
+- Exigir reconciliação read-only governada por esse ID antes de certificar ciclo completo; pré-auditoria isolada não é atomicidade interserviços.
+- Código e testes permanecem na Command PR #90 Draft e **NÃO CERTIFICADOS** por CI sem steps. F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED; sem merge/deploy/segredos reais/migration produtiva.
