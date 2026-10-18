@@ -167,3 +167,30 @@ PRÓXIMO PASSO:
 - restabelecer capacidade do GitHub Actions/Billing;
 - rerodar CI nos HEADs atuais;
 - se 100% GREEN, marcar F0 GREEN e avançar automaticamente para F1.
+
+
+2026-10-17 23:00+ BRT
+FASE: F0 / preparação permitida de F1
+HEAD ASSISTANT: 34f8b71017598cad7510cbed2518d23535277896
+AÇÃO:
+- gate F0 revalidado;
+- GitHub Actions continua impedido de iniciar por Billing/Plans;
+- executado Current Discovery preparatório de F1;
+- criado docs/governance/F1_CURRENT_DISCOVERY_AND_IMPLEMENTATION_PLAN.md;
+- identificada contradição CURRENT: production ainda aceita openai_compatible direto;
+- planejada correção para enforcement do ADR-002 quando F1 for liberada;
+- planejado schema Identity/RBAC/Tenant/License sem destruir estruturas existentes.
+EVIDÊNCIA:
+- workflow Assistant 39089221034: job não iniciado por Billing/Plans;
+- workflow Core 39089193385: job não iniciado por Billing/Plans;
+- código atual verificado em api.py, security.py, db.py, repositories.py, domain.py, settings.py;
+- migrations 0001/0002 e testes atuais inspecionados.
+RESULTADO:
+- F0 permanece BLOCKED_EXTERNAL;
+- F1 permanece NOT_STARTED para promoção/implementação;
+- preparação técnica de F1 concluída e pronta para execução após GREEN de F0.
+GATE: BLOCKED_EXTERNAL
+PRÓXIMO PASSO:
+- corrigir/restabelecer GitHub Billing/Actions;
+- rerodar CI nos HEADs atuais;
+- se GREEN 100%, marcar F0 GREEN e iniciar F1.1 automaticamente.
