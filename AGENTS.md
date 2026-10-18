@@ -567,3 +567,14 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - Status distintos: `BUILD_IN_PROGRESS`, `BUILD_COMPLETE_INTERNAL_GREEN`, `EXTERNAL_HOMOLOGATION_DEFERRED`, `REAL_HOMOLOGATION_APPROVED`. Não confundir código completo com software homologado em produção.
 - Manter autorização especial para ações irreversíveis, deploy, credenciais reais, gastos e migrations não descartáveis. Merge interno pré-autorizado apenas se gates de software verdes, proteção de branches e ausência de deploy implícito forem comprovados.
 - Esta decisão substitui apenas a leitura antiga que exigia provas externas para avançar a construção; o restante dos controles de segurança e auditoria continua em vigor.
+
+## F3/F9 — PLANOS E CONTROLE DE CONSUMO POR ASSINATURA (2026-10-18)
+
+- A autoridade canônica de plano, assinatura, trial, estado comercial e entitlements é o FM Assistant. Core não cria, promove ou altera plano comercial por conta própria.
+- Catálogo de planos e métricas versionados: `assistant_plan_versions`, `assistant_plan_limits`; `TenantLicenseORM.plan_revision` fixa a versão comercial por tenant. PlanLimitResolver só retorna quotas após validar tenant, unidade, licença, vigência, revisão e escopo; ausência falha fechada.
+- Métricas propostas: requests IA, input/output/cached/total tokens, custo técnico interno da FM, áudio, mensagens, usuários, unidades, armazenamento, CRM e automações. Valores e preços dos planos são configuráveis e ainda NÃO definidos comercialmente.
+- Um plano deve poder limitar por tenant e/ou unidade; global tenant deve incluir consumo de todas as unidades e não criar quota separada que amplie artificialmente limite.
+- Consumo técnico dos modelos é custo da FM Tecnologia; a assinatura comercial é cobrada do cliente e fica no billing do produto, não confundida com o custo interno da IA.
+- Nenhum endpoint para tenant autoatribuir quotas, criar versões de planos ou aumentar limite. Projeção Command/Assistant→Core deve ser autenticada, revisionada, anti-replay, expirável, revogável e auditada; construir e certificar internamente antes de produção.
+- Core implementou pré-reserva atômica multi-métrica e um ledger por request (tokens/requests/custo) com PostgreSQL 16 concorrente, porém **os guards ainda devem ser integrados ao fluxo comercial completo** antes de declarar funcionalidade concluída. Garantir rollback total se qualquer limite falhar.
+- Documento: `docs/governance/F3_F9_PLAN_QUOTAS_AND_AI_USAGE_ARCHITECTURE.md`. Trilha externa permanece adiada conforme diretriz Build First; não bloquear programação por configuração real.
