@@ -725,3 +725,20 @@ CORREÇÕES ORIENTADAS POR LOGS:
 - efd7a89e = checkout temporário Assistant retirado da árvore Next.js após E2E antes de build, sem desabilitar checks.
 GATE: Command CI funcional GREEN nesse SHA, mas revisão independente + homologação infraestrutura/Vault/TLS/ACL/quotas/providers pendem; F3 GLOBAL IN_PROGRESS, não promover F4.
 CI documental do HEAD posterior deve ser revalidado. Sem merge, deploy, credenciais reais, migrations produtivas; Kordena read-only.
+
+2026-10-18 — F3.7.9 COMMAND STATUS NONCE REPLAY PROTECTION
+STATUS: F3 IN_PROGRESS, F4 NOT_STARTED; melhoria de segurança GREEN no HEAD funcional Assistant.
+PR ASSISTANT #1: 303747d8efe33536af796d75c698bf01864409a5.
+- Migration aditiva 20261018_0008 cria assistant_command_bridge_status_nonce, sem credencial real, identidade ou grant ativo.
+- Serviço status passa a consumir nonce válido de cada consulta HMAC por inserção transacional com UNIQUE PK, inclusive outcome unknown; concorrência e replay retornam negativa 401 sem alterar grants/identity.
+- Teste SQLite para retorno unknown, replay e MAC inválido sem consumo; teste PostgreSQL 16 em concorrência comprova exatamente uma leitura válida/uma negada e nenhuma alteração no ledger de mutações; validação de upgrade Alembic.
+CI CERTIFICADO:
+- SaaS Foundation push 39147372675 SUCCESS, PR 39147376449 SUCCESS.
+- Core Assistant Bridge push 39147372436 SUCCESS, PR 39147376462 SUCCESS.
+- F3 PostgreSQL16 push 39147372438 SUCCESS, PR 39147376482 SUCCESS.
+HISTÓRICO DE CORREÇÕES:
+- Ruff isort falhou no primeiro gate, corrigido sem relaxar linter.
+- Teste PostgreSQL anterior exigia ledger vazio após outros testes; substituído por contagem delta de eventos preexistentes, sem reduzir prova anti-replay.
+COMMAND:
+- PR #90 mantém CI anterior GREEN em 811f0cf5d7d99ec078577b1fa35948a1120a921e; runbook documental de staging isolado docs/FMCC_F3_CONTROLLED_STAGING_VALIDATION_RUNBOOK.md criado no Command.
+RESTRIÇÕES: F3 GLOBAL IN_PROGRESS, Command e Core não sofrem deploy. Falta reviewer independente, ambiente/credenciais governados, TLS/ACL/Vault, quotas/circuit/FinOps, política de retenção para nonces e homologação controlada. Não promover PRs, F4 ou produção antecipadamente.
