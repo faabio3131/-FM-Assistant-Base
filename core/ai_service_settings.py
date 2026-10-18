@@ -62,6 +62,9 @@ class CoreSettings:
     routes: tuple[ProviderRouteSettings, ...]
     control_plane_database_url: str | None = field(default=None, repr=False)
     admin_key: str | None = field(default=None, repr=False)
+    assistant_bridge_url: str | None = None
+    assistant_bridge_key_id: str | None = None
+    assistant_bridge_signing_key: str | None = field(default=None, repr=False)
     
     @property
     def persistent_control_plane(self) -> bool:
@@ -72,6 +75,29 @@ class CoreSettings:
         return self.environment in {CoreEnvironment.STAGING, CoreEnvironment.PRODUCTION}
 
     def validate(self) -> CoreSettings:
+        enabled = (
+            self.assistant_bridge_url,
+            self.assistant_bridge_key_id,
+            self.assistant_bridge_signing_key,
+        )
+        if any(enabled) and not all(enabled):
+            raise RuntimeError("core_assistant_bridge_config_incomplete")
+        if all(enabled):
+            if not self.persistent_control_plane:
+                raise RuntimeError("core_assistant_bridge_requires_control_plane")
+            from core.ai_assistant_credential_gateway import (
+                AssistantSignedCredentialGateway,
+            )
+            try:
+                AssistantSignedCredentialGateway(
+                    base_url=self.assistant_bridge_url or "",
+                    key_id=self.assistant_bridge_key_id or "",
+                    signing_key=self.assistant_bridge_signing_key or "",
+                )
+            except ValueError as exc:
+                raise RuntimeError("core_assistant_bridge_config_invalid") from exc
+            if self.assistant_bridge_signing_key in (self.service_key, self.admin_key):
+                raise RuntimeError("core_assistant_bridge_key_reused")
         if not self.service_key.strip():
             raise RuntimeError("FM_CORE_SERVICE_KEY obrigatorio")
         if self.persistent_control_plane:
@@ -162,4 +188,7 @@ def load_settings() -> CoreSettings:
         routes=tuple(_route_from_payload(item) for item in payload),
         control_plane_database_url=db_url,
         admin_key=os.getenv("FM_CORE_ADMIN_KEY") or None,
+        assistant_bridge_url=os.getenv("FM_CORE_ASSISTANT_BRIDGE_URL") or None,
+        assistant_bridge_key_id=os.getenv("FM_CORE_ASSISTANT_BRIDGE_KEY_ID") or None,
+        assistant_bridge_signing_key=os.getenv("FM_CORE_ASSISTANT_BRIDGE_SIGNING_KEY") or None,
     ).validate()
