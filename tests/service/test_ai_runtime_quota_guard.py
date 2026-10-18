@@ -6,10 +6,13 @@ import pytest
 
 from core.ai_control_plane_runtime import CoreControlPlaneAIRuntime
 from core.ai_quota_store import (
-    AIQuotaPolicyRecord, AIQuotaReservationRecord, QuotaDenied, QuotaReservations,
+    AIQuotaPolicyRecord,
+    AIQuotaReservationRecord,
+    QuotaDenied,
+    QuotaReservations,
     ReservationState,
 )
-from core.ai_router import CapabilityIA
+from core.ai_router import CapabilityIA, FalhaRotaTransitoria
 from core.ai_service_contracts import TextMessage
 from core.seguranca.segredos import SecretValue
 from tests.service.test_ai_control_plane_runtime import _plane, _policy
@@ -90,7 +93,7 @@ def test_provider_timeout_keeps_reservation_for_manual_reconciliation(monkeypatc
         raise httpx.TimeoutException("synthetic-provider-timeout")
 
     monkeypatch.setattr("core.ai_providers.httpx.post", fake_post)
-    with pytest.raises(Exception):
+    with pytest.raises(FalhaRotaTransitoria):
         _request(runtime)
     with pytest.raises(QuotaDenied, match="execution_replay_denied"):
         _request(runtime)
