@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Barrier
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
@@ -136,6 +136,12 @@ def postgres_bridge():
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
     now = datetime.now(UTC)
     vault = FernetCredentialVault(VAULT_KEY)
+    # Disposable assistant_f3 ONLY. Each test gets a clean, migrated schema.
+    with engine.begin() as cleanup:
+        cleanup.execute(text(
+            "TRUNCATE TABLE assistant_tenants, assistant_integration_providers, "
+            "assistant_core_bridge_identities RESTART IDENTITY CASCADE"
+        ))
     with sessions.begin() as db:
         db.add(TenantORM(
             tenant_id=TENANT_ID, display_name="Postgres Fixture", slug=TENANT_ID,
@@ -181,6 +187,8 @@ def postgres_bridge():
         db.add(CoreBridgeIdentityORM(
             key_id=CORE_KEY_ID, active=True, revoked_at=None, created_at=now,
         ))
+        # Flush the parent tenant, unit and identity before the FK-dependent grant.
+        db.flush()
         db.add(CoreBridgeGrantORM(
             key_id=CORE_KEY_ID, tenant_id=TENANT_ID, unit_id=UNIT_ID,
             capability=CAPABILITY, active=True, revoked_at=None, created_at=now,
