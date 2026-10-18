@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hmac
 from datetime import date
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
 from sqlalchemy import select
