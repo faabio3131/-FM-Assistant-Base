@@ -194,3 +194,29 @@ PRÓXIMO PASSO:
 - corrigir/restabelecer GitHub Billing/Actions;
 - rerodar CI nos HEADs atuais;
 - se GREEN 100%, marcar F0 GREEN e iniciar F1.1 automaticamente.
+
+
+2026-10-17 23:30+ BRT
+FASE: F0
+HEAD ASSISTANT VALIDADO: f2cadbd262ab88c4e8a9184f49d9c8b44756e1ef
+AÇÃO:
+- repositório FM Assistant Base alterado para público pelo proprietário;
+- rerun do GitHub Actions executado;
+- workflow 39089505677, attempt 2, executou de fato em runner público.
+EVIDÊNCIA:
+- checkout: GREEN;
+- setup-python: GREEN;
+- install: GREEN;
+- Ruff: GREEN;
+- Pytest: GREEN;
+- job test concluído com SUCCESS em 19s.
+RESULTADO:
+- gate CI do Assistant = GREEN;
+- FM Core Base continua privado;
+- rerun do Core 39089193385 continua bloqueado por Billing/Plans;
+- F0 geral permanece BLOCKED_EXTERNAL exclusivamente pelo CI obrigatório do Core.
+GATE: BLOCKED_EXTERNAL
+PRÓXIMO PASSO:
+- tornar FM Core Base público ou regularizar Billing/Plans;
+- rerodar AI Service CI do Core;
+- se Core GREEN e nenhum outro gate pendente, marcar F0 GREEN e iniciar F1 automaticamente.
