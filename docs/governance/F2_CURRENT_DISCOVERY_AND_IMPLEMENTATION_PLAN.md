@@ -1,8 +1,8 @@
 # F2 — Current Discovery e Plano de Implementação
 ## Integration & Credential Control Plane
 
-**Data:** 2026-10-18  
-**Status:** IN_PROGRESS  
+**Data:** 2026-10-18
+**Status:** IN_PROGRESS
 **Baseline:** F1 GREEN 100%
 
 ## CURRENT

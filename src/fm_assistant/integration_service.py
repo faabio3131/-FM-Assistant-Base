@@ -491,4 +491,3 @@ class IntegrationService:
         if not isinstance(payload, dict) or str(payload.get("id", "")) != phone_number_id:
             raise IntegrationValidationError("provider_identity_mismatch")
         return {"provider_status": response.status_code, "identity_match": True}
-
