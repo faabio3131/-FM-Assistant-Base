@@ -1,0 +1,35 @@
+name: Core Assistant Authenticated Bridge Contract
+
+on:
+  push:
+    branches:
+      - main
+      - feat/**
+  pull_request:
+
+jobs:
+  signed-bridge-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Assistant
+        uses: actions/checkout@v4
+      - name: Checkout Core (integration contract)
+        uses: actions/checkout@v4
+        with:
+          repository: faabio3131/FM-Core-Base-
+          ref: feat/ai-service-v1
+          path: core-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install both services
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pip install -e ./core-source
+          python -m pip check
+      - name: Verify exact Core client is installed
+        run: python -c "from core.ai_assistant_credential_gateway import AssistantSignedCredentialGateway; assert AssistantSignedCredentialGateway"
+      - name: Core to Assistant signed HMAC grant/revocation E2E
+        run: pytest tests/saas/test_core_bridge_service.py -k test_signed_core_gateway_end_to_end -q -rs
