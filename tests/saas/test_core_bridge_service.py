@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.api import create_app
 from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
-from fm_assistant.command_bridge_control_service import sign_command_control
+from fm_assistant.command_bridge_control_service import STATUS_PATH, sign_command_control
 from fm_assistant.core_bridge_models import (
     CoreBridgeAccessORM,
     CoreBridgeGrantORM,
@@ -466,3 +466,99 @@ def test_command_rejects_old_step_up_even_with_valid_hmac(bridge_client):
     assert client.post(COMMAND_PATH, content=tampered, headers=headers).status_code == 401
     with sessions() as db:
         assert db.get(CoreBridgeIdentityORM, KEY_ID).active
+
+
+def _status_headers(body: bytes, *, key=COMMAND_KEY, path=STATUS_PATH):
+    timestamp = str(int(datetime.now(UTC).timestamp()))
+    nonce = secrets.token_urlsafe(24)
+    return {
+        "X-FM-Command-Key-ID": COMMAND_KEY_ID,
+        "X-FM-Command-Timestamp": timestamp,
+        "X-FM-Command-Nonce": nonce,
+        "X-FM-Command-Signature": sign_command_control(
+            key=key, key_id=COMMAND_KEY_ID, timestamp=timestamp, nonce=nonce,
+            body=body, path=path,
+        ),
+    }
+
+
+def test_command_reconcile_status_hmac_bound_scope_and_immutability(bridge_client):
+    client, sessions = bridge_client
+    endpoint = STATUS_PATH
+    body, headers = command_request("revoke_grant")
+    snapshot = json.loads(body)
+    unknown = client.post(endpoint, content=body, headers=_status_headers(body))
+    assert unknown.status_code == 200
+    assert unknown.json() == {"status": "unknown", "outcome": None}
+    assert unknown.headers["cache-control"] == "no-store"
+    with sessions() as db:
+        assert db.scalars(select(CommandBridgeControlEventORM)).all() == []
+        assert db.get(CoreBridgeGrantORM, (KEY_ID, "tenant-a", "unit-a", "ai.text")).active
+
+    result = client.post(COMMAND_PATH, content=body, headers=headers)
+    assert result.status_code == 200, result.text
+    looked_up = client.post(endpoint, content=body, headers=_status_headers(body))
+    assert looked_up.status_code == 200
+    assert looked_up.json() == {"status": "applied", "outcome": "revoked"}
+    assert "secret" not in looked_up.text.casefold()
+
+    # Authorization requires a separate signature for read-only vs mutation.
+    assert client.post(endpoint, content=body, headers=headers).status_code == 401
+    assert client.post(COMMAND_PATH, content=body, headers=_status_headers(body)).status_code == 401
+    forged = dict(snapshot, tenant_id="another-tenant")
+    forged_body = json.dumps(forged, sort_keys=True, separators=(",", ":")).encode()
+    assert client.post(
+        endpoint, content=forged_body,
+        headers=_status_headers(forged_body),
+    ).json() == {"status": "unknown", "outcome": None}
+    forged = dict(snapshot, actor_user_id="attacker-admin")
+    forged_body = json.dumps(forged, sort_keys=True, separators=(",", ":")).encode()
+    assert client.post(
+        endpoint, content=forged_body,
+        headers=_status_headers(forged_body),
+    ).json() == {"status": "unknown", "outcome": None}
+    unsigned = client.post(endpoint, json=snapshot)
+    assert unsigned.status_code == 401
+
+    with sessions() as db:
+        rows = db.scalars(select(CommandBridgeControlEventORM)).all()
+        assert len(rows) == 1
+        assert rows[0].command_request_id == snapshot["command_request_id"]
+
+
+def test_command_reconcile_status_unknown_cannot_authorize_retry(bridge_client):
+    client, _ = bridge_client
+    body, _ = command_request("grant")
+    response = client.post(STATUS_PATH, content=body, headers=_status_headers(body))
+    assert response.status_code == 200
+    assert response.json()["status"] == "unknown"
+    assert "retry" not in response.json()
+
+
+def test_duplicate_command_request_id_cannot_perform_second_mutation(bridge_client):
+    client, sessions = bridge_client
+    body, headers = command_request("revoke_grant")
+    first = client.post(COMMAND_PATH, content=body, headers=headers)
+    assert first.status_code == 200
+    duplicate = json.loads(body)
+    duplicate["action"] = "revoke_identity"
+    second_body = json.dumps(duplicate, sort_keys=True, separators=(",", ":")).encode()
+    timestamp = str(int(datetime.now(UTC).timestamp()))
+    nonce = secrets.token_urlsafe(24)
+    second_headers = {
+        "X-FM-Command-Key-ID": COMMAND_KEY_ID,
+        "X-FM-Command-Timestamp": timestamp,
+        "X-FM-Command-Nonce": nonce,
+        "X-FM-Command-Signature": sign_command_control(
+            key=COMMAND_KEY, key_id=COMMAND_KEY_ID,
+            timestamp=timestamp, nonce=nonce, body=second_body,
+        ),
+    }
+    assert client.post(
+        COMMAND_PATH, content=second_body, headers=second_headers,
+    ).status_code == 401
+    with sessions() as db:
+        identity = db.get(CoreBridgeIdentityORM, KEY_ID)
+        assert identity.active and identity.revoked_at is None
+        rows = db.scalars(select(CommandBridgeControlEventORM)).all()
+        assert len(rows) == 1
