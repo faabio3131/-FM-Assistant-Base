@@ -311,3 +311,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Não habilitar guards por padrão no composition root comercial antes de projeção de entitlement, política aprovada, retrocompatibilidade, segurança de BYOK, FinOps real e staging.
 - Documento canônico da entrega: `docs/F3_8_3_PERSISTENT_CIRCUIT_QUOTA_RUNTIME.md`. Exigir Ruff, suites, PostgreSQL16 concorrente e review antes de promover o subgate.
 - F3.8 global e F3 global permanecem IN_PROGRESS; F4 NOT_STARTED. Sem deploy, migração em banco persistente, segredos reais ou merge antecipado.
+
+## F3.8.4 — Consulta de pendencias sem acao automatica (2026-10-18)
+
+- A quota permite consulta scoped de reservas ainda nao conciliadas, usando tenant/unidade/capability e cutoff obrigatorios. Nunca retornar reservas de outro tenant.
+- A consulta nao reembolsa, nao contabiliza gasto ficticio, nao repete provider call e nao muda o estado do registro.
+- O produtor do request continua impedido de executar novamente o mesmo request_id em caso de resultado ambiguo.
+- Este gate nao equivale a conciliacao monetaria, provider usage settlement, cobranca ou verificacao de saldo real.
+- CI verde no HEAD atual e revisao independente sao condicoes de certificacao. Nao ativar em producao.
