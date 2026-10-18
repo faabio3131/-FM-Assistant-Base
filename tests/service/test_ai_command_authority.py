@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from core.ai_command_authority import (
     CommandAuthorityDenied,
