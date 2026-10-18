@@ -633,3 +633,23 @@ GATE: F3.7.4 GREEN INTERMEDIÁRIO, F3 GLOBAL IN_PROGRESS.
 MERGE: proibido enquanto gates inter-repositórios obrigatórios não estiverem todos GREEN 100%.
 DEPLOY/SEGREDOS REAIS/MIGRATION PRODUTIVA: sem autorização; não executados.
 KORDENA READ-ONLY; MCP Commander não usado.
+
+2026-10-18 — F3.7.4 REGRESSION HARDENING / FINAL RETEST
+FASE: F3 IN_PROGRESS; PostgreSQL gate GREEN INTERMEDIÁRIO (mantido).
+ASSISTANT SHA FUNCIONAL: 45b35a6900c59825a987d9db47e98ad18073dec2
+FALHA NOVA NO HEAD DOCUMENTAL ANTERIOR:
+- run SaaS Foundation CI 39139738788 encontrou teste de replay intermitente: command_request_id de fixture SQLite tinha formato aleatório capaz de começar com _ ou -, mas o contrato exige primeiro caractere alfanumérico;
+- a falha foi real na suíte, não no Postgres. Nenhum teste foi desabilitado/afrouxado.
+CORREÇÃO:
+- tests/saas/test_core_bridge_service.py utiliza UUID, como o FM Command corporativo;
+- nenhum contrato de produção, segredo, banco ou regra de autorização foi alterado.
+EVIDÊNCIA NO NOVO HEAD FUNCIONAL:
+- Assistant SaaS CI push 39139876188 SUCCESS / PR 39139880261 SUCCESS;
+- F3 PostgreSQL 16 gate push 39139876172 SUCCESS / PR 39139880254 SUCCESS;
+- Core Assistant Contract push 39139876135 SUCCESS / PR 39139880264 SUCCESS;
+- 6/6 workflows SUCCESS, todos no SHA 45b35a6900c59825a987d9db47e98ad18073dec2.
+GATES REMANESCENTES:
+- CI Command PR #90, efetivo lint/typecheck/test/build, continua BLOCKED_EXTERNAL (jobs sem steps);
+- E2E Node Command→Python Assistant, security review independente, TLS/ACL/rate limits, Vault externo, providers, quotas/circuit/FinOps, homologações.
+RESULTADO: F3.7.4 GREEN INTERMEDIÁRIO; F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED.
+PROIBIÇÕES: sem merge prematuro, segredo real, banco/deploy produtivo ou escrita Kordena.
