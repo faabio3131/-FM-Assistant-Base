@@ -158,13 +158,13 @@ def test_request_finops_reconciliation_reports_unknown_without_zeroing(ledger):
     assert summary.fallback_attempts == 1
     assert summary.known_total == Decimal("0.05")
     assert summary.currency == "USD"
-    assert summary.settled is False
+    assert summary.all_recorded_costs_known is False
     assert store.reconcile_request(
         tenant_id="b", unit_id="u", request_id="request-a",
     ).total_attempts == 0
     assert store.reconcile_request(
         tenant_id="a", unit_id="different", request_id="request-a",
-    ).settled is False
+    ).all_recorded_costs_known is False
 
 
 def test_request_finops_reconciliation_marks_fully_known_attempts(ledger):
@@ -176,7 +176,7 @@ def test_request_finops_reconciliation_marks_fully_known_attempts(ledger):
     )
     assert complete.known_attempts == 1
     assert complete.unknown_attempts == 0
-    assert complete.settled is True
+    assert complete.all_recorded_costs_known is True
     assert complete.known_total == Decimal("0.05")
     with pytest.raises(ValueError, match="invalid_request_scope"):
         store.reconcile_request(tenant_id="a", unit_id="u", request_id=" ")
