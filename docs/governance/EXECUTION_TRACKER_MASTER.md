@@ -420,3 +420,25 @@ GATE: F3.5 GREEN; F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED.
 PENDÊNCIAS: Admin API autenticada e auditada, controle de autoridade por tenant/consumidor, BYOK shared vault, quota/circuit breaker, testes PostgreSQL e integração Assistant, gates completos.
 RESTRICOES: sem merge desta PR até critérios integrais aplicáveis; sem deploy, sem migration de produção; Kordena read-only.
 PROXIMO PASSO: F3.6 administração governada e autorização diferenciada, com testes e CI.
+
+
+2026-10-18 — F3.5 LAZY-CREDENTIAL CORRECTION
+FASE: F3, melhoria de regressao pos-F3.5, F3 global ainda IN_PROGRESS.
+CORE HEAD CERTIFICADO: 1243c41e0943bc61a35761040af4409be034d99c
+AÇÃO:
+- Credential resolver mudou de eager para lazy: segredo resolvido somente quando a rota é efetivamente tentada;
+- evita negar sucesso da rota primária por falta de credencial de fallback;
+- erro de segredo ausente tratado por codigo externo generico, sem referencia sensivel;
+- Alembic path_separator atualizado para reduzir warnings de deprecacao;
+- falhas intermediarias Ruff e contrato de erro foram corrigidas, sem suprimir testes.
+EVIDENCIA:
+- primeira mudança: c44b309845274465893a293fe1537d6733ae7738;
+- lint fix: 6d8555f5fb76b6a9e46eaf819895817629631d4e;
+- API contract fix: 1243c41e0943bc61a35761040af4409be034d99c;
+- Core push #39104780301 = SUCCESS;
+- Core PR #39104782604 = SUCCESS;
+- 50 pytest PASS, 0 FAIL, 1 warning de dependencia externa;
+- Ruff PASS.
+GATE: correção de F3.5 GREEN, mantendo F3 = IN_PROGRESS.
+PROXIMO PASSO: F3.6 admin API governada (autoridade de plataforma e auditoria), depois demais gates F3.
+NAO: merge antes de F3/criterios completos, deploy, migration em producao.
