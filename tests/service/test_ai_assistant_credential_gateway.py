@@ -39,8 +39,8 @@ def test_scoped_gateway_signs_exact_request_and_uses_tls():
         assert key_id == "fm-core-v1"
         assert len(nonce) >= 22
         message = (
-            "POST\\n/internal/v1/core/credentials/resolve\\n"
-            + key_id + "\\n" + timestamp + "\\n" + nonce + "\\n"
+            "POST\n/internal/v1/core/credentials/resolve\n"
+            + key_id + "\n" + timestamp + "\n" + nonce + "\n"
             + hashlib.sha256(body).hexdigest()
         ).encode("ascii")
         signature = hmac.new(SIGNING_KEY.encode(), message, hashlib.sha256).hexdigest()
