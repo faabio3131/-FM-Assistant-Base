@@ -519,3 +519,29 @@ RESTRICOES:
 - merge somente após 100% gates aplicáveis da entrega/fase;
 - deploy/segredos reais/migrations de produção exigem autorização humana;
 - Kordena read-only.
+
+
+2026-10-18 — F3.7 ASSISTANT INTERNAL BYOK ELIGIBILITY
+FASE: F3 IN_PROGRESS; elegibilidade local de credenciais BYOK = GREEN INTERMEDIÁRIO.
+ASSISTANT FUNCTIONAL HEAD: 7cfa15452be7fbf3cd4333b40420071d6cd90aa8
+ACOES:
+- política CoreBYOKReleasePolicy, somente leitura e decisão bool, sem decifrar ou expor segredos;
+- validação cumulativa tenant/unidade/assinatura/trial/entitlement ai.byok/provider ai/capability/connection ACTIVE/secret ativo e vigente;
+- cobertura de cross-tenant e cross-unit, integracao draft/revogada, origem FM, credencial revogada ou expirada, licença e trial expirados;
+- documentação de riscos e fronteira em docs/governance/F3_7_ASSISTANT_BYOK_RELEASE_POLICY.md.
+EVIDENCIA REMOTA DO HEAD FUNCIONAL:
+- Assistant Actions push 39133544960 SUCCESS;
+- Assistant Actions PR 39133548475 SUCCESS;
+- Ruff e suíte SaaS integral GREEN.
+GATE:
+- política interna de elegibilidade: GREEN INTERMEDIÁRIO;
+- serviço de entrega de segredo Core↔Assistant: NÃO IMPLEMENTADO / NÃO HOMOLOGADO;
+- F3 global: IN_PROGRESS; F4 NOT_STARTED.
+PENDENCIAS:
+- identidade do serviço Core e vinculação autoritativa tenant/unit/capability;
+- entrega de segredo limitada a conexão autorizada, com replay/expiry/revoke/concurrency;
+- Integration Catalog AI providers, Vault externo, BYOK real e E2E em PostgreSQL;
+- gates finais F3 restantes.
+MERGE: NÃO PERMITIDO ENQUANTO F3/GATES OBRIGATORIOS NAO ESTIVEREM 100% GREEN.
+DEPLOY/SEGREDOS REAIS/MIGRATION PRODUCAO: EXIGEM AUTORIZAÇÃO HUMANA.
+KORDENA: READ-ONLY.
