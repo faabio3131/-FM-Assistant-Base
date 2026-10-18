@@ -279,3 +279,9 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - FM Core é **somente consumidor governado**, não consulta Command para promover a si próprio nem pode substituir auditoria/grants/ACL por resposta de UI. Respeitar revogação em cada request.
 - Command corporativo real `FM-CONTROL-CENTER` PR #90 Draft já tem código e testes de lookup, mas CI privado não inicia steps. Continuar `NOT_TESTED / BLOCKED_EXTERNAL` até teste efetivo.
 - F3 global IN_PROGRESS, F4 NOT_STARTED, sem merge/deploy/segredos reais/migrations produtivas sem gates e autoridade humana.
+
+## F3.7.9 — Status HMAC: replay protection no Assistant (2026-10-18)
+
+- Assistant introduziu ledger de nonce `assistant_command_bridge_status_nonce` + migration aditiva `20261018_0008`, com teste PostgreSQL 16 de consultas concorrentes/replay, HEAD funcional `303747d8efe33536af796d75c698bf01864409a5` 6/6 SUCCESS.
+- Não altera a autoridade do FM Core: Core continua consumindo credenciais somente após verificação de identidade, tenant/unidade/capability e grants pelo Assistant, e nunca consulta o Command para autoautorizar acesso.
+- Não há deployment, credenciais reais nem homologação de rede/Vault: F3 IN_PROGRESS e F4 NOT_STARTED; PRs continuam Draft e merge condicionado aos gates da fase.
