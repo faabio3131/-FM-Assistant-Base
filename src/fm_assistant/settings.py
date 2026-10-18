@@ -30,6 +30,8 @@ class Settings:
     admin_key: str
     credential_pepper: str
     channel_encryption_key: str
+    session_pepper: str
+    session_ttl_minutes: int
     model_backend: str
     model_base_url: str | None
     model_api_key: str | None
@@ -51,6 +53,10 @@ class Settings:
             raise RuntimeError("FM_ASSISTANT_CREDENTIAL_PEPPER obrigatório")
         if not self.channel_encryption_key.strip():
             raise RuntimeError("FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY obrigatório")
+        if not self.session_pepper.strip():
+            raise RuntimeError("FM_ASSISTANT_SESSION_PEPPER obrigatório")
+        if not 15 <= self.session_ttl_minutes <= 10080:
+            raise RuntimeError("FM_ASSISTANT_SESSION_TTL_MINUTES inválido")
 
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible", "core"}:
@@ -59,8 +65,8 @@ class Settings:
         if self.production_like:
             if self.database_url.lower().startswith("sqlite"):
                 raise RuntimeError("SQLite não é permitido em staging/production")
-            if backend == "development":
-                raise RuntimeError("Model gateway de desenvolvimento não é permitido em produção")
+            if backend != "core":
+                raise RuntimeError("FM Core Base é obrigatório em staging/production")
             if self.admin_key == "change-me-development":
                 raise RuntimeError("FM_ASSISTANT_ADMIN_KEY padrão é proibida em produção")
             if self.credential_pepper == "change-me-development-pepper":
@@ -71,6 +77,8 @@ class Settings:
                 raise RuntimeError("FM_ASSISTANT_ADMIN_KEY deve ter ao menos 24 caracteres")
             if len(self.credential_pepper) < 32:
                 raise RuntimeError("FM_ASSISTANT_CREDENTIAL_PEPPER deve ter ao menos 32 caracteres")
+            if len(self.session_pepper) < 32:
+                raise RuntimeError("FM_ASSISTANT_SESSION_PEPPER deve ter ao menos 32 caracteres")
 
         if backend == "openai_compatible":
             if not all(
@@ -121,6 +129,11 @@ def load_settings() -> Settings:
             "FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY",
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         ),
+        session_pepper=os.getenv(
+            "FM_ASSISTANT_SESSION_PEPPER",
+            "change-me-development-session-pepper",
+        ),
+        session_ttl_minutes=int(os.getenv("FM_ASSISTANT_SESSION_TTL_MINUTES", "480")),
         model_backend=os.getenv("FM_ASSISTANT_MODEL_BACKEND", "development"),
         model_base_url=os.getenv("FM_ASSISTANT_MODEL_BASE_URL"),
         model_api_key=os.getenv("FM_ASSISTANT_MODEL_API_KEY"),

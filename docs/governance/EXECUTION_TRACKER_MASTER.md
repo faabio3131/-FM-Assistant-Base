@@ -238,3 +238,34 @@ PRÓXIMO PASSO:
 - F1.2 contratos de domínio;
 - F1.3 migration 0003;
 - enforcement ADR-002 em runtime comercial.
+
+
+2026-10-18 — F1 IMPLEMENTATION LOCAL GATE
+FASE: F1
+AÇÃO:
+- ADR-007 Identity/Session/RBAC implementado;
+- Identity/RBAC/Tenant/Unit/Session/Invitation/Recovery/License/Entitlement implementados;
+- API credential separada de identidade humana;
+- migration 0003 aditiva + backfill implementada;
+- ADR-002 enforced: staging/production exigem FM Core;
+- workflow reforçado com pip check + Ruff da migration.
+EVIDÊNCIA LOCAL:
+- secret scan: NO_SECRET_PATTERN_MATCHES;
+- Ruff: PASS;
+- pip check: PASS;
+- git diff --check: PASS;
+- identity/RBAC/recovery pós-correção: 10/10 PASS;
+- suíte tests/saas final: 27/27 PASS;
+- migration/backfill: PASS.
+FALHA CORRIGIDA:
+- patch de recovery inseriu PasswordResetORM em chamadas SQLAlchemy;
+- cinco testes ficaram RED;
+- causa raiz corrigida;
+- subset e suíte integral rerodados verdes.
+RESULTADO:
+- implementação F1 local = GREEN;
+- F1 geral permanece IN_PROGRESS até CI remoto validar o SHA do commit.
+PRÓXIMO PASSO:
+- commit/push;
+- validar GitHub Actions;
+- se GREEN 100%, fechar F1 e promover F2 automaticamente.

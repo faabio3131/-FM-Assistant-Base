@@ -3,57 +3,69 @@ import pytest
 from fm_assistant.settings import Environment, Settings
 
 
+def _settings(**overrides):
+    values = {
+        "environment": Environment.PRODUCTION,
+        "database_url": "postgresql://user:pass@db/app",
+        "admin_key": "a" * 32,
+        "credential_pepper": "b" * 48,
+        "channel_encryption_key": "YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=",
+        "session_pepper": "s" * 48,
+        "session_ttl_minutes": 480,
+        "model_backend": "core",
+        "model_base_url": None,
+        "model_api_key": None,
+        "model_name": None,
+        "core_base_url": "https://core.internal",
+        "core_service_key": "c" * 48,
+        "auto_create_schema": False,
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
 def test_production_rejects_development_secrets_and_backend():
     with pytest.raises(RuntimeError):
-        Settings(
-            environment=Environment.PRODUCTION,
-            database_url="postgresql://user:pass@db/app",
+        _settings(
             admin_key="change-me-development",
             credential_pepper="change-me-development-pepper",
-            channel_encryption_key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            session_pepper="change-me-development-session-pepper",
             model_backend="development",
-            model_base_url=None,
-            model_api_key=None,
-            model_name=None,
             core_base_url=None,
             core_service_key=None,
-            auto_create_schema=False,
         ).validate()
 
 
-def test_production_accepts_strong_openai_compatible_configuration():
-    settings = Settings(
-        environment=Environment.PRODUCTION,
-        database_url="postgresql://user:pass@db/app",
-        admin_key="a" * 32,
-        credential_pepper="b" * 48,
-        channel_encryption_key="YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=",
+def test_production_rejects_direct_openai_compatible_backend():
+    with pytest.raises(RuntimeError, match="FM Core Base"):
+        _settings(
+            model_backend="openai_compatible",
+            model_base_url="https://example.invalid/v1",
+            model_api_key="secret-key",
+            model_name="model-x",
+            core_base_url=None,
+            core_service_key=None,
+        ).validate()
+
+
+def test_development_allows_direct_openai_compatible_configuration():
+    settings = _settings(
+        environment=Environment.DEVELOPMENT,
+        database_url="sqlite:///./dev.db",
         model_backend="openai_compatible",
         model_base_url="https://example.invalid/v1",
         model_api_key="secret-key",
         model_name="model-x",
         core_base_url=None,
         core_service_key=None,
-        auto_create_schema=False,
+        auto_create_schema=True,
     ).validate()
 
-    assert settings.production_like is True
+    assert settings.model_backend == "openai_compatible"
 
 
 def test_production_accepts_core_backend_configuration():
-    settings = Settings(
-        environment=Environment.PRODUCTION,
-        database_url="postgresql://user:pass@db/app",
-        admin_key="a" * 32,
-        credential_pepper="b" * 48,
-        channel_encryption_key="YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=",
-        model_backend="core",
-        model_base_url=None,
-        model_api_key=None,
-        model_name=None,
-        core_base_url="https://core.internal",
-        core_service_key="c" * 48,
-        auto_create_schema=False,
-    ).validate()
+    settings = _settings().validate()
 
+    assert settings.production_like is True
     assert settings.model_backend == "core"

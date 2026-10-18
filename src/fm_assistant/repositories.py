@@ -85,6 +85,22 @@ class CredentialRepository:
             session.commit()
             return True
 
+    def revoke_scoped(self, context: TenantContext, credential_id: str) -> bool:
+        with self._session_factory() as session:
+            row = session.scalar(
+                select(TenantCredentialORM).where(
+                    TenantCredentialORM.credential_id == credential_id,
+                    TenantCredentialORM.tenant_id == context.tenant_id,
+                    TenantCredentialORM.unit_id == context.unit_id,
+                    TenantCredentialORM.active.is_(True),
+                )
+            )
+            if row is None:
+                return False
+            row.active = False
+            session.commit()
+            return True
+
 
 class PersonaSQLAlchemyRepository:
     def __init__(self, session_factory) -> None:

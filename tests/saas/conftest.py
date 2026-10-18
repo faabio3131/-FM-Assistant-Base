@@ -15,6 +15,8 @@ def client(tmp_path):
         admin_key="admin-test-key",
         credential_pepper="pepper-test-very-long",
         channel_encryption_key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        session_pepper="session-test-pepper-very-long-at-least-32-chars",
+        session_ttl_minutes=480,
         model_backend="development",
         model_base_url=None,
         model_api_key=None,

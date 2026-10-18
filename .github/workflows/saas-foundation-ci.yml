@@ -18,7 +18,13 @@ jobs:
           cache: pip
       - name: Install
         run: pip install -e ".[dev]"
+      - name: Pip check
+        run: pip check
       - name: Ruff
-        run: ruff check src tests/saas
+        run: >
+          ruff check
+          src
+          tests/saas
+          alembic/versions/20261017_0003_identity_tenant_rbac.py
       - name: Pytest
         run: pytest tests/saas
