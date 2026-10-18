@@ -679,3 +679,17 @@ RISCO TÉCNICO A FECHAR:
 - revisão independente, CI real, Vault, rede, quotas/circuit/FinOps, observabilidade e providers ainda pendentes.
 DECISÃO: NÃO mergear PR #90 ou PRs #1; não iniciar F4, não fazer deploy/credential real/migration produtiva.
 PRÓXIMO PASSO: obter CI Command executando steps e corrigir até 100% GREEN; passar teste cruzado e revisão independente; concluir gates restantes da F3 antes da promoção.
+
+
+2026-10-18 — F3.7.6 COMMAND PRE-MUTATION AUDIT INTENT
+FASE: F3 IN_PROGRESS; F4 NOT_STARTED.
+ACHADO: o Command emitia request_id somente dentro do cliente S2S e registrava auditoria depois da mutation; em falha do audit writer, o Assistant poderia ter confirmado sem referência durável no Command.
+CORREÇÃO EM BRANCH COMMAND PR #90:
+- Command persiste previamente evento .requested no ledger corporativo; se falhar, NÃO envia mutation.
+- UUID produzido server-side e persistido é encaminhado ao Assistant como command_request_id coberto pelo HMAC, e também registrado em sucesso/falha no Command.
+- Testes de falha do audit-intent, resultado posterior ambíguo, validação de request_id e mesmo UUID em corpo/audit.
+- Commits Command: efa3f349 (client), 35210452 (route), ea5ca271 e 5823b3d (tests), 0ba4ac7 (docs), af21aecc (AGENTS).
+LIMITES: implementado, NÃO certificado porque GitHub Actions Command segue sem executar steps. O mecanismo de consulta/reconciliação read-only de status e prova no Assistant permanece pendente; não é transação distribuída.
+GATE: NOT_TESTED / BLOCKED_EXTERNAL Command; Assistant/Core próprios CIs continuaram GREEN no checkpoint anterior, mas não substituem o Command.
+MERGE: NÃO. DEPLOY/PROD/MIGRATION REAL: NÃO. Kordena read-only.
+PRÓXIMO PASSO: desbloquear CI Command, executar suites completas inclusive cross-runtime e auditoria; corrigir falhas; implementar e certificar reconciliação segura sem reenvio automático.
