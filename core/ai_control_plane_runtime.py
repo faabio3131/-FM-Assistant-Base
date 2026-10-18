@@ -183,6 +183,9 @@ class CoreControlPlaneAIRuntime:
         resolved = self._control_plane.resolve(
             tenant_id=tenant_id, unit_id=unit_id, capability=capability
         )
+        sources = {route.credential_source for route in resolved}
+        if "tenant_managed" in sources and "fm_managed" in sources:
+            raise ControlPlaneError("core_control_plane.mixed_credential_fallback_forbidden")
         return AIModelRouter(
             rotas=tuple(item.route for item in resolved),
             executor=ScopedCoreExecutor(
