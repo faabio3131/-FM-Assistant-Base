@@ -10,8 +10,7 @@ from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-import core.ai_admin_audit  # noqa: F401 - registra tabela administrativa
-
+import core.ai_admin_audit
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
 from core.ai_control_plane_runtime import (
     CoreControlPlaneAIRuntime,
