@@ -7,6 +7,7 @@ somente os eventos conhecidos, e cost_unknown_events e obrigatorio para leitura.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from hashlib import sha256
@@ -82,6 +83,22 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+@dataclass(frozen=True, kw_only=True)
+class AIRequestCostSummary:
+    """No false cost=zero when provider attempts lack trustworthy usage."""
+
+    tenant_id: str
+    unit_id: str
+    request_id: str
+    currency: str | None
+    known_total: Decimal
+    known_attempts: int
+    unknown_attempts: int
+    total_attempts: int
+    fallback_attempts: int
+    settled: bool
 
 
 class PersistentAIFinOps:
@@ -216,6 +233,49 @@ class PersistentAIFinOps:
                     price_snapshot_id=evento.price_snapshot_id,
                     event_time=evento.timestamp,
                 )
+            )
+
+    def reconcile_request(
+        self, *, tenant_id: str, unit_id: str, request_id: str,
+    ) -> AIRequestCostSummary:
+        """Summarize ALL persisted routing attempts in one scoped request.
+
+        Known_total is a subtotal, never a proof of final spend when unknown
+        attempts exist. Mixing currencies is not silently converted.
+        """
+        if any(
+            not isinstance(value, str) or not value.strip() or len(value) > 128
+            for value in (tenant_id, unit_id, request_id)
+        ):
+            raise ControlPlaneError("core_finops.invalid_request_scope")
+        with self._sessions() as db:
+            rows = db.scalars(select(AIUsageRecord).where(
+                AIUsageRecord.tenant_id == tenant_id,
+                AIUsageRecord.unit_id == unit_id,
+                AIUsageRecord.request_id == request_id,
+            )).all()
+            currencies = {
+                item.currency for item in rows
+                if item.cost_decimal is not None
+            }
+            if len(currencies) > 1:
+                raise ControlPlaneError("core_finops.mixed_currency")
+            known = [item for item in rows if item.cost_decimal is not None]
+            total = sum((Decimal(item.cost_decimal) for item in known), Decimal(0))
+            if not total.is_finite() or total < 0:
+                raise ControlPlaneError("core_finops.invalid_known_cost")
+            unknown = len(rows) - len(known)
+            return AIRequestCostSummary(
+                tenant_id=tenant_id,
+                unit_id=unit_id,
+                request_id=request_id,
+                currency=next(iter(currencies), None),
+                known_total=total,
+                known_attempts=len(known),
+                unknown_attempts=unknown,
+                total_attempts=len(rows),
+                fallback_attempts=sum(bool(item.fallback_used) for item in rows),
+                settled=bool(rows) and unknown == 0,
             )
 
     def listar(
