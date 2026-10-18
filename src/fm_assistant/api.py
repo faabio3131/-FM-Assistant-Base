@@ -24,6 +24,7 @@ from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
+from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
 from .core_client import CoreAIClient, CoreAudioTranscriber
 from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
@@ -132,6 +133,28 @@ class CommandBridgeManagePayload(BaseModel):
     organization_id: str = Field(min_length=1, max_length=128)
     step_up_at: int
     command_request_id: str = Field(min_length=1, max_length=96)
+
+
+class PlanSyncAllowance(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    resource: str
+    scope: str
+    limitUnits: int
+    windowSeconds: int
+
+
+class CommandPlanProjectionPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    product_code: str = Field(pattern=r"^VENDEATENDEIA$")
+    organization_id: str = Field(min_length=1, max_length=128)
+    actor_user_id: str = Field(min_length=1, max_length=128)
+    step_up_at: int
+    plan_code: str = Field(min_length=2, max_length=120)
+    revision: int = Field(gt=0)
+    label: str = Field(min_length=2, max_length=160)
+    allowances: list[PlanSyncAllowance] = Field(min_length=1, max_length=32)
 
 
 class CoreBridgeResolvePayload(BaseModel):
@@ -424,6 +447,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         command_signing_key=cfg.command_control_signing_key,
         trusted_organization=cfg.trusted_command_organization_id,
         core_key_id=cfg.core_bridge_key_id,
+    )
+    plan_projection = CommandPlanProjectionService(
+        sessions=session_factory,
+        key_id=cfg.command_control_key_id,
+        signing_key=cfg.command_control_signing_key,
+        trusted_organization=cfg.trusted_command_organization_id,
     )
     whatsapp_channels = WhatsAppChannelRepository(integration_service)
     whatsapp_inbound = WhatsAppInboundRepository(session_factory)
@@ -1235,6 +1264,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for row in rows
         ]
 
+
+    @app.post("/internal/v1/command/assistant-plans/project", include_in_schema=False)
+    async def internal_command_plan_projection(request: Request) -> JSONResponse:
+        raw = await request.body()
+        if len(raw) > 12000:
+            raise HTTPException(status_code=401, detail="plan_sync_denied")
+        try:
+            payload = CommandPlanProjectionPayload.model_validate_json(raw)
+            result = plan_projection.apply(
+                raw_body=raw,
+                headers={
+                    "key_id": request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Command-Nonce"),
+                    "signature": request.headers.get("X-FM-Command-Signature"),
+                },
+                product_code=payload.product_code,
+                organization_id=payload.organization_id,
+                actor_user_id=payload.actor_user_id,
+                step_up_at=payload.step_up_at,
+                plan_code=payload.plan_code,
+                revision=payload.revision,
+                label=payload.label,
+                allowances=tuple(item.model_dump() for item in payload.allowances),
+            )
+        except (PlanSyncDenied, ValidationError) as exc:
+            raise HTTPException(status_code=401, detail="plan_sync_denied") from exc
+        return JSONResponse(
+            {"status": result}, headers={"Cache-Control": "no-store"}
+        )
 
     @app.post("/internal/v1/command/core-bridge/manage", include_in_schema=False)
     async def internal_command_core_bridge_manage(request: Request) -> JSONResponse:
