@@ -396,3 +396,27 @@ EVIDENCIA DE ESTADO NA DATA:
 - Core PR #1: mergeable=true, draft=true, merged=false;
 - F3 permanece IN_PROGRESS, portanto estas PRs nao estao prontas para merge por governanca, embora GitHub indique mergeability tecnica.
 RESULTADO: AUTORIZACAO CONFIRMADA, NENHUM MERGE EXECUTADO.
+
+
+2026-10-18 — F3.5 PERSISTENT RUNTIME CERTIFICADO
+FASE: F3 — IN_PROGRESS; apenas F3.5 = GREEN INTERMEDIÁRIO.
+CORE BRANCH/HEAD: feat/ai-service-v1 / 8de891435c1c93ef23ac4d3bd46f7cbfe3f13d14
+ACOES:
+- Integração do Control Plane persistente ao bootstrap do Core, resolvendo rotas/segredos por requisicao sem duplicar AIModelRouter;
+- produção/staging exigem PostgreSQL e Control Plane persistente, rejeitam rotas estáticas e chaves padrão;
+- credenciais de serviço/admin distintas, min 32 caracteres em runtime comercial; secret repr sanitizado;
+- metering usa PersistentAIFinOps na operação persistente;
+- startup exige revisão Alembic f3_0001 preexistente, nunca migra banco automaticamente;
+- readiness verifica conectividade, tabelas e versionamento; erro de dependência retorna 503 sem detalhes sensíveis;
+- testes para bootstrap, schema ausente, uso/custo persistido e segredo indisponível;
+- correção autônoma de falha inicial Ruff por imports/SIM117.
+EVIDÊNCIA:
+- implementation 4f38151c70b52272d6dd5db2b92d4a721818afe0;
+- fix 8de891435c1c93ef23ac4d3bd46f7cbfe3f13d14;
+- Core GitHub Actions push #39104485612 = SUCCESS;
+- Core GitHub Actions pull_request #39104487912 = SUCCESS;
+- Ruff PASS; pytest 49 PASS, 0 FAIL, 5 warnings (revisar).
+GATE: F3.5 GREEN; F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED.
+PENDÊNCIAS: Admin API autenticada e auditada, controle de autoridade por tenant/consumidor, BYOK shared vault, quota/circuit breaker, testes PostgreSQL e integração Assistant, gates completos.
+RESTRICOES: sem merge desta PR até critérios integrais aplicáveis; sem deploy, sem migration de produção; Kordena read-only.
+PROXIMO PASSO: F3.6 administração governada e autorização diferenciada, com testes e CI.
