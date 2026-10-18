@@ -7,6 +7,7 @@ not stored here: Command remains the only commercial price authority.
 from __future__ import annotations
 
 import hmac
+import json
 import re
 from datetime import UTC, datetime
 
@@ -77,6 +78,21 @@ class CommandPlanProjectionService:
             nonce=nonce, body=raw_body, path=PATH,
         )
         if not hmac.compare_digest(expected, signature):
+            raise PlanSyncDenied("plan_sync_denied")
+        try:
+            decoded = json.loads(raw_body)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise PlanSyncDenied("plan_sync_denied") from exc
+        if decoded != {
+            "product_code": product_code,
+            "organization_id": organization_id,
+            "actor_user_id": actor_user_id,
+            "step_up_at": step_up_at,
+            "plan_code": plan_code,
+            "revision": revision,
+            "label": label,
+            "allowances": list(allowances),
+        }:
             raise PlanSyncDenied("plan_sync_denied")
 
         clean: dict[str, tuple[str, int, int]] = {}
