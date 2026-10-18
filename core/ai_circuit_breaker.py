@@ -117,3 +117,23 @@ def settle(
         phase=CircuitPhase.OPEN, failures=failures,
         until=now + timedelta(seconds=policy.cooldown_seconds),
     )
+
+
+def expire_probe(
+    state: CircuitState, policy: CircuitPolicy, *, now: datetime,
+) -> CircuitState:
+    """Fail closed if a half-open worker disappears before reporting a result.
+
+    The distributed store must commit this transition with row locking.
+    It never auto-retries the failed probe or authorizes an immediate call.
+    """
+    now = aware(now)
+    if state.phase is not CircuitPhase.HALF_OPEN:
+        raise CircuitDenied("circuit.no_outstanding_probe")
+    if now < aware(state.until):
+        raise CircuitDenied("circuit.probe_active")
+    return CircuitState(
+        phase=CircuitPhase.OPEN,
+        failures=max(state.failures, policy.threshold),
+        until=now + timedelta(seconds=policy.cooldown_seconds),
+    )
