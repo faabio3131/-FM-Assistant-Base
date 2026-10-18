@@ -174,6 +174,8 @@ class PersistentAIFinOps:
             event.capability.value,
             event.provider,
             event.model,
+            event.route_reason,
+            event.price_snapshot_id,
             event.outcome.value,
             str(event.fallback_used),
         )
