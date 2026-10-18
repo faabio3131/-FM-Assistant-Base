@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from core.ai_control_plane import (
     AIControlPlaneStore,
     ControlPlaneBase,
+    ControlPlaneError,
     RouteDefinition,
 )
 from core.ai_control_plane_runtime import (
@@ -209,3 +210,30 @@ def test_primary_route_succeeds_even_if_fallback_secret_is_unavailable(monkeypat
     assert result.content == "ok"
     assert result.fallback_used is False
     assert seen == ["Bearer primary-test-secret"]
+
+
+def test_mixed_byok_fm_fallback_fails_closed_before_provider(monkeypatch):
+    from dataclasses import replace
+
+    store = _plane()
+    store.add_route(_policy(
+        identifier="tenant-byok", scope="tenant", tenant="tenant-a",
+        credential_source="tenant_managed",
+    ))
+    store.add_route(replace(
+        _policy(identifier="tenant-fm", scope="tenant", tenant="tenant-a"),
+        priority=90,
+    ))
+    requests = []
+    monkeypatch.setattr(
+        "core.ai_providers.httpx.post",
+        lambda *a, **kw: requests.append(kw),
+    )
+    resolver = Resolver()
+    runtime = CoreControlPlaneAIRuntime(
+        control_plane=store, credentials=resolver,
+    )
+    with pytest.raises(ControlPlaneError, match="mixed_credential_fallback_forbidden"):
+        _generate(runtime, "tenant-a")
+    assert requests == []
+    assert resolver.calls == []
