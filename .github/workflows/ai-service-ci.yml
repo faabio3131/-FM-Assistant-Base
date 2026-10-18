@@ -27,6 +27,7 @@ jobs:
           core/ai_control_plane_bootstrap.py
           core/ai_admin_read_api.py
           core/ai_command_authority.py
+          core/ai_tenant_credential_resolver.py
           core/ai_admin_audit.py
           core/ai_usage_ledger.py
           alembic/env.py
