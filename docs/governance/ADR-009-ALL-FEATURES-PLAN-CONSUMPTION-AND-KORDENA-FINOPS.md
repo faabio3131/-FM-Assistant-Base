@@ -88,6 +88,15 @@ Referência GitHub (somente leitura):
   rota nem snapshot: rotas distintas do mesmo provider/model com mesmo
   instante podem colidir. O Core deve preservar ID de tentativa único
   e deduplicação exata, nunca suprimir consumo de fallback.
+- Conforme o provedor, `cached_tokens` pode ser **subconjunto dos
+  input_tokens**, não uma terceira quantidade adicional ao total:
+  a regra de medição por modelo deve definir como interpretar cache
+  para evitar dupla contagem no teto comercial e cálculo financeiro.
+  Uso `None` de tokens nunca autoriza reembolso automático nem
+  permite afirmar consumo zero.
+- O limite de tokens de saída precisa ser mandado ao provider antes
+  da chamada; limites de input e contagem de áudio exigem contrato e
+  estimador apropriados por adapter/capability para reserva conservadora.
 - O projetor agrega por dia e serve dashboard, mas **não é fonte de
   verdade transacional** para autorizar nova chamada concorrente.
   Não usar read-model atrasado para calcular saldo disponível em
