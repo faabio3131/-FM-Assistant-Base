@@ -539,3 +539,13 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - Assistant é autoridade transacional de grants e mantém `command_request_id` em seu ledger; resultados HTTP ambíguos **não autorizam** retry cego.
 - Exigir reconciliação read-only governada por esse ID antes de certificar ciclo completo; pré-auditoria isolada não é atomicidade interserviços.
 - Código e testes permanecem na Command PR #90 Draft e **NÃO CERTIFICADOS** por CI sem steps. F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED; sem merge/deploy/segredos reais/migration produtiva.
+
+
+## 23. F3.7.7 — SIGNED RECONCILIATION (2026-10-18)
+
+- A mutation no Assistant grava evidência transacional com `command_request_id` único, via índice de unicidade criado pela migration aditiva `20261018_0007`. Reuso do mesmo ID em nova mutation deve falhar integralmente e sem contornar grants/revogação.
+- Endpoint interno `/internal/v1/command/core-bridge/status` usa HMAC com caminho canônico próprio, mesmo actor/organização/tenant/unidade/capability e identity configurada para retornar exclusivamente `applied`, `denied` ou `unknown`; não revela segredos, não muta identities/grants.
+- `unknown`, indisponibilidade e timeout NÃO autorizam replay da mutation. Monitorar e reconciliar sempre contra auditoria transacional.
+- Assistant CI para esta entrega: `c65f05f73546380f1641611d96d6a3bd74c3a0b3`, 6/6 SUCCESS em SaaS, PG16 e contrato Core↔Assistant.
+- Command PR #90 introduziu consulta corporativa read-only com Better Auth e step-up, mas CI de seu repositório privado ainda termina sem steps; considerá-lo NOT_TESTED/BLOCKED_EXTERNAL. F3 GLOBAL IN_PROGRESS, F4 NOT_STARTED.
+- O ambiente de produção depende de segurança em rede, Vault, rate limit, observabilidade e teste real autorizado pelo proprietário. Sem merge/deploy/segredo real/migration de produção enquanto gates obrigatórios faltarem.
