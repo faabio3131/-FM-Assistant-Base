@@ -328,3 +328,13 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - A progressão para F4 e subsequentes depende da conclusão de implementação e CI interno da fase anterior, não de testes contra provedores reais.
 - Não ativar providers, segredos reais, deploy, migration produtiva ou custos sem autorização específica; merge condicionado à certificação interna integral e à verificação de que não provoca deploy automático.
 - Registrar conclusão comprovada em `docs/governance/EXECUTION_TRACKER_MASTER.md` do Assistant. Autoridade: `docs/governance/F3_BUILD_FIRST_EXTERNAL_HOMOLOGATION_LAST_2026-10-18.md` naquele repositório. Esta decisão substitui a restrição antiga somente quanto ao bloqueio de **construção** por dependências externas.
+
+## F3.8 — MULTI-METRIC PLAN ENFORCEMENT / FM AI FINOPS (2026-10-18)
+
+- FM Assistant é autoridade exclusiva de planos, trial, assinatura e limites comerciais. FM Core apenas aplica políticas projetadas e registra uso real; não cria um segundo sistema de billing.
+- `QuotaReservations.reserve_bundle/settle_bundle` permite reservar num único commit múltiplas métricas, com policy row locking ordenado, idempotência, limitação por tenant e por unidade, proteção contra replay de request e rollback de todas as métricas diante de qualquer insuficiência.
+- Tenant agregado é representado por chave técnica `__tenant__` nos testes. Não aceitar essa chave de input do cliente; só um projetor governado escolhe tenant/unidade e origem da policy.
+- Custo da IA é despesa interna FM; tokens, requests, áudio e eventuais orçamentos de micro-unidades de moeda são métricas para guard técnico, não cobrança ao cliente. Nunca contabilizar tokens/custo desconhecidos como zero.
+- O runtime só poderá habilitar a guarda obrigatória depois de receber plan policies assinadas do Assistant, teto de tokens efetivamente aplicado nos adapters, expiração/revogação de licença, settlement por tentativa/fallback e CI interno completo. Não confundir engine transacional de quota com funcionalidade comercial inteiramente conectada.
+- Catálogo comercial é configurável e versionado, sem valores comerciais fixados no código. Referência de autoridade: Assistant `docs/governance/F3_F9_PLAN_QUOTAS_AND_AI_USAGE_ARCHITECTURE.md`.
+- Homologação externa ao final; testes unitários e PostgreSQL efêmero obrigatórios durante construção, sem deploy ou credenciais reais.
