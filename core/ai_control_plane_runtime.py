@@ -24,6 +24,7 @@ from core.ai_router import (
     SolicitacaoIA,
 )
 from core.ai_service_contracts import CoreAIResult, TextMessage, TextRequestContent
+from core.ai_tenant_credential_resolver import TenantCredentialDenied
 from core.ai_service_runtime import _result
 from core.ai_service_settings import ProviderRouteSettings
 from core.seguranca.erros import ReferenciaSegredoInvalida, SegredoAusente
@@ -71,6 +72,9 @@ class ScopedCoreExecutor(ExecutorModeloIA):
                 credential_source=item.credential_source,
                 secret_reference=item.secret_reference,
             )
+        except TenantCredentialDenied as exc:
+            # A negacao BYOK nunca deve disparar fallback para uma rota FM-managed.
+            raise FalhaRotaDefinitiva("core_ai_credential_unavailable") from exc
         except (ControlPlaneError, ReferenciaSegredoInvalida, SegredoAusente) as exc:
             raise FalhaRotaTransitoria("core_ai_credential_unavailable") from exc
 
