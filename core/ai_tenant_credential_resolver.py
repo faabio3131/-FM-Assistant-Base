@@ -72,6 +72,11 @@ class TenantCredentialGateway(Protocol):
         self, *, tenant_id: str, opaque_reference: str
     ) -> SecretValue: ...
 
+    def resolve_scoped_secret(
+        self, *, tenant_id: str, unit_id: str, capability: str, opaque_reference: str
+    ) -> SecretValue: ...
+
+
 
 class GovernedCredentialResolver:
     """Resolve credenciais FM e BYOK; não troca a origem em caso de falha."""
@@ -117,3 +122,38 @@ class GovernedCredentialResolver:
                 )
             raise ControlPlaneError("core_control_plane.credential_result_invalid")
         return result
+
+    def resolve_for_request(
+        self,
+        *,
+        tenant_id: str,
+        unit_id: str,
+        capability: str,
+        credential_source: str,
+        secret_reference: str,
+    ) -> SecretValue:
+        if credential_source != "tenant_managed":
+            return self.resolve(
+                tenant_id=tenant_id,
+                credential_source=credential_source,
+                secret_reference=secret_reference,
+            )
+        try:
+            if not unit_id.strip() or not capability.strip():
+                raise ValueError("scope_missing")
+            parsed = parse_tenant_secret_reference(
+                tenant_id=tenant_id, secret_reference=secret_reference
+            )
+            result = self._tenant.resolve_scoped_secret(
+                tenant_id=parsed.tenant_id,
+                unit_id=unit_id,
+                capability=capability,
+                opaque_reference=parsed.opaque_id,
+            )
+            if not isinstance(result, SecretValue):
+                raise ValueError("invalid_result")
+            return result
+        except Exception as exc:
+            raise TenantCredentialDenied(
+                "core_control_plane.byok_credential_unavailable"
+            ) from exc
