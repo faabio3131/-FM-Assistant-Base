@@ -709,3 +709,19 @@ IMPLEMENTADO NO COMMAND PRIVADO (PR #90 Draft):
 BLOQUEIOS: corrigir account runner/billing/configuração GitHub Actions; executar CI integral real, revisão independente; Vault/TLS/ACL/rate limits/quotas/observabilidade/providers e homologações.
 AÇÃO DO PROPRIETÁRIO QUANDO NECESSÁRIO: conferir GitHub Billing & licensing → Payment information e Budgets & alerts/erros de Actions; não compartilhar cartão/segredos; providenciar aprovação expressa antes de qualquer credencial real/deploy não descartável.
 MERGE NÃO. DEPLOY NÃO. KORDENA READ-ONLY.
+
+
+2026-10-18 — F3.7.8 COMMAND CI DESBLOQUEADO E CERTIFICADO EM HEAD FUNCIONAL
+FASE: F3 IN_PROGRESS; F4 NOT_STARTED.
+PROVA: GitHub repositório FM-CONTROL-CENTER passou a público; annotation prévia dizia pagamentos recentes falhos OU aumento de spending limit; após mudança, jobs iniciaram com steps reais.
+COMMAND PR #90 HEAD FUNCIONAL: efd7a89e15a7e02ded3e21e962bce8e5279b00ee.
+GATES COMMAND NESTE SHA:
+- Foundation 39145954696 = SUCCESS: lint/typecheck/migrations/Vitest/Node signer ↔ Assistant ASGI sintético/secret scan/build/Playwright/runtime smoke/Docker/audit.
+- F21 39145954712 = SUCCESS: tenant/security, PostgreSQL backup restore, scan e auditoria.
+- Cognitive 39145954655 = SUCCESS: segurança de regressão, suite cognitiva, build e git diff check.
+CORREÇÕES ORIENTADAS POR LOGS:
+- b964dbcf = testes de config exigiam NODE_ENV para ProcessEnv;
+- ac870b30 = remoção de trailing whitespace em doc F3;
+- efd7a89e = checkout temporário Assistant retirado da árvore Next.js após E2E antes de build, sem desabilitar checks.
+GATE: Command CI funcional GREEN nesse SHA, mas revisão independente + homologação infraestrutura/Vault/TLS/ACL/quotas/providers pendem; F3 GLOBAL IN_PROGRESS, não promover F4.
+CI documental do HEAD posterior deve ser revalidado. Sem merge, deploy, credenciais reais, migrations produtivas; Kordena read-only.
