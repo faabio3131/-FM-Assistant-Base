@@ -150,7 +150,7 @@ class CommandPlanProjectionPayload(BaseModel):
     product_code: str = Field(pattern=r"^VENDEATENDEIA$")
     organization_id: str = Field(min_length=1, max_length=128)
     actor_user_id: str = Field(min_length=1, max_length=128)
-    step_up_at: int
+    approved_at: int
     plan_code: str = Field(min_length=2, max_length=120)
     revision: int = Field(gt=0)
     label: str = Field(min_length=2, max_length=160)
@@ -1283,7 +1283,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 product_code=payload.product_code,
                 organization_id=payload.organization_id,
                 actor_user_id=payload.actor_user_id,
-                step_up_at=payload.step_up_at,
+                approved_at=payload.approved_at,
                 plan_code=payload.plan_code,
                 revision=payload.revision,
                 label=payload.label,
