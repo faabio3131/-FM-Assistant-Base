@@ -301,3 +301,13 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - CI do Core (funcional `3dbab732d8fa9c2425d6ebaa8d560cd6b1fbcf21`): AI Service push/PR SUCCESS e novo gate PostgreSQL16 push/PR SUCCESS. Ver `docs/F3_8_1_2_EXECUTION_CERTIFICATION.md`.
 - Não ativar quotas nem breaker no runtime antes de fonte de policy autenticada, locks/leasing/fencing do breaker, testes de gasto/token/custo, monitoramento e controle de fallback.
 - F3.8.1/2 = GREEN INTERMEDIÁRIO sintético; F3.8 GLOBAL IN_PROGRESS, F3 GLOBAL IN_PROGRESS, F4 NOT_STARTED. Sem merge, deploy, credenciais reais ou migration em banco não descartável.
+
+## F3.8.3 — Circuito persistente e guards opt-in (2026-10-18)
+
+- Código implementado: `core/ai_circuit_state_store.py`, migration aditiva `f3_0004`, row locking PostgreSQL, epoch fencing, single probe half-open, reabertura governada pós-expiração e rejeição de resultados obsoletos.
+- `CoreControlPlaneAIRuntime` admite guards **injetáveis** de circuito e quota. Quando injetada, quota rejeita ausência de política antes de provider e proíbe novo envio do mesmo `request_id`, mesmo com reserva contábil idempotente.
+- Circuito provider-wide é SOMENTE FM-managed nesta etapa. BYOK com circuito injetado é negado ANTES de resolver segredo; configuração com fallback misto BYOK→FM é negada para impedir troca de autoridade silenciosa.
+- Uma quota representa **request técnico**, não custo nem tokens. Timeout mantém reserva pendente para reconciliação; não reembolsar automaticamente.
+- Não habilitar guards por padrão no composition root comercial antes de projeção de entitlement, política aprovada, retrocompatibilidade, segurança de BYOK, FinOps real e staging.
+- Documento canônico da entrega: `docs/F3_8_3_PERSISTENT_CIRCUIT_QUOTA_RUNTIME.md`. Exigir Ruff, suites, PostgreSQL16 concorrente e review antes de promover o subgate.
+- F3.8 global e F3 global permanecem IN_PROGRESS; F4 NOT_STARTED. Sem deploy, migração em banco persistente, segredos reais ou merge antecipado.
