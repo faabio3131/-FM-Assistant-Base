@@ -16,7 +16,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.api import create_app
-from fm_assistant.command_bridge_control_models import (CommandBridgeControlEventORM, CommandBridgeStatusNonceORM)
+from fm_assistant.command_bridge_control_models import (
+    CommandBridgeControlEventORM,
+    CommandBridgeStatusNonceORM,
+)
 from fm_assistant.command_bridge_control_service import STATUS_PATH, sign_command_control
 from fm_assistant.core_bridge_models import (
     CoreBridgeAccessORM,
