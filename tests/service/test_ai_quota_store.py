@@ -270,3 +270,27 @@ def test_bundle_cross_tenant_and_partial_settlement_denied(quota):
         ).all()
         assert len(records) == 2
         assert all(record.state == ReservationState.RESERVED for record in records)
+
+
+def test_plan_usage_snapshot_reports_remaining_and_pending_reservations(quota):
+    store, _ = quota
+    reserve(store, "first", units=2)
+    before = store.usage_snapshot(
+        tenant_id="a", unit_id="u1", capability="text", at=NOW,
+    )
+    assert (before.limit_units, before.reserved_units, before.consumed_units) == (3, 2, 0)
+    assert before.remaining_units == 1
+    assert before.period_ends_at > NOW
+    settle(store, "first", consumed=1)
+    after = store.usage_snapshot(
+        tenant_id="a", unit_id="u1", capability="text", at=NOW,
+    )
+    assert (after.reserved_units, after.consumed_units, after.remaining_units) == (0, 1, 2)
+    other = store.usage_snapshot(
+        tenant_id="b", unit_id="u1", capability="text", at=NOW,
+    )
+    assert (other.reserved_units, other.consumed_units, other.remaining_units) == (0, 0, 1)
+    with pytest.raises(QuotaDenied, match="policy_unavailable"):
+        store.usage_snapshot(
+            tenant_id="missing", unit_id="u1", capability="text", at=NOW,
+        )
