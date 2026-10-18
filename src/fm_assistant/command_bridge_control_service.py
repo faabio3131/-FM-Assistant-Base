@@ -17,7 +17,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from .command_bridge_control_models import (CommandBridgeControlEventORM, CommandBridgeStatusNonceORM)
+from .command_bridge_control_models import CommandBridgeControlEventORM, CommandBridgeStatusNonceORM
 from .core_bridge_models import CoreBridgeGrantORM, CoreBridgeIdentityORM
 from .db import TenantORM, UnitORM
 
