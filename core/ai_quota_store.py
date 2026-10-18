@@ -6,6 +6,7 @@ row-level locking in deployment. SQLite is used for sequential unit tests.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -82,6 +83,16 @@ def _utc(value: datetime) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise QuotaDenied("core_quota.time_invalid")
     return value.astimezone(UTC)
+
+
+@dataclass(frozen=True, kw_only=True)
+class QuotaRequirement:
+    """One plan metric bucket (scope key may represent an entire tenant)."""
+
+    tenant_id: str
+    unit_id: str
+    capability: str
+    units: int
 
 
 class QuotaReservations:
@@ -213,3 +224,107 @@ class QuotaReservations:
                 ).limit(limit)
             ).all()
             return tuple(records)
+
+    def reserve_bundle(
+        self, *, needs: tuple[QuotaRequirement, ...],
+        request_id: str, at: datetime,
+    ) -> tuple[AIQuotaReservationRecord, ...]:
+        """Atomically reserve every plan dimension or reject the whole request.
+
+        PostgreSQL locks all policy rows in consistent sorted order. Scope keys
+        (tenant-wide or unit-specific) must be derived by the trusted policy
+        projector, never accepted from an untrusted client request.
+        """
+        if not needs or len(needs) > 32 or not _valid_id(request_id):
+            raise QuotaDenied("core_quota.bundle_invalid")
+        keys = [(v.tenant_id, v.unit_id, v.capability) for v in needs]
+        if len(set(keys)) != len(keys) or len({x.tenant_id for x in needs}) != 1:
+            raise QuotaDenied("core_quota.bundle_invalid")
+        if any(
+            not all(_valid_id(x) for x in key) or len(key[2]) > 80
+            or type(need.units) is not int or not 0 < need.units <= 2_000_000_000
+            for key, need in zip(keys, needs, strict=True)
+        ):
+            raise QuotaDenied("core_quota.bundle_invalid")
+        now = _utc(at)
+        ordered = sorted(needs, key=lambda item: (
+            item.tenant_id, item.unit_id, item.capability,
+        ))
+        with self._sessions.begin() as db:
+            staged = []
+            for need in ordered:
+                scope = (need.tenant_id, need.unit_id, need.capability)
+                policy = self._policy(db, scope)
+                period = int(now.timestamp()) // policy.window_seconds
+                if db.get(AIQuotaReservationRecord, (*scope, request_id)) is not None:
+                    raise QuotaDenied("core_quota.execution_replay_denied")
+                pending = db.scalar(select(func.coalesce(func.sum(
+                    AIQuotaReservationRecord.reserved_units,
+                ), 0)).where(
+                    AIQuotaReservationRecord.tenant_id == need.tenant_id,
+                    AIQuotaReservationRecord.unit_id == need.unit_id,
+                    AIQuotaReservationRecord.capability == need.capability,
+                    AIQuotaReservationRecord.period == period,
+                    AIQuotaReservationRecord.state == ReservationState.RESERVED,
+                ))
+                spent = db.scalar(select(func.coalesce(func.sum(
+                    AIQuotaReservationRecord.consumed_units,
+                ), 0)).where(
+                    AIQuotaReservationRecord.tenant_id == need.tenant_id,
+                    AIQuotaReservationRecord.unit_id == need.unit_id,
+                    AIQuotaReservationRecord.capability == need.capability,
+                    AIQuotaReservationRecord.period == period,
+                    AIQuotaReservationRecord.state == ReservationState.SETTLED,
+                ))
+                if int(pending) + int(spent) + need.units > policy.limit_units:
+                    raise QuotaDenied("core_quota.limit_exceeded")
+                staged.append(AIQuotaReservationRecord(
+                    tenant_id=need.tenant_id,
+                    unit_id=need.unit_id,
+                    capability=need.capability,
+                    request_id=request_id,
+                    period=period,
+                    policy_revision=policy.revision,
+                    reserved_units=need.units,
+                    consumed_units=0,
+                    state=ReservationState.RESERVED,
+                    created_at=now,
+                ))
+            db.add_all(staged)
+            db.flush()
+            return tuple(staged)
+
+    def settle_bundle(
+        self, *, usage: tuple[QuotaRequirement, ...], request_id: str,
+    ) -> None:
+        """Settle only confirmed metrics, retaining all reserves on failure."""
+        if not usage or len(usage) > 32 or not _valid_id(request_id):
+            raise QuotaDenied("core_quota.bundle_invalid")
+        keys = [(x.tenant_id, x.unit_id, x.capability) for x in usage]
+        if len(keys) != len(set(keys)) or len({x.tenant_id for x in usage}) != 1:
+            raise QuotaDenied("core_quota.bundle_invalid")
+        if any(
+            not all(_valid_id(z) for z in key) or len(key[2]) > 80
+            or type(item.units) is not int or item.units < 0
+            for key, item in zip(keys, usage, strict=True)
+        ):
+            raise QuotaDenied("core_quota.bundle_invalid")
+        with self._sessions.begin() as db:
+            to_settle = []
+            for item in sorted(usage, key=lambda x: (
+                x.tenant_id, x.unit_id, x.capability,
+            )):
+                key = (item.tenant_id, item.unit_id, item.capability)
+                self._policy(db, key)
+                row = db.get(AIQuotaReservationRecord, (*key, request_id))
+                if row is None or row.reserved_units < item.units:
+                    raise QuotaDenied("core_quota.reservation_unavailable")
+                if row.state == ReservationState.SETTLED:
+                    if row.consumed_units != item.units:
+                        raise QuotaDenied("core_quota.settlement_conflict")
+                else:
+                    to_settle.append((row, item.units))
+            for row, consumed in to_settle:
+                row.state = ReservationState.SETTLED
+                row.consumed_units = consumed
+            db.flush()
