@@ -134,14 +134,28 @@ Se gate vermelho: corrigir e repetir.
 
 Não pedir autorização a cada teste/correção interna já coberta por este Prompt.
 
-Ainda exigem autorização específica:
+Autonomia operacional autorizada:
 
-- merge;
-- deploy real;
-- criação/rotação de credenciais reais;
-- migrations em banco não descartável/staging/prod;
-- operações destrutivas;
-- mudança material de arquitetura aprovada.
+- correções internas;
+- criação/edição de código dentro da arquitetura aprovada;
+- testes;
+- migrations não destrutivas;
+- commits;
+- pushes;
+- atualização de PR;
+- repetição de gates;
+- avanço de fase quando o gate anterior estiver GREEN 100%;
+- **merge quando todos os critérios obrigatórios aplicáveis estiverem GREEN 100%**.
+
+Bloqueio humano obrigatório permanece para:
+
+- deploy/cutover de produção;
+- migration de produção como parte do release;
+- ativação de credenciais reais que efetivamente coloquem produção em operação;
+- ação irreversível equivalente de produção;
+- mudança material das decisões arquiteturais aprovadas.
+
+A regra detalhada está no `AGENTS.md`.
 
 ---
 
@@ -739,15 +753,31 @@ Produção real ainda exige autorização explícita.
 
 # 21. FASE 15 — MERGE / PRODUÇÃO
 
-NÃO EXECUTAR automaticamente.
+## Merge
+
+**MERGE ESTÁ PRÉ-AUTORIZADO** quando todos os gates obrigatórios aplicáveis estiverem
+`GREEN` 100%, sem STOP condition, com CI verde, diff revisado, documentação/tracker
+atualizados e PR mergeable.
+
+Após merge:
+
+- verificar CI pós-merge;
+- registrar SHA;
+- verificar regressões;
+- atualizar o tracker.
+
+Se qualquer gate estiver RED, BLOCKED_EXTERNAL, ausente ou contraditório, merge é proibido.
+
+## Produção
+
+**DEPLOY/CUTOVER DE PRODUÇÃO NÃO ESTÁ PRÉ-AUTORIZADO.**
 
 Exigir autorização humana explícita para:
 
-- merge final;
-- migration em produção;
-- deploy;
-- domínio/cutover;
-- credenciais reais;
+- deploy em produção;
+- migration de produção como parte do release;
+- domínio/cutover/tráfego;
+- ativação de credenciais reais que coloquem produção em operação;
 - produção comercial.
 
 ---
@@ -801,6 +831,7 @@ O Prompt Mestre só está concluído quando:
 2. nenhuma STOP condition permanece aberta;
 3. documentação reflete Current;
 4. produto está formalmente classificado como **PRONTO PARA PRODUÇÃO**;
-5. merge/deploy continuam aguardando autorização humana específica.
+5. merge pode ocorrer automaticamente quando 100% dos gates obrigatórios estiverem verdes;
+6. deploy/produção continuam aguardando autorização humana específica.
 
 Até lá, o executor deve avançar fase a fase dentro das autorizações deste documento, corrigindo gates vermelhos antes de progredir.
