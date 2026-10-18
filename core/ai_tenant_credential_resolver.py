@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from core.ai_control_plane import ControlPlaneError
-from core.ai_control_plane_runtime import CoreCredentialResolver
 from core.seguranca.segredos import SecretValue
 
 _TENANT_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
@@ -51,6 +50,16 @@ def parse_tenant_secret_reference(
     return TenantSecretReference(tenant_id=tenant_id, opaque_id=parts[2])
 
 
+class TenantCredentialDenied(ControlPlaneError):
+    """Negação BYOK não permite fallback para credenciais de outra origem."""
+
+
+class FMProviderCredentialResolver(Protocol):
+    def resolve(
+        self, *, tenant_id: str, credential_source: str, secret_reference: str
+    ) -> SecretValue: ...
+
+
 class TenantCredentialGateway(Protocol):
     """Porta do serviço autoritativo de segredos, sem dependência do produto.
 
@@ -70,7 +79,7 @@ class GovernedCredentialResolver:
     def __init__(
         self,
         *,
-        fm_credentials: CoreCredentialResolver,
+        fm_credentials: FMProviderCredentialResolver,
         tenant_gateway: TenantCredentialGateway,
     ) -> None:
         self._fm = fm_credentials
@@ -88,14 +97,23 @@ class GovernedCredentialResolver:
                 secret_reference=secret_reference,
             )
         elif credential_source == "tenant_managed":
-            parsed = parse_tenant_secret_reference(
-                tenant_id=tenant_id, secret_reference=secret_reference
-            )
-            result = self._tenant.resolve_active_secret(
-                tenant_id=parsed.tenant_id, opaque_reference=parsed.opaque_id
-            )
+            try:
+                parsed = parse_tenant_secret_reference(
+                    tenant_id=tenant_id, secret_reference=secret_reference
+                )
+                result = self._tenant.resolve_active_secret(
+                    tenant_id=parsed.tenant_id, opaque_reference=parsed.opaque_id
+                )
+            except Exception as exc:
+                raise TenantCredentialDenied(
+                    "core_control_plane.byok_credential_unavailable"
+                ) from exc
         else:
             raise ControlPlaneError("core_control_plane.credential_source_invalid")
         if not isinstance(result, SecretValue):
+            if credential_source == "tenant_managed":
+                raise TenantCredentialDenied(
+                    "core_control_plane.byok_credential_unavailable"
+                )
             raise ControlPlaneError("core_control_plane.credential_result_invalid")
         return result
