@@ -67,17 +67,16 @@ def test_mutation_and_audit_share_transaction_and_reject_jti_replay(tmp_path):
             assert len(audit[0].request_digest) == 64
             assert db.get(AIProvider, "test-provider").enabled is False
 
-        with pytest.raises(IntegrityError):
-            with sessions.begin() as db:
-                provider = db.get(AIProvider, "test-provider")
-                provider.enabled = True
-                stage_admin_mutation_audit(
-                    db,
-                    principal=_principal(),  # reused signed token jti
-                    action="core.ai.provider.enable",
-                    resource_id="test-provider",
-                    canonical_request=b'{"enabled":true}',
-                )
+        with pytest.raises(IntegrityError), sessions.begin() as db:
+            provider = db.get(AIProvider, "test-provider")
+            provider.enabled = True
+            stage_admin_mutation_audit(
+                db,
+                principal=_principal(),  # reused signed token jti
+                action="core.ai.provider.enable",
+                resource_id="test-provider",
+                canonical_request=b'{"enabled":true}',
+            )
         with sessions() as db:
             assert db.get(AIProvider, "test-provider").enabled is False
             assert len(db.scalars(select(CommandAdminAuditRecord)).all()) == 1
@@ -88,16 +87,15 @@ def test_mutation_and_audit_share_transaction_and_reject_jti_replay(tmp_path):
 def test_rejected_or_rolled_back_mutation_leaves_no_audit(tmp_path):
     engine, sessions = _migrated(tmp_path)
     try:
-        with pytest.raises(RuntimeError, match="forced-rollback"):
-            with sessions.begin() as db:
-                stage_admin_mutation_audit(
-                    db,
-                    principal=_principal("one-time-token-2"),
-                    action="core.ai.route.update",
-                    resource_id="policy-1",
-                    canonical_request=b"{}",
-                )
-                raise RuntimeError("forced-rollback")
+        with pytest.raises(RuntimeError, match="forced-rollback"), sessions.begin() as db:
+            stage_admin_mutation_audit(
+                db,
+                principal=_principal("one-time-token-2"),
+                action="core.ai.route.update",
+                resource_id="policy-1",
+                canonical_request=b"{}",
+            )
+            raise RuntimeError("forced-rollback")
         with sessions() as db:
             assert db.scalars(select(CommandAdminAuditRecord)).all() == []
     finally:
@@ -115,14 +113,13 @@ def test_rejected_or_rolled_back_mutation_leaves_no_audit(tmp_path):
 def test_audit_requires_structured_scope(tmp_path, action, resource, payload):
     engine, sessions = _migrated(tmp_path)
     try:
-        with pytest.raises(ValueError):
-            with sessions.begin() as db:
-                stage_admin_mutation_audit(
-                    db,
-                    principal=_principal(),
-                    action=action,
-                    resource_id=resource,
-                    canonical_request=payload,
-                )
+        with pytest.raises(ValueError), sessions.begin() as db:
+            stage_admin_mutation_audit(
+                db,
+                principal=_principal(),
+                action=action,
+                resource_id=resource,
+                canonical_request=payload,
+            )
     finally:
         engine.dispose()
