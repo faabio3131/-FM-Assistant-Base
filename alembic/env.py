@@ -6,6 +6,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+import fm_assistant.core_bridge_models  # noqa: F401 - bind migration metadata
 from fm_assistant.db import Base
 
 config = context.config
