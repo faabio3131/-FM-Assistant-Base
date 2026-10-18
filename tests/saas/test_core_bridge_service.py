@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -320,7 +321,7 @@ def command_request(
         "actor_user_id": "fm-human-admin-1",
         "organization_id": organization,
         "step_up_at": int(datetime.now(UTC).timestamp()),
-        "command_request_id": secrets.token_urlsafe(24),
+        "command_request_id": str(uuid4()),
     }
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     timestamp = timestamp or str(int(datetime.now(UTC).timestamp()))
