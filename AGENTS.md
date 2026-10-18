@@ -261,3 +261,12 @@ A única barreira humana operacional permanente após gates verdes é deploy/pro
 O consumidor Core↔Assistant tem novo gate PostgreSQL 16, validando nonce concorrente e revogação em banco real descartável. **Assistant SHA funcional** `6dd2d9f7ebf84fa140ae7380f6f0386387500ca9`; Actions Postgres push `39139495756` e PR `39139500097`: SUCCESS; SaaS/contrato Core verdes. Isto é GREEN INTERMEDIÁRIO do contrato, não homologação de credencial real.
 
 O Core não deverá considerar F3 global aprovada enquanto o Command corporativo `FM-CONTROL-CENTER` PR #90 não executar CI efetivo lint/typecheck/test/build, revisão independente e E2E completo. Jobs com zero steps são `BLOCKED_EXTERNAL`, jamais GREEN. Próxima sequência: segurança Command, Vault/rede, provider catalog, circuit/quotas/FinOps, homologação real. Sem merge prematuro nem deploy/segredos/migration produtivos.
+
+
+## F3.7.5 — Cross-runtime Command/Assistant e segurança (2026-10-18)
+
+- O estado autoritativo das identities/grants continua no Assistant. Core não pode provisionar, autoautorizar escopo, contornar revogação nem assumir o papel do Command corporativo.
+- Command corporativo correto = `faabio3131/FM-CONTROL-CENTER`, PR #90 Draft; `fm-command-v2` é produto separado.
+- Command recebeu auditoria de negativas e teste cross-runtime real do cliente Node assinador contra o ASGI FastAPI do Assistant. **Não confundir teste definido com teste executado**: Foundation/F21/Cognitive do Command falharam sem steps, portanto novo teste é NOT_TESTED/BLOCKED_EXTERNAL.
+- Risco restante: consistência/reconciliação da auditoria interserviços, Vault, TLS/ACL, quotas/circuit/FinOps, provider homologation e revisão independente.
+- F3 GLOBAL permanece IN_PROGRESS; sem merge enquanto todos os gates obrigatórios não forem GREEN. Nenhum deploy/credencial real/migration produtiva sem autorização específica. Kordena read-only.
