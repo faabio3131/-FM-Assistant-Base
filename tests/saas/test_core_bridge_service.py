@@ -418,3 +418,50 @@ def test_command_control_missing_configuration_is_denied(client):
     data, headers = command_request("provision")
     response = client.post(COMMAND_PATH, content=data, headers=headers)
     assert response.status_code == 401
+
+
+
+def test_command_hmac_contract_matches_node_crypto_reference_vector():
+    raw_body = b'{"action":"revoke_grant","tenant_id":"tenant-a"}'
+    digest = sign_command_control(
+        key=COMMAND_KEY,
+        key_id=COMMAND_KEY_ID,
+        timestamp="1792335600",
+        nonce="nonce-123456789012345678901234",
+        body=raw_body,
+    )
+    assert digest == (
+        "954f3ac7be0e0f854ac5c96e8097f69be2cd347ef72d1ce545bc7ec833abd78b"
+    )
+
+
+def test_command_rejects_forged_target_identity(bridge_client):
+    client, sessions = bridge_client
+    body, headers = command_request("revoke_identity")
+    parsed = json.loads(body)
+    parsed["target_key_id"] = "unauthorized-core-key"
+    tampered = json.dumps(parsed, sort_keys=True, separators=(",", ":")).encode()
+    headers["X-FM-Command-Signature"] = sign_command_control(
+        key=COMMAND_KEY, key_id=COMMAND_KEY_ID,
+        timestamp=headers["X-FM-Command-Timestamp"],
+        nonce=headers["X-FM-Command-Nonce"], body=tampered,
+    )
+    assert client.post(COMMAND_PATH, content=tampered, headers=headers).status_code == 401
+    with sessions() as db:
+        assert db.get(CoreBridgeIdentityORM, KEY_ID).active
+
+
+def test_command_rejects_old_step_up_even_with_valid_hmac(bridge_client):
+    client, sessions = bridge_client
+    body, headers = command_request("revoke_identity")
+    parsed = json.loads(body)
+    parsed["step_up_at"] = int(datetime.now(UTC).timestamp()) - 360
+    tampered = json.dumps(parsed, sort_keys=True, separators=(",", ":")).encode()
+    headers["X-FM-Command-Signature"] = sign_command_control(
+        key=COMMAND_KEY, key_id=COMMAND_KEY_ID,
+        timestamp=headers["X-FM-Command-Timestamp"],
+        nonce=headers["X-FM-Command-Nonce"], body=tampered,
+    )
+    assert client.post(COMMAND_PATH, content=tampered, headers=headers).status_code == 401
+    with sessions() as db:
+        assert db.get(CoreBridgeIdentityORM, KEY_ID).active
