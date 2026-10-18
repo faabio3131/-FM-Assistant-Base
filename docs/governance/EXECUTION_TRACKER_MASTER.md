@@ -545,3 +545,37 @@ PENDENCIAS:
 MERGE: NÃO PERMITIDO ENQUANTO F3/GATES OBRIGATORIOS NAO ESTIVEREM 100% GREEN.
 DEPLOY/SEGREDOS REAIS/MIGRATION PRODUCAO: EXIGEM AUTORIZAÇÃO HUMANA.
 KORDENA: READ-ONLY.
+
+
+2026-10-18 — F3.7.2 AUTHENTICATED CORE ↔ ASSISTANT BRIDGE
+FASE: F3 IN_PROGRESS; BRIDGE CONTRATO E E2E SINTÉTICO = GREEN INTERMEDIÁRIO.
+HEAD FUNCIONAL ASSISTANT: 21406566f71f31e903e13348d526b5d1c34973f1
+HEAD CORE FUNCIONAL: da05ca3e736197069ac87695e2859671fca142e0
+AÇÕES:
+- identidade plataforma Core com key_id ativo/revogável persistido no Assistant;
+- grants exatos por tenant/unidade/capability;
+- HMAC-SHA256 por corpo bruto, TTL 60s, nonce criptográfico único e anti-replay de banco;
+- migration Assistant 20261018_0005 aditiva, sem criar credencial/identidade real;
+- transação conjunta para autorização + auditoria de nonce e leitura de versão do segredo;
+- HTTPS obrigatório no cliente Core, timeout limitado, sem redirect/retry e sem fallback FM em BYOK negado;
+- Core passa unidade+capability à resolução autenticada;
+- configuração opt-in via secret manager, desabilitada por padrão.
+EVIDÊNCIAS:
+- Assistant Actions push 39135485241 SUCCESS, PR 39135488843 SUCCESS (schema/tests);
+- Assistant Core-Bridge Contract push 39135485263 SUCCESS, PR 39135488877 SUCCESS (E2E);
+- Core Actions push 39135214051 SUCCESS, PR 39135217217 SUCCESS (contrato cliente);
+- documentação: docs/governance/F3_7_2_CORE_ASSISTANT_SIGNED_BRIDGE.md;
+- Core documentação: docs/F3_7_2_CORE_ASSISTANT_BRIDGE_CLIENT.md;
+- testes de HMAC real Core→Assistant, cross-tenant/unit/capability, grant revogado, nonce replay,
+  identidade revogada, rotação, audit, migration additive.
+GATE: implementação de bridge sintética GREEN INTERMEDIÁRIO;
+F3 GLOBAL: IN_PROGRESS; F4 NOT_STARTED; sem merge global.
+PENDÊNCIAS OBRIGATÓRIAS:
+- provisionamento governado de identidades/grants pelo Command;
+- infraestrutura de rede privada, TLS/ACL/rate limit e segredos de serviço reais;
+- integração de AI providers tenant-scoped e Vault externo;
+- testes PostgreSQL reais para locking/revoke/nonce sob concorrência;
+- incident response, observabilidade, security gate e homologação de provider/credenciais.
+PROIBIÇÕES:
+- não executar migrations no banco real, deploy/cutover ou ativar credencial real sem autorização humana;
+- não alterar Kordena; não tratar simulação E2E como homologação produtiva.
