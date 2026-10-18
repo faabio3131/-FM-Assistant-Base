@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
-    CheckConstraint, DateTime, ForeignKeyConstraint, Integer, String, func, select,
+    BigInteger, CheckConstraint, DateTime, ForeignKeyConstraint, Integer, String, func, select,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
@@ -57,7 +57,7 @@ class AIQuotaReservationRecord(ControlPlaneBase):
     unit_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     capability: Mapped[str] = mapped_column(String(80), primary_key=True)
     request_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    period: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    period: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     policy_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     reserved_units: Mapped[int] = mapped_column(Integer, nullable=False)
     consumed_units: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -101,7 +101,7 @@ class QuotaReservations:
         request_id: str, units: int, at: datetime,
     ) -> AIQuotaReservationRecord:
         scope = (tenant_id, unit_id, capability)
-        if not all(_valid_id(i) for i in (*scope, request_id)):
+        if not all(_valid_id(i) for i in (*scope, request_id)) or len(capability) > 80:
             raise QuotaDenied("core_quota.invalid_scope")
         if type(units) is not int or not 0 < units <= 2_000_000_000:
             raise QuotaDenied("core_quota.invalid_units")
@@ -116,9 +116,7 @@ class QuotaReservations:
                     raise QuotaDenied("core_quota.request_conflict")
                 return old
             consumed = db.scalar(select(func.coalesce(func.sum(
-                AIQuotaReservationRecord.reserved_units -
-                AIQuotaReservationRecord.consumed_units +
-                AIQuotaReservationRecord.consumed_units,
+                AIQuotaReservationRecord.reserved_units,
             ), 0)).where(
                 AIQuotaReservationRecord.tenant_id == tenant_id,
                 AIQuotaReservationRecord.unit_id == unit_id,
