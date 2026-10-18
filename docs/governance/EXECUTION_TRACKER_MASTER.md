@@ -772,3 +772,6 @@ PENDÊNCIAS:
 - FinOps de custo/token real, preço desconhecido auditado (nunca zero fictício), fallback seguro BYOK/FM, observabilidade, revisão independente e homologação de provedores/TLS/ACL/Vault.
 - Real PostgreSQL de staging/credenciais/provedores exige autorização humana específica.
 RESTRIÇÕES: sem merge das PRs F3, deploy, migration real, mudança produtiva de secret ou promoção de F4. Kordena read-only.
+
+2026-10-18 — F3.8.3 PERSISTENT CIRCUIT AND GUARDED RUNTIME
+F3=IN_PROGRESS; F4=NOT_STARTED. FM Core PR #1 implemented provider circuit state locking/fencing with migration f3_0004 and PostgreSQL16 single-probe concurrency tests. CoreControlPlaneAIRuntime supports opt-in quota request admission (one technical request unit, not monetary spend), unique execution replay denial, conservative timeout retention, and provider circuit enforcement. BYOK is rejected under provider-wide breaker until tenant/credential partitioning; mixed BYOK/FM fallback is prohibited. Guards are NOT automatically enabled in production. Source: FM Core docs/F3_8_3_PERSISTENT_CIRCUIT_QUOTA_RUNTIME.md and AGENTS.md. Pending: authoritative Assistant quota projection, provider cost/token settlement, real FinOps, retention, security review, TLS/ACL/Vault and staging. No merge, deployment, real credentials or persistent migration.
