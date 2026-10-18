@@ -14,7 +14,7 @@ from core.ai_control_plane_runtime import (
     CoreControlPlaneAIRuntime,
     FMManagedCredentialResolver,
 )
-from core.ai_router import CapabilityIA, FalhaRotaTransitoria, MedidorUsoIAEmMemoria
+from core.ai_router import CapabilityIA, FalhaRotaDefinitiva, MedidorUsoIAEmMemoria
 from core.ai_service_contracts import TextMessage
 from core.seguranca.segredos import ReferenceSecretStore, SecretValue
 
@@ -22,6 +22,17 @@ from core.seguranca.segredos import ReferenceSecretStore, SecretValue
 class Resolver:
     def __init__(self):
         self.calls = []
+
+    def resolve_for_request(
+        self, *, tenant_id, unit_id, capability, credential_source, secret_reference
+    ):
+        assert unit_id == "unit-1"
+        assert capability == "atendimento_interpretacao"
+        return self.resolve(
+            tenant_id=tenant_id,
+            credential_source=credential_source,
+            secret_reference=secret_reference,
+        )
 
     def resolve(self, *, tenant_id, credential_source, secret_reference):
         self.calls.append((tenant_id, credential_source, secret_reference))
@@ -142,7 +153,7 @@ def test_default_resolver_refuses_byok_before_provider_call(monkeypatch):
     )
     called = []
     monkeypatch.setattr("core.ai_providers.httpx.post", lambda *a, **kw: called.append(a))
-    with pytest.raises(FalhaRotaTransitoria, match="core_ai_credential_unavailable"):
+    with pytest.raises(FalhaRotaDefinitiva, match="core_ai_credential_unavailable"):
         _generate(runtime, "tenant-a")
     assert called == []
 
