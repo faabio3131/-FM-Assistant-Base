@@ -99,6 +99,18 @@ Referência GitHub (somente leitura):
   sem certificação integral, merge ou homologação real comprovada.
   Não copiar nem declarar operação pronta sem corrigir/reexecutar
   os testes pertinentes e revisar as fronteiras de autoridade.
+- **FM Command PR #91**, branch candidata com SHA
+  `7fde1e1c95d7e77547e5b6f088939311be06518f`,
+  também **Draft**: editor de preço/periodicidade em BRL e franquia
+  `ai.budget.<capability>` em USD interno, validação de valores
+  decimais sem float, preview, step-up e workflows corporativos
+  de `plan_version.*` / `price.*`. Seus 3 workflows exibidos
+  estavam SUCCESS na inspeção, porém a PR permanece aberta, não
+  representa publicação nem homologação. **Reaproveitar o padrão**
+  de editor versionado/autoridade FM, adaptando-o a
+  `product_id=VENDEATENDEIA`, planos sem feature gating, preços
+  configuráveis e quotas de tokens/requests além do orçamento em USD.
+  Não copiar IDs fixos de quatro planos do Kordena.
 - **Diferença para VendeAtendeIA:** o budget inicial do Kordena é em
   USD por **unidade** e por capability; nosso SaaS também exige tetos
   de tokens, requests, capacidades e, quando configurado, orçamento
