@@ -1,0 +1,109 @@
+# FM Assistant + FM Core — Planos, quotas e consumo de IA
+
+**Data:** 2026-10-18  
+**Status:** arquitetura de implementação em andamento; não define valores comerciais finais  
+**Autoridade:** FM Assistant (plano, licença e entitlements) → FM Core (execução, roteamento, contador e FinOps) → FM Command (visão corporativa e governança).
+
+## Princípio econômico
+
+**A FM Tecnologia fornece e paga pelos modelos de IA.** O cliente adquire uma
+assinatura do software, não uma conta pessoal em cada provedor. O custo técnico
+é interno à FM, rastreado por tenant, unidade, produto, capability, modelo e
+tentativa. A cobrança comercial de mensalidade, overage eventual e planos
+pertence ao Assistant/billing e jamais é confundida com gasto técnico do Core.
+
+## Configuração comercial sem hardcoding de níveis
+
+O catálogo admite qualquer quantidade de planos (exemplos comerciais a
+definir posteriormente: Essencial / Profissional / Empresarial). Cada
+`plan_code` suporta múltiplas revisões **imutáveis**, para modificar limites,
+recursos habilitados ou prazos sem editar código. Cada cliente fixa
+`plan_code + plan_revision` em sua licença, evitando que uma edição de plano
+mude silenciosamente as regras de assinantes existentes.
+
+Métricas candidatas configuráveis, por capacidade e período:
+
+| Recurso | Unidade medida | Escopo possível |
+|---|---|---|
+| `ai.requests` | requisições lógicas | tenant / unidade |
+| `ai.total_tokens` | tokens de entrada, saída e tentativas de fallback | tenant / unidade |
+| `ai.input_tokens`, `ai.output_tokens`, `ai.cached_tokens` | tokens por categoria | tenant / unidade |
+| `ai.cost_usd_microunits` | orçamento técnico interno em milionésimos de USD | tenant |
+| `audio.seconds` | segundos processados | tenant / unidade |
+| `whatsapp.messages` | mensagens elegíveis | tenant / unidade |
+| `crm.leads`, `automation.executions` | unidades de funcionalidade | tenant / unidade |
+| `storage.bytes`, `users.seats`, `units.active` | capacidade de operação | tenant |
+
+Não definir números, preços ou limites de mercado até decisão comercial.
+Para IA, limites ausentes devem negar a operação **quando o controle estiver
+ativado**; `NULL` nunca significa ilimitado.
+
+**Períodos:** diário/semanal/mensal/ciclo de assinatura conforme policy
+versionada. O período efetivo precisa permanecer contido no intervalo
+válido da licença; `trial`, `active`, `suspended`, `canceled` e expiração
+são tratados pelo Assistant.
+
+## Fluxo de execução comercial (alvo técnico)
+
+1. Assistant valida tenant/unidade e assinatura ativa/trial, obtém revision
+   fixada e resolve as cotas para o recurso solicitado.
+2. Entitlement projetado para Core por **contrato de serviço autenticado,
+   versionado, com integridade, expiração, revogação e isolamento de escopo**.
+   Nenhum tenant publica ou eleva suas próprias quotas.
+3. Core valida token de autoridade e policy vigente, calcula orçamento
+   conservador de chamadas e fallback, reserva atomicamente as métricas
+   **compartilhadas por tenant e por unidade** antes de cada execução.
+4. Caso o saldo de qualquer métrica termine, a transação toda é rejeitada
+   (por exemplo `PLAN_LIMIT_REACHED`), sem nova chamada ao provedor ou
+   cobrança técnica adicional provocada pelo bloqueio.
+5. Para operações aceitas, adapter aplica teto de geração e emite eventos
+   de uso por tentativa (inclusive fallback, timeout e erro). O Core
+   concilia o consumo real, confirma settlement e libera somente a parte
+   da reserva que foi comprovadamente não utilizada.
+6. Em uso ambíguo o orçamento permanece reservado, com alerta e workflow
+   administrativo de reconciliação. Nunca assumir custo zero sem prova.
+7. Assistant disponibiliza consumo, saldo, % utilizado, data de renovação,
+   aviso antecipado e caminho para upgrade; Command consolida receita, custo
+   interno da IA, margem e risco, por produto e organização.
+
+**Eventos importantes:** `quota_reserved`, `quota_denied`,
+`usage_observed`, `usage_unknown`, `quota_settled`,
+`period_reset`, `plan_changed`, `license_suspended`,
+`quota_warning_80_percent`. Percentuais são exemplos configuráveis
+de alerta, não limiares comerciais definitivos.
+
+**Overage:** por padrão, hard stop. Comprar excedentes, carry-over,
+burst, throttling ou upgrade automático serão decisões explícitas do
+produto e do plano; jamais consumo ilimitado implícito.
+
+## CURRENT implementado, sem alegação de homologação
+
+- `assistant_plan_versions`, `assistant_plan_limits`: catálogo versionado
+  e limites positivos por métrica e escopo.
+- `assistant_tenant_licenses.plan_revision`: fixação de revisão por licença,
+  opcional para retrocompatibilidade. Sem revisão, leitor nega uso de
+  quota, não inventa regra.
+- `PlanLimitResolver`: valida tenant/unidade, status, validade e plano
+  antes de resolver limite publicado/revisionado.
+- No Core, `QuotaReservations.reserve_bundle` e `settle_bundle`
+  transacionam métricas em conjunto, com row lock de políticas, soma de
+  reservas/consumo, idempotência, bloqueio de replay e rollback total.
+  Um identificador técnico `__tenant__` é usado em testes internos para
+  o orçamento agregado do tenant; o **projetor confiável** deve produzir
+  essa chave, jamais confiar no ID fornecido pelo cliente.
+- Testes de concorrência PostgreSQL16 provam que duas unidades simultâneas
+  não conseguem ultrapassar o mesmo orçamento técnico.
+
+**PENDÊNCIAS DE CONSTRUÇÃO, executar antes da homologação externa:**
+provisionamento assinado/revisionado Assistant→Core; cadastro e alteração
+de plano protegidos por autoridade FM; vinculação de licença,
+suspensão/expiração imediata de orçamento; implementação do guard obrigatório
+no composition root; preflight com limites reais nos adapters; conciliação
+oficial de tentativas/tokens/custo, dashboards e alertas; F9 billing/upgrade
+e SaaS entitlements UI; teste E2E sintético ponta a ponta.
+
+**CONFIGURAÇÕES EXTERNAS ADIADAS:** credenciais de modelos, Vault, ambientes
+reais, gateways de assinatura, pagamentos reais, rede/TLS e homologação
+com terceiros. Essas pendências **não impedem** a construção integral.
+
+**Não classificar software como 100% concluído antes dos gates internos.**
