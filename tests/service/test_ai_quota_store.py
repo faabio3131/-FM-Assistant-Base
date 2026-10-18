@@ -127,3 +127,30 @@ def test_request_replay_after_policy_revision_is_rejected(quota):
         reserve(store, "prior", units=1)
     with pytest.raises(QuotaDenied, match="limit_exceeded"):
         reserve(store, "new", units=1)
+
+
+def test_pending_quota_reconciliation_is_scoped_read_only(quota):
+    store, sessions = quota
+    reserve(store, "ambiguous", units=1, tenant="a", unit="u1")
+    reserve(store, "other-tenant", tenant="b", unit="u1")
+    reserve(store, "success", units=1, tenant="a", unit="u1")
+    settle(store, "success", consumed=1, tenant="a", unit="u1")
+    cutoff = NOW + timedelta(minutes=1)
+    pending = store.pending_for_reconciliation(
+        tenant_id="a", unit_id="u1", capability="text", older_than=cutoff,
+    )
+    assert [p.request_id for p in pending] == ["ambiguous"]
+    assert store.pending_for_reconciliation(
+        tenant_id="a", unit_id="u2", capability="text", older_than=cutoff,
+    ) == ()
+    assert [p.request_id for p in store.pending_for_reconciliation(
+        tenant_id="b", unit_id="u1", capability="text", older_than=cutoff,
+    )] == ["other-tenant"]
+    with pytest.raises(QuotaDenied, match="invalid_limit"):
+        store.pending_for_reconciliation(
+            tenant_id="a", unit_id="u1", capability="text",
+            older_than=cutoff, limit=1000,
+        )
+    with sessions() as db:
+        records = db.scalars(select(AIQuotaReservationRecord)).all()
+        assert len(records) == 3  # query did not modify/erase reservations
