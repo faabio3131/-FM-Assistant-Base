@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -138,3 +139,44 @@ def test_invalid_date_range_fails_closed(ledger):
             inicio=date(2026, 10, 19),
             fim=date(2026, 10, 18),
         )
+
+
+def test_request_finops_reconciliation_reports_unknown_without_zeroing(ledger):
+    store, _ = ledger
+    store.add_price_snapshot(price())
+    store.registrar(event(request="request-a"))
+    store.registrar(replace(
+        event(request="request-a", price_id="unknown-snapshot"),
+        fallback_used=True, fallback_reason="timeout", inp=None, out=None,
+    ))
+    summary = store.reconcile_request(
+        tenant_id="a", unit_id="u", request_id="request-a",
+    )
+    assert summary.total_attempts == 2
+    assert summary.known_attempts == 1
+    assert summary.unknown_attempts == 1
+    assert summary.fallback_attempts == 1
+    assert summary.known_total == Decimal("0.05")
+    assert summary.currency == "USD"
+    assert summary.settled is False
+    assert store.reconcile_request(
+        tenant_id="b", unit_id="u", request_id="request-a",
+    ).total_attempts == 0
+    assert store.reconcile_request(
+        tenant_id="a", unit_id="different", request_id="request-a",
+    ).settled is False
+
+
+def test_request_finops_reconciliation_marks_fully_known_attempts(ledger):
+    store, _ = ledger
+    store.add_price_snapshot(price())
+    store.registrar(event(request="complete"))
+    complete = store.reconcile_request(
+        tenant_id="a", unit_id="u", request_id="complete",
+    )
+    assert complete.known_attempts == 1
+    assert complete.unknown_attempts == 0
+    assert complete.settled is True
+    assert complete.known_total == Decimal("0.05")
+    with pytest.raises(ValueError, match="invalid_request_scope"):
+        store.reconcile_request(tenant_id="a", unit_id="u", request_id=" ")
