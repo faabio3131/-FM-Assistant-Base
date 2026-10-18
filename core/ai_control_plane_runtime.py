@@ -19,15 +19,15 @@ from core.ai_router import (
     FalhaRotaTransitoria,
     MedidorUsoIA,
     MedidorUsoIAEmMemoria,
-    SolicitacaoIA,
     RespostaModeloIA,
     RotaIA,
+    SolicitacaoIA,
 )
 from core.ai_service_contracts import CoreAIResult, TextMessage, TextRequestContent
 from core.ai_service_runtime import _result
 from core.ai_service_settings import ProviderRouteSettings
-from core.seguranca.segredos import SecretStore, SecretValue
 from core.seguranca.erros import ReferenciaSegredoInvalida, SegredoAusente
+from core.seguranca.segredos import SecretStore, SecretValue
 
 
 class CoreCredentialResolver(Protocol):
