@@ -9,8 +9,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -21,8 +21,8 @@ from .core_bridge_models import (
     CoreBridgeIdentityORM,
 )
 from .core_byok_release_policy import CoreBYOKReleasePolicy
-from .db import IntegrationConnectionORM, IntegrationSecretVersionORM
 from .credential_vault import CredentialVault
+from .db import IntegrationConnectionORM, IntegrationSecretVersionORM
 
 PATH = "/internal/v1/core/credentials/resolve"
 KEY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
