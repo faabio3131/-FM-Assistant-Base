@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from core.ai_admin_read_api import register_admin_read_routes
+from core.ai_assistant_credential_gateway import AssistantSignedCredentialGateway
 from core.ai_control_plane import ControlPlaneError
 from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
@@ -76,8 +77,18 @@ def create_app(
         app.state.settings = cfg
         db_engine = None
         if cfg.persistent_control_plane:
+            tenant_gateway = (
+                AssistantSignedCredentialGateway(
+                    base_url=cfg.assistant_bridge_url or "",
+                    key_id=cfg.assistant_bridge_key_id or "",
+                    signing_key=cfg.assistant_bridge_signing_key or "",
+                )
+                if cfg.assistant_bridge_url
+                else None
+            )
             ai_runtime, db_engine = build_persistent_core(
-                cfg.control_plane_database_url or ""
+                cfg.control_plane_database_url or "",
+                tenant_gateway=tenant_gateway,
             )
         else:
             ai_runtime = runtime or CoreAIRuntime.from_settings(cfg)
