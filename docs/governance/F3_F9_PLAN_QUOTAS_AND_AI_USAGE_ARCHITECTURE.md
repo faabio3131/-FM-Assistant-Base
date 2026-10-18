@@ -93,6 +93,14 @@ produto e do plano; jamais consumo ilimitado implícito.
   essa chave, jamais confiar no ID fornecido pelo cliente.
 - Testes de concorrência PostgreSQL16 provam que duas unidades simultâneas
   não conseguem ultrapassar o mesmo orçamento técnico.
+- `QuotaReservations.usage_snapshot` fornece saldo por recurso e escopo:
+  limite, consumido, reservado/pendente, saldo restante, revisão e fim da
+  janela, sem misturar consumo entre tenants.
+- Adapters Gemini e OpenAI-compatible transmitem teto de tokens de saída
+  configurado no payload (`maxOutputTokens` / `max_tokens`); testes
+  sintéticos verificam presença e rejeição de limites inválidos. Até
+  completar guarda de input e ingestão de policies, não considerar teto
+  isolado garantia de orçamento máximo.
 
 **PENDÊNCIAS DE CONSTRUÇÃO, executar antes da homologação externa:**
 provisionamento assinado/revisionado Assistant→Core; cadastro e alteração
