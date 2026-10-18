@@ -20,6 +20,7 @@ from core.ai_quota_store import (
     AIQuotaPolicyRecord,
     AIQuotaReservationRecord,
     QuotaDenied,
+    QuotaRequirement,
     QuotaReservations,
 )
 
@@ -142,3 +143,59 @@ def test_pg_circuit_only_one_half_open_claim(postgres_quota):
         row = db.get(ProviderCircuitRecord, "provider-ci")
         assert row.phase == CircuitPhase.HALF_OPEN
         assert row.probe_id
+
+
+def test_pg_shared_tenant_budget_across_units_is_atomic(postgres_quota):
+    """Parallel units cannot evade a shared plan-wide token ceiling."""
+    store, sessions = postgres_quota
+    with sessions.begin() as db:
+        for scope, metric, limit in (
+            ("__tenant__", "ai.total_tokens", 1000),
+            ("unit-a", "ai.requests", 5),
+            ("unit-b", "ai.requests", 5),
+        ):
+            key = ("tenant-budget-ci", scope, metric)
+            old = db.get(AIQuotaPolicyRecord, key)
+            if old is None:
+                db.add(AIQuotaPolicyRecord(
+                    tenant_id=key[0], unit_id=key[1], capability=key[2],
+                    limit_units=limit, window_seconds=60, revision=1,
+                ))
+        db.flush()
+    barrier = Barrier(2)
+
+    def reserve(unit: str) -> str:
+        barrier.wait(timeout=8)
+        try:
+            store.reserve_bundle(
+                request_id=f"request-{unit}", at=NOW,
+                needs=(
+                    QuotaRequirement(
+                        tenant_id="tenant-budget-ci", unit_id=unit,
+                        capability="ai.requests", units=1,
+                    ),
+                    QuotaRequirement(
+                        tenant_id="tenant-budget-ci", unit_id="__tenant__",
+                        capability="ai.total_tokens", units=700,
+                    ),
+                ),
+            )
+            return "accepted"
+        except QuotaDenied:
+            return "denied"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(reserve, "unit-a")
+        second = pool.submit(reserve, "unit-b")
+        assert sorted((first.result(timeout=20), second.result(timeout=20))) == [
+            "accepted", "denied",
+        ]
+    with sessions() as db:
+        rows = db.scalars(select(AIQuotaReservationRecord).where(
+            AIQuotaReservationRecord.tenant_id == "tenant-budget-ci",
+        )).all()
+        assert len(rows) == 2
+        assert {item.capability for item in rows} == {
+            "ai.requests", "ai.total_tokens",
+        }
+        assert len({item.request_id for item in rows}) == 1
