@@ -693,3 +693,19 @@ LIMITES: implementado, NÃO certificado porque GitHub Actions Command segue sem 
 GATE: NOT_TESTED / BLOCKED_EXTERNAL Command; Assistant/Core próprios CIs continuaram GREEN no checkpoint anterior, mas não substituem o Command.
 MERGE: NÃO. DEPLOY/PROD/MIGRATION REAL: NÃO. Kordena read-only.
 PRÓXIMO PASSO: desbloquear CI Command, executar suites completas inclusive cross-runtime e auditoria; corrigir falhas; implementar e certificar reconciliação segura sem reenvio automático.
+
+
+2026-10-18 — F3.7.7 SIGNED RECONCILIATION CHECKPOINT
+FASE: F3 IN_PROGRESS, F4 NOT_STARTED; nenhuma PR mergeada.
+IMPLEMENTADO NO ASSISTANT:
+- Migration aditiva 20261018_0007: unique index em assistant_command_bridge_control_events.command_request_id; rollback integral de uma mutation duplicada.
+- Serviço/endpoint POST /internal/v1/command/core-bridge/status, HMAC com domínio separado da rota /manage, same actor/org/tenant/unit/capability/target e recent step-up.
+- Consulta de resultado status applied + exact outcome / denied / unknown; nenhum secret retornado ou mutation executada; unknown nunca autoriza retry.
+- Testes de unicidade, replay, HMAC path, cross-scope/actor, schema e integridade. Evidência Assistant SHA c65f05f73546380f1641611d96d6a3bd74c3a0b3: 6/6 CI SUCCESS (push+PR em SaaS, Postgres16 e bridge).
+IMPLEMENTADO NO COMMAND PRIVADO (PR #90 Draft):
+- cliente de consulta HMAC e rota de status com sessão Better Auth corporativa, owner/admin, step-up, consulta de intent do próprio ator no audit event; scope vem do intent e não do caller.
+- unit tests para consulta e security, e Node signed status -> Assistant ASGI cross-runtime extendido; checkout Assistant c65f05f7 pinado.
+- CI Command privado ainda finaliza antes de steps; novo código/testes = NOT_TESTED/BLOCKED_EXTERNAL e NÃO HOMOLOGADO.
+BLOQUEIOS: corrigir account runner/billing/configuração GitHub Actions; executar CI integral real, revisão independente; Vault/TLS/ACL/rate limits/quotas/observabilidade/providers e homologações.
+AÇÃO DO PROPRIETÁRIO QUANDO NECESSÁRIO: conferir GitHub Billing & licensing → Payment information e Budgets & alerts/erros de Actions; não compartilhar cartão/segredos; providenciar aprovação expressa antes de qualquer credencial real/deploy não descartável.
+MERGE NÃO. DEPLOY NÃO. KORDENA READ-ONLY.
