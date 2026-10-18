@@ -285,3 +285,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Assistant introduziu ledger de nonce `assistant_command_bridge_status_nonce` + migration aditiva `20261018_0008`, com teste PostgreSQL 16 de consultas concorrentes/replay, HEAD funcional `303747d8efe33536af796d75c698bf01864409a5` 6/6 SUCCESS.
 - Não altera a autoridade do FM Core: Core continua consumindo credenciais somente após verificação de identidade, tenant/unidade/capability e grants pelo Assistant, e nunca consulta o Command para autoautorizar acesso.
 - Não há deployment, credenciais reais nem homologação de rede/Vault: F3 IN_PROGRESS e F4 NOT_STARTED; PRs continuam Draft e merge condicionado aos gates da fase.
+
+## F3.8 — Quotas, Circuit & FinOps: design candidate (2026-10-18)
+
+- O arquivo `docs/F3_8_QUOTAS_CIRCUIT_FINOPS_DESIGN_CANDIDATE.md` é **proposta técnica**, não implementação, homologação nem arquitetura aprovada.
+- CURRENT: route resolver exige provider healthy/circuit closed; transição automatizada e breaker distribuído/half-open não foram certificados. Usage/FinOps persistente não equivale a reserva/limite preventivo.
+- Implementação futura deve exigir token/custo/quota determinísticos pré-provider, idempotência e settlement reconciliável, circuit state distribuído, half-open probe com lease/fencing, limites por tenant/unidade/capability e sem bypass BYOK→FM-managed.
+- Antes de criar migrations ou alterar runtime, revisar a proposta contra ADRs, impor testes concorrentes PostgreSQL e não assumir defaults econômicos sem decisão explícita.
+- F3 IN_PROGRESS; F3.8 DESIGN_CANDIDATE, não GREEN; sem merge/deploy/providers reais.
