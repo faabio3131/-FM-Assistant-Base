@@ -10,7 +10,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, DateTime, ForeignKeyConstraint, Integer, String, func, select,
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    func,
+    select,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
