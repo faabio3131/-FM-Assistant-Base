@@ -29,9 +29,9 @@ FM Assistant API
       |
       +--> ModelGateway
               |
-              +--> desenvolvimento
-              +--> OpenAI-compatible temporário
-              +--> FM Core Base (destino arquitetural)
+              +--> desenvolvimento (somente dev/test)
+              +--> OpenAI-compatible direto (compatibilidade controlada)
+              +--> FM Core Base (CURRENT integrado; obrigatório em staging/produção)
 ```
 
 ## Regra de isolamento
@@ -73,9 +73,13 @@ retrieval híbrido/RAG governado sem alterar o contrato do Conversation Engine.
 
 O domínio depende de `ModelGateway`, não de SDK de provider.
 
-O adapter `OpenAICompatibleGateway` permite operação temporária com endpoints
-compatíveis. A arquitetura alvo é um adapter para o FM Core Base, que será responsável
-por roteamento multimodelo, fallback, FinOps e políticas de modelo.
+O `CoreModelGateway` e o `CoreAudioTranscriber` já integram oficialmente o
+FM Assistant Base ao FM Core Base. O Core é responsável por roteamento multimodelo,
+fallback e evolução das políticas de modelo.
+
+O `OpenAICompatibleGateway` direto permanece apenas como compatibilidade controlada.
+Conforme ADR-002, staging/produção devem utilizar o backend `core`, salvo exceção
+formal aprovada.
 
 ## Segurança
 
@@ -87,15 +91,29 @@ por roteamento multimodelo, fallback, FinOps e políticas de modelo.
 - gateway de desenvolvimento proibido em staging/production
 - handoff explícito para humano
 
-## Próximas capacidades
+## CURRENT certificado
 
-1. adapter oficial para FM Core Base
-2. WhatsApp como channel adapter desacoplado
-3. webchat/Instagram
-4. CRM/lead plugin
-5. pipeline comercial e lead scoring
-6. scheduling/follow-up
-7. RAG híbrido e embeddings
-8. billing/metering por tenant
-9. painel administrativo
-10. webhooks e SDK público
+Já fazem parte da linha canônica:
+
+1. integração oficial com FM Core Base;
+2. WhatsApp/Meta como channel adapter desacoplado;
+3. texto e áudio;
+4. persona tenant-scoped;
+5. knowledge textual tenant-scoped;
+6. conversation engine;
+7. handoff state;
+8. auditoria;
+9. migrations;
+10. CI/testes da fundação.
+
+## TARGET aprovado
+
+A sequência futura é regida por:
+
+- `docs/governance/SYSTEM_DESIGN_MASTER_V1.md`;
+- ADR-001 a ADR-006;
+- `docs/governance/PROMPT_MESTRE_EXECUCAO_INTEGRAL_V1.md`.
+
+Inclui Identity/RBAC, Control Plane, Integration Fabric, BYOK, CRM/Sales Pack,
+follow-up, RAG governado, human inbox, frontend comercial, billing, observabilidade
+e readiness de produção.
