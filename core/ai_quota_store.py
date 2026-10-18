@@ -7,7 +7,7 @@ row-level locking in deployment. SQLite is used for sequential unit tests.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy import (
@@ -93,6 +93,19 @@ class QuotaRequirement:
     unit_id: str
     capability: str
     units: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class QuotaUsageSnapshot:
+    tenant_id: str
+    unit_id: str
+    capability: str
+    limit_units: int
+    reserved_units: int
+    consumed_units: int
+    remaining_units: int
+    period_ends_at: datetime
+    policy_revision: int
 
 
 class QuotaReservations:
@@ -328,3 +341,40 @@ class QuotaReservations:
                 row.state = ReservationState.SETTLED
                 row.consumed_units = consumed
             db.flush()
+
+    def usage_snapshot(
+        self, *, tenant_id: str, unit_id: str,
+        capability: str, at: datetime,
+    ) -> QuotaUsageSnapshot:
+        """Scoped, read-only plan usage for alerts and commercial dashboards."""
+        scope = (tenant_id, unit_id, capability)
+        if not all(_valid_id(k) for k in scope) or len(capability) > 80:
+            raise QuotaDenied("core_quota.invalid_scope")
+        now = _utc(at)
+        with self._sessions() as db:
+            policy = self._policy(db, scope)
+            period = int(now.timestamp()) // policy.window_seconds
+            rows = db.scalars(select(AIQuotaReservationRecord).where(
+                AIQuotaReservationRecord.tenant_id == tenant_id,
+                AIQuotaReservationRecord.unit_id == unit_id,
+                AIQuotaReservationRecord.capability == capability,
+                AIQuotaReservationRecord.period == period,
+            )).all()
+            reserved = sum(
+                row.reserved_units for row in rows
+                if row.state == ReservationState.RESERVED
+            )
+            spent = sum(
+                row.consumed_units for row in rows
+                if row.state == ReservationState.SETTLED
+            )
+            return QuotaUsageSnapshot(
+                tenant_id=tenant_id, unit_id=unit_id, capability=capability,
+                limit_units=policy.limit_units, reserved_units=reserved,
+                consumed_units=spent,
+                remaining_units=max(0, policy.limit_units - reserved - spent),
+                period_ends_at=datetime.fromtimestamp(
+                    period * policy.window_seconds, tz=UTC,
+                ) + timedelta(seconds=policy.window_seconds),
+                policy_revision=policy.revision,
+            )
