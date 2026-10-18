@@ -161,11 +161,7 @@ def _route_from_payload(payload: Any) -> ProviderRouteSettings:
             base_url=str(payload["base_url"]).rstrip("/"),
             api_key=api_key,
             timeout_seconds=float(payload.get("timeout_seconds", 30.0)),
-            max_output_tokens=(
-                payload.get("max_output_tokens")
-                if payload.get("max_output_tokens") is None
-                else int(payload["max_output_tokens"])
-            ),
+            max_output_tokens=payload.get("max_output_tokens"),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("configuraÃ§Ã£o de rota de IA invÃ¡lida") from exc
