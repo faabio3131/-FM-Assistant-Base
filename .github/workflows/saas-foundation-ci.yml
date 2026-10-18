@@ -27,5 +27,6 @@ jobs:
           tests/saas
           alembic/versions/20261017_0003_identity_tenant_rbac.py
           alembic/versions/20261018_0004_integration_control_plane.py
+          alembic/versions/20261018_0005_core_service_identity.py
       - name: Pytest
         run: pytest tests/saas
