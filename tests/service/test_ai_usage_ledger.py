@@ -147,7 +147,7 @@ def test_request_finops_reconciliation_reports_unknown_without_zeroing(ledger):
     store.registrar(event(request="request-a"))
     store.registrar(replace(
         event(request="request-a", price_id="unknown-snapshot"),
-        fallback_used=True, fallback_reason="timeout", inp=None, out=None,
+        fallback_used=True, fallback_reason="timeout", input_tokens=None, output_tokens=None,
     ))
     summary = store.reconcile_request(
         tenant_id="a", unit_id="u", request_id="request-a",
