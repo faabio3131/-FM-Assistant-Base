@@ -293,3 +293,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Implementação futura deve exigir token/custo/quota determinísticos pré-provider, idempotência e settlement reconciliável, circuit state distribuído, half-open probe com lease/fencing, limites por tenant/unidade/capability e sem bypass BYOK→FM-managed.
 - Antes de criar migrations ou alterar runtime, revisar a proposta contra ADRs, impor testes concorrentes PostgreSQL e não assumir defaults econômicos sem decisão explícita.
 - F3 IN_PROGRESS; F3.8 DESIGN_CANDIDATE, não GREEN; sem merge/deploy/providers reais.
+
+## F3.8.1–2 — Gate intermediário (2026-10-18)
+
+- A F3.8 possui agora circuit breaker **determinístico puro**, sem estado distribuído e sem conexão ao AIModelRouter; não afirmar que o circuito protege providers reais.
+- Novo ledger transacional de quotas por tenant/unidade/capability e request_id com policy row locking em PostgreSQL, reserve, settle, idempotência e limitação; migration aditiva `f3_0003`. É projeção técnica das decisões do Assistant, jamais autoridade de plano/licença do produto.
+- CI do Core (funcional `3dbab732d8fa9c2425d6ebaa8d560cd6b1fbcf21`): AI Service push/PR SUCCESS e novo gate PostgreSQL16 push/PR SUCCESS. Ver `docs/F3_8_1_2_EXECUTION_CERTIFICATION.md`.
+- Não ativar quotas nem breaker no runtime antes de fonte de policy autenticada, locks/leasing/fencing do breaker, testes de gasto/token/custo, monitoramento e controle de fallback.
+- F3.8.1/2 = GREEN INTERMEDIÁRIO sintético; F3.8 GLOBAL IN_PROGRESS, F3 GLOBAL IN_PROGRESS, F4 NOT_STARTED. Sem merge, deploy, credenciais reais ou migration em banco não descartável.
