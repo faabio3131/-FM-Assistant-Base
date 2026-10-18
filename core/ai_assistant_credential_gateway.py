@@ -106,7 +106,7 @@ class AssistantSignedCredentialGateway:
                 raise TenantCredentialDenied("core_control_plane.byok_denied")
             payload = response.json()
             if not isinstance(payload, dict):
-                raise ValueError("invalid_response")
+                raise TypeError("invalid_response")
             secret = payload.get("secret")
             if not isinstance(secret, str) or not secret or len(secret) > 8192:
                 raise ValueError("invalid_secret")
