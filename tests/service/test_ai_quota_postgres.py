@@ -13,6 +13,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
+from core.ai_circuit_breaker import CircuitDenied, CircuitPhase, CircuitPolicy
+from core.ai_circuit_state_store import PersistentCircuit, ProviderCircuitRecord
+from core.ai_control_plane import AIProvider
 from core.ai_quota_store import (
     AIQuotaPolicyRecord,
     AIQuotaReservationRecord,
@@ -91,3 +94,51 @@ def test_pg_same_request_is_idempotent_across_two_workers(postgres_quota):
         assert a.result(timeout=20) == b.result(timeout=20) == "stable-id"
     with sessions() as db:
         assert len(db.scalars(select(AIQuotaReservationRecord)).all()) == 1
+
+
+def test_pg_circuit_only_one_half_open_claim(postgres_quota):
+    """Two independent workers contend for a single provider probe lease."""
+    _, sessions = postgres_quota
+    with sessions.begin() as db:
+        provider = db.get(AIProvider, "provider-ci")
+        if provider is None:
+            db.add(AIProvider(
+                provider_id="provider-ci", adapter="gemini",
+                base_url="https://invalid.example", enabled=True,
+            ))
+        db.flush()
+        row = db.get(ProviderCircuitRecord, "provider-ci")
+        if row is None:
+            db.add(ProviderCircuitRecord(
+                provider_id="provider-ci", phase="open", failures=2,
+                until=NOW, probe_id=None, version=1,
+            ))
+        else:
+            row.phase = "open"
+            row.failures = 2
+            row.until = NOW
+            row.probe_id = None
+            row.version += 1
+    store = PersistentCircuit(
+        sessions, CircuitPolicy(threshold=2, cooldown_seconds=30, probe_seconds=5),
+    )
+    barrier = Barrier(2)
+
+    def attempt():
+        barrier.wait(timeout=8)
+        try:
+            return "claimed" if store.claim(
+                provider_id="provider-ci", now=NOW,
+            )[0] else "unexpected"
+        except CircuitDenied:
+            return "denied"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a, b = pool.submit(attempt), pool.submit(attempt)
+        assert sorted((a.result(timeout=20), b.result(timeout=20))) == [
+            "claimed", "denied",
+        ]
+    with sessions() as db:
+        row = db.get(ProviderCircuitRecord, "provider-ci")
+        assert row.phase == CircuitPhase.HALF_OPEN
+        assert row.probe_id
