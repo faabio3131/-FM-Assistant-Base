@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.ai_circuit_breaker import CircuitDenied, CircuitOutcome, CircuitPhase, CircuitPolicy
+from core.ai_circuit_breaker import CircuitDenied, CircuitOutcome, CircuitPolicy
 from core.ai_circuit_state_store import PersistentCircuit, ProviderCircuitRecord
 from core.ai_control_plane import AIProvider, ControlPlaneBase
 
