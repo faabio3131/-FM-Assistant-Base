@@ -85,11 +85,13 @@ def test_byok_circuit_denies_until_tenant_partition_is_proven(monkeypatch):
     store, circuit = _guarded_store(tenant_managed=True)
     calls = []
     monkeypatch.setattr("core.ai_providers.httpx.post", lambda *a, **k: calls.append(1))
+    resolver = Resolver()
     runtime = CoreControlPlaneAIRuntime(
-        control_plane=store, credentials=Resolver(), circuit=circuit,
+        control_plane=store, credentials=resolver, circuit=circuit,
     )
     with pytest.raises(FalhaRotaDefinitiva, match="byok_partition_required"):
         _call(runtime)
+    assert not resolver.calls  # BYOK key is never resolved on blocked route
     assert not calls
 
 
