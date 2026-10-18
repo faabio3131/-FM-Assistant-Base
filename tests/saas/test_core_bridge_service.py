@@ -15,14 +15,14 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.api import create_app
+from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
+from fm_assistant.command_bridge_control_service import sign_command_control
 from fm_assistant.core_bridge_models import (
     CoreBridgeAccessORM,
     CoreBridgeGrantORM,
     CoreBridgeIdentityORM,
 )
 from fm_assistant.core_bridge_service import sign_core_bridge
-from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
-from fm_assistant.command_bridge_control_service import sign_command_control
 from fm_assistant.credential_vault import FernetCredentialVault
 from fm_assistant.db import (
     EntitlementORM,
