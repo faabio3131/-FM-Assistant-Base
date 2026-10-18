@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Protocol
 
+from core.ai_circuit_breaker import CircuitDenied, CircuitOutcome
+from core.ai_circuit_state_store import PersistentCircuit
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneError, ResolvedCoreRoute
 from core.ai_providers import GeminiExecutor, OpenAICompatibleExecutor
 from core.ai_quota_store import QuotaReservations
@@ -59,10 +61,12 @@ class ScopedCoreExecutor(ExecutorModeloIA):
     """Resolve credentials only for the actually attempted route."""
 
     def __init__(
-        self, *, routes: tuple[ResolvedCoreRoute, ...], credentials: CoreCredentialResolver
+        self, *, routes: tuple[ResolvedCoreRoute, ...], credentials: CoreCredentialResolver,
+        circuit: PersistentCircuit | None = None,
     ) -> None:
         self._routes = {route.route.configuracao_id: route for route in routes}
         self._credentials = credentials
+        self._circuit = circuit
 
     def executar(self, *, rota: RotaIA, solicitacao: SolicitacaoIA) -> RespostaModeloIA:
         item = self._routes.get(rota.configuracao_id)
@@ -106,13 +110,52 @@ class ScopedCoreExecutor(ExecutorModeloIA):
             api_key=secret.reveal(),
             timeout_seconds=item.timeout_seconds,
         )
-        if item.adapter == "gemini":
-            return GeminiExecutor(settings).executar(rota=rota, solicitacao=solicitacao)
-        if item.adapter == "openai_compatible":
-            return OpenAICompatibleExecutor(settings).executar(
-                rota=rota, solicitacao=solicitacao
+        if item.adapter not in {"gemini", "openai_compatible"}:
+            raise FalhaRotaDefinitiva("core_ai_adapter_invalid")
+        lease: str | None = None
+        version = 0
+        if self._circuit is not None:
+            # Provider-wide health cannot safely represent independent BYOK
+            # credential health; reject until credential-partitioned fencing exists.
+            if item.credential_source != "fm_managed":
+                raise FalhaRotaDefinitiva("core_circuit.byok_partition_required")
+            try:
+                lease, version = self._circuit.claim(
+                    provider_id=rota.provider, now=datetime.now(UTC),
+                )
+            except CircuitDenied as exc:
+                # Never fall back implicitly across credentials on circuit denial.
+                raise FalhaRotaDefinitiva("core_circuit.unavailable") from exc
+        try:
+            executor = (
+                GeminiExecutor(settings) if item.adapter == "gemini"
+                else OpenAICompatibleExecutor(settings)
             )
-        raise FalhaRotaDefinitiva("core_ai_adapter_invalid")
+            response = executor.executar(rota=rota, solicitacao=solicitacao)
+        except FalhaRotaTransitoria:
+            if self._circuit is not None:
+                self._circuit.finish(
+                    provider_id=rota.provider, now=datetime.now(UTC),
+                    outcome=CircuitOutcome.TRANSIENT_FAILURE,
+                    probe_id=lease, version=version,
+                )
+            raise
+        except FalhaRotaDefinitiva:
+            if self._circuit is not None:
+                self._circuit.finish(
+                    provider_id=rota.provider, now=datetime.now(UTC),
+                    outcome=CircuitOutcome.DEFINITIVE_FAILURE,
+                    probe_id=lease, version=version,
+                )
+            raise
+        # An unknown/ambiguous executor exception conservatively leaves any
+        # half-open probe leased until timeout and requires explicit recovery.
+        if self._circuit is not None:
+            self._circuit.finish(
+                provider_id=rota.provider, now=datetime.now(UTC),
+                outcome=CircuitOutcome.SUCCESS, probe_id=lease, version=version,
+            )
+        return response
 
 
 class CoreControlPlaneAIRuntime:
@@ -125,8 +168,10 @@ class CoreControlPlaneAIRuntime:
         credentials: CoreCredentialResolver,
         metering: MedidorUsoIA | None = None,
         quota: QuotaReservations | None = None,
+        circuit: PersistentCircuit | None = None,
     ) -> None:
         self._quota = quota
+        self._circuit = circuit
         self._control_plane = control_plane
         self._credentials = credentials
         self._metering = metering or MedidorUsoIAEmMemoria()
@@ -139,7 +184,9 @@ class CoreControlPlaneAIRuntime:
         )
         return AIModelRouter(
             rotas=tuple(item.route for item in resolved),
-            executor=ScopedCoreExecutor(routes=resolved, credentials=self._credentials),
+            executor=ScopedCoreExecutor(
+                routes=resolved, credentials=self._credentials, circuit=self._circuit,
+            ),
             metering=self._metering,
         )
 
