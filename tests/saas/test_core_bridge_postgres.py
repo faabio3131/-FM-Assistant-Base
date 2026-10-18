@@ -18,11 +18,12 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
 from fm_assistant.command_bridge_control_service import (
     CommandBridgeControlService,
+    CommandBridgeDenied,
     sign_command_control,
 )
-from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
 from fm_assistant.core_bridge_models import (
     CoreBridgeAccessORM,
     CoreBridgeGrantORM,
@@ -261,7 +262,7 @@ def test_postgres_command_identity_revocation_is_irreversible(postgres_bridge):
     assert _command(command, "revoke_identity") == "revoked"
     with pytest.raises(CoreBridgeDenied):
         _resolve(core, secrets.token_urlsafe(24))
-    with pytest.raises(Exception):
+    with pytest.raises(CommandBridgeDenied):
         _command(command, "provision")
     with sessions() as db:
         identity = db.get(CoreBridgeIdentityORM, CORE_KEY_ID)
