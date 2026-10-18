@@ -17,7 +17,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: faabio3131/FM-Core-Base-
-          ref: feat/ai-service-v1
+          # Pinned to the certified Core HEAD; update only with a green Core CI.
+          ref: da05ca3e736197069ac87695e2859671fca142e0
           path: core-source
           persist-credentials: false
       - uses: actions/setup-python@v5
