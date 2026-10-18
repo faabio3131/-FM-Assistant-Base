@@ -98,7 +98,7 @@ class AIRequestCostSummary:
     unknown_attempts: int
     total_attempts: int
     fallback_attempts: int
-    settled: bool
+    all_recorded_costs_known: bool
 
 
 class PersistentAIFinOps:
@@ -275,7 +275,7 @@ class PersistentAIFinOps:
                 unknown_attempts=unknown,
                 total_attempts=len(rows),
                 fallback_attempts=sum(bool(item.fallback_used) for item in rows),
-                settled=bool(rows) and unknown == 0,
+                all_recorded_costs_known=bool(rows) and unknown == 0,
             )
 
     def listar(
