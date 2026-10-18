@@ -234,3 +234,63 @@ def test_secret_rotation_uses_only_latest_active_version(bridge_client):
 def test_bridge_without_configuration_fails_closed(client):
     response = client.post(PATH, json=PAYLOAD)
     assert response.status_code == 401
+
+
+
+def test_signed_core_gateway_end_to_end(bridge_client):
+    """Wire the REAL Core HTTP signer into the REAL Assistant ASGI endpoint."""
+    import httpx
+
+    module = pytest.importorskip("core.ai_assistant_credential_gateway")
+    from core.ai_tenant_credential_resolver import TenantCredentialDenied
+
+    assistant, sessions = bridge_client
+
+    def forward(request):
+        response = assistant.post(
+            PATH, content=request.content, headers=dict(request.headers)
+        )
+        return httpx.Response(
+            status_code=response.status_code,
+            content=response.content,
+            headers=dict(response.headers),
+        )
+
+    transport = httpx.Client(transport=httpx.MockTransport(forward))
+    try:
+        gateway = module.AssistantSignedCredentialGateway(
+            base_url="https://assistant.example",
+            key_id=KEY_ID,
+            signing_key=SIGNING_KEY,
+            client=transport,
+        )
+        secret = gateway.resolve_scoped_secret(
+            tenant_id="tenant-a",
+            unit_id="unit-a",
+            capability="ai.text",
+            opaque_reference="connection-a",
+        )
+        assert secret.reveal() == "synthetic-provider-secret-only"
+
+        # Same gateway and key must stop immediately after grant revocation.
+        with sessions.begin() as db:
+            grant = db.get(
+                CoreBridgeGrantORM, (KEY_ID, "tenant-a", "unit-a", "ai.text")
+            )
+            grant.active = False
+            grant.revoked_at = datetime.now(UTC)
+        with pytest.raises(TenantCredentialDenied):
+            gateway.resolve_scoped_secret(
+                tenant_id="tenant-a",
+                unit_id="unit-a",
+                capability="ai.text",
+                opaque_reference="connection-a",
+            )
+
+        with sessions() as db:
+            rows = db.scalars(select(CoreBridgeAccessORM)).all()
+            assert len(rows) == 2
+            assert {row.outcome for row in rows} == {"released", "denied"}
+            assert len({row.nonce for row in rows}) == 2
+    finally:
+        transport.close()
