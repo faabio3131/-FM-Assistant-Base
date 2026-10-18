@@ -786,3 +786,18 @@ INTERNAL GATES: software correctness, authorization, tenant isolation, audit, mi
 F3.8 CORE WORK: core/ai_usage_ledger.py now includes request-scoped, known-subtotal versus unknown-attempt FinOps reconciliation; missing costs are explicitly counted. core/ai_finops_preflight.py calculates deterministic worst-case provider fallback token costs against immutable price snapshot and explicit monetary limit, failing closed for missing/invalid pricing, currency mismatch, or budget exceed. Both are BUILD_IN_PROGRESS internal components, not provider-verified spend caps and not real homologation.
 BUILD GAPS NEXT: authorized Assistant entitlement-to-Core projection; monetary budget reservations/settlement and provider attempt lifecycle; enforced provider output token ceilings; completed circuit/quotas/FinOps runtime wiring with test fixtures; end-to-end internal certification; other master phases through completion.
 EXTERNAL GAPS DEFERRED TO FINAL: provider keys and live requests, hosted Vault/network/TLS, production deploy, provider contracts, financial gateways, real acceptance/homologation and independent external verification. F3/F4 progression depends only on completed internal implementation and internal CI, not these deferred tasks.
+
+2026-10-18 — F3/F9 PLANS, TOKEN QUOTAS AND PER-TENANT BUDGETS
+OWNER REQUIREMENT: Planos comercializados devem possuir limites versionados por plano, tenant e unidade, incluindo requests/tokens/áudio/mensagens e custos internos de IA; FM paga os provedores de IA (modo FM-managed), cobrança do cliente é assinatura SaaS independente.
+ASSISTANT IMPLEMENTED:
+- Migration aditiva 20261018_0009 cria assistant_plan_versions e assistant_plan_limits e adiciona tenant license plan_revision (nullable para retrocompatibilidade).
+- PlanLimitResolver lê unicamente licença canônica: tenant/unidade ativos, licença active/trial vigente, revisão fixada, recurso presente, janela/limite positivo. Falha fechada sem licença válida ou quota.
+- Testes de plano revision-pinned, tenant isolation, trial suspenso/expirado e recurso ausente; migration de schema atualizada e CI integrado.
+CORE IMPLEMENTED:
+- QuotaReservations.reserve_bundle/settle_bundle bloqueia/reserva atomicamente todas as dimensões do plano. Suporta orçamento agregado de tenant (scope técnico __tenant__) e limite por unidade com lock de políticas; concorrência PG16 confirma que apenas uma das unidades concorrentes consome saldo global.
+- ProviderRouteSettings.max_output_tokens configurável e validado; OpenAI-compatible envia max_tokens e Gemini maxOutputTokens; testes sintéticos dos adapters. FinOps request reconciliation distingue custos conhecidos/desconhecidos.
+- Testes de rollback integral em limite excedido, replay de request, settlement idempotente, scope e concorrência multiunidade.
+COMMAND DOCUMENTED: docs/FMCC_F3_F9_COMMERCIAL_PLANS_AND_AI_COST_CONTROL.md define responsabilidades corporativas product_id+tenant_id+plan_code+revision, custos IA da FM, margem, limites e governança.
+REFERENCE: docs/governance/F3_F9_PLAN_QUOTAS_AND_AI_USAGE_ARCHITECTURE.md.
+CURRENT STATUS: BUILD_IN_PROGRESS (subcomponentes CI a certificar no HEAD atual). Ainda faltam sincronização assinada de quotas/entitlements Assistant→Core, política de expiração/revogação no Core, guard obrigatório no runtime, limitação segura de input tokens, conciliação oficial de tokens/custo e UI/plano/upgrade/downgrade no F9, dashboard.
+REAL HOMOLOGATION: EXTERNAL_HOMOLOGATION_DEFERRED; não impede próximos passos de software. Sem segredos reais, produção, deploy ou migrations em banco não descartável.
