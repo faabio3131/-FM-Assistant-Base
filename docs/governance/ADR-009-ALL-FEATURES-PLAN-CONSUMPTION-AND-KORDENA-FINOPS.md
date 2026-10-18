@@ -77,10 +77,35 @@ Referência GitHub (somente leitura):
   `infra/streamlit_app/ai_finops.py` — tokens, eficiência, fallback,
   cobertura de custo conhecido/ausente e visão por provedor.
 
-**Partes insuficientes para planos por consumo:**
-- O FinOps Kordena é *read/analytics*, não engine de admissão
-  transacional; não há nele catálogo de preço comercial SaaS + franquia
-  nem contrato de plano/assinatura com pré-bloqueio por orçamento.
+**Distinguir o patrimônio da main do desenvolvimento recente:**
+- `main` SHA `9a047f98d45574eb7dbf171a9fff8fe5a79fcb2d`
+  continha o FinOps analítico/read-model e não o mecanismo completo
+  de admissão comercial; essa era a constatação da primeira leitura.
+- **PR #230 Draft**, branch `feat/kordena-finops-pricing-metering-20261018`,
+  HEAD `691ba84edd1cd663278fb868035b6d1169e90610`,
+  **já implementa um Budget Guard candidato** (`infra/ai_budget_guard.py`),
+  ledger monetário transacional PostgreSQL por tenant/unidade/capability
+  e ciclo de assinatura (`infra/ai_budget_sqlalchemy.py`), pré-reserva
+  por attempt do AIModelRouter, liquidação com Decimal, pendência no
+  timeout, replay fail-closed e provisionamento a partir da assinatura
+  (`application/ai_budget_provision.py`).
+- A mesma PR implementa catálogo de tarifas configurado em control plane
+  (`application/ai_pricing_runtime.py`), consulta segura de franquia ao
+  cliente com alertas 70/90/100% sem expor USD ou custo interno
+  (`application/ai_franchise_customer_view.py`) e contrato detalhado em
+  `docs/commercial-platform/AI_FINOPS_FRANCHISE_RUNTIME_CONTRACT_2026-10-18.md`.
+  O cadastro de preço comercial e franquia foi planejado para o Command.
+- Essa versão ainda está **Draft com workflows falhando** na PR #230,
+  sem certificação integral, merge ou homologação real comprovada.
+  Não copiar nem declarar operação pronta sem corrigir/reexecutar
+  os testes pertinentes e revisar as fronteiras de autoridade.
+- **Diferença para VendeAtendeIA:** o budget inicial do Kordena é em
+  USD por **unidade** e por capability; nosso SaaS também exige tetos
+  de tokens, requests, capacidades e, quando configurado, orçamento
+  agregado por tenant compartilhado entre unidades. Entitlements
+  `enabled` por capability no Kordena **não podem ser traduzidos
+  em feature gating**: no VendeAtendeIA todas as funções são acessíveis
+  em qualquer plano, limitada apenas a quantidade consumida.
 - Em `infra/ai_finops_projector.py`, tokens ausentes são somados como
   `0` nos agregados: o Core não deve confundir tokens desconhecidos com
   uso real zero para enforcement.
@@ -106,9 +131,16 @@ Referência GitHub (somente leitura):
   e visão cross-SaaS, ausentes nos buckets de Kordena.
 
 **Decisão de reutilização:** preservar Kordena inalterado;
-reaproveitar conceitos do metering/projeção e dashboard, preferindo
-o ledger, quota store, circuit breaker e preflight do FM Core já
-evoluídos. Não duplicar código `ai_cost`/`ai_pricing`.
+reaproveitar da PR #230 **os padrões** de Budget Guard, ledger monetário
+Decimal transacional por attempt, autorização anterior ao provedor,
+reconciliação de timeout, sincronização da assinatura com o orçamento
+e visão do cliente sem custos internos; reaproveitar da `main`
+metering, projeção diária e dashboard. **Integrar ao Core existente**
+(`QuotaReservations`, `PersistentCircuit`, `AIUsageLedger`,
+`FinOpsPreflight`) sem criar segunda fonte de verdade para a mesma
+franquia. Para o VendeAtendeIA, manter proteção de teto por tenant,
+plano revisionado e dimensões tokens/requests além de orçamento FM.
+Não duplicar `ai_cost`/`ai_pricing`, cujos blobs já são idênticos.
 Todos os ajustes necessários devem ser feitos nos repositórios do
 novo SaaS, não no Kordena.
 
