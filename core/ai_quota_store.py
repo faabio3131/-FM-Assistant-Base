@@ -184,3 +184,32 @@ class QuotaReservations:
             item.state = ReservationState.SETTLED
             db.flush()
             return item
+
+    def pending_for_reconciliation(
+        self, *, tenant_id: str, unit_id: str, capability: str,
+        older_than: datetime, limit: int = 100,
+    ) -> tuple[AIQuotaReservationRecord, ...]:
+        """Read-only scoped review of unresolved provider attempts.
+
+        This never refunds or changes quota; only a separately authorized
+        recovery workflow may resolve attempts with ambiguous outcomes.
+        """
+        if not all(_valid_id(v) for v in (tenant_id, unit_id, capability)):
+            raise QuotaDenied("core_quota.invalid_scope")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise QuotaDenied("core_quota.invalid_limit")
+        cutoff = _utc(older_than)
+        with self._sessions() as db:
+            records = db.scalars(
+                select(AIQuotaReservationRecord).where(
+                    AIQuotaReservationRecord.tenant_id == tenant_id,
+                    AIQuotaReservationRecord.unit_id == unit_id,
+                    AIQuotaReservationRecord.capability == capability,
+                    AIQuotaReservationRecord.state == ReservationState.RESERVED,
+                    AIQuotaReservationRecord.created_at < cutoff,
+                ).order_by(
+                    AIQuotaReservationRecord.created_at,
+                    AIQuotaReservationRecord.request_id,
+                ).limit(limit)
+            ).all()
+            return tuple(records)
