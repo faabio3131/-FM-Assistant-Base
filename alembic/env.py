@@ -6,6 +6,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import create_engine, pool
 
+import core.ai_admin_audit  # noqa: F401 - registra auditoria administrativa
 import core.ai_usage_ledger  # noqa: F401 - registra tabelas do ledger
 from alembic import context
 from core.ai_control_plane import ControlPlaneBase
