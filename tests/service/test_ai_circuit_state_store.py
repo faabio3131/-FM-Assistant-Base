@@ -93,3 +93,20 @@ def test_missing_circuit_configuration_denies(circuit):
 def test_unaware_time_denied_before_mutation(circuit):
     with pytest.raises(CircuitDenied, match="circuit.invalid_time"):
         circuit.claim(provider_id="provider-a", now=datetime(2026, 10, 18))
+
+
+def test_stale_closed_success_cannot_clear_newer_open_circuit(circuit):
+    _, first_fence = circuit.claim(provider_id="provider-a", now=NOW)
+    _, second_fence = circuit.claim(provider_id="provider-a", now=NOW)
+    assert first_fence == second_fence
+    circuit.finish(
+        provider_id="provider-a", now=NOW,
+        outcome=CircuitOutcome.TRANSIENT_FAILURE,
+        probe_id=None, version=first_fence,
+    )
+    with pytest.raises(CircuitDenied, match="stale_fence"):
+        circuit.finish(
+            provider_id="provider-a", now=NOW,
+            outcome=CircuitOutcome.SUCCESS,
+            probe_id=None, version=second_fence,
+        )
