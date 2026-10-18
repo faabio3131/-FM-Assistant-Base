@@ -26,6 +26,7 @@ jobs:
           core/ai_control_plane_runtime.py
           core/ai_control_plane_bootstrap.py
           core/ai_admin_read_api.py
+          core/ai_command_authority.py
           core/ai_usage_ledger.py
           alembic/env.py
           alembic/versions/0001_f3_ai_control_plane.py
