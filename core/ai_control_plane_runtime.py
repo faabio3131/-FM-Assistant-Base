@@ -67,11 +67,25 @@ class ScopedCoreExecutor(ExecutorModeloIA):
         if item is None:
             raise FalhaRotaDefinitiva("ai_provider.executor_missing")
         try:
-            secret = self._credentials.resolve(
-                tenant_id=solicitacao.tenant_id,
-                credential_source=item.credential_source,
-                secret_reference=item.secret_reference,
-            )
+            if item.credential_source == "tenant_managed":
+                scoped = getattr(self._credentials, "resolve_for_request", None)
+                if scoped is None:
+                    raise TenantCredentialDenied(
+                        "core_control_plane.byok_scope_required"
+                    )
+                secret = scoped(
+                    tenant_id=solicitacao.tenant_id,
+                    unit_id=solicitacao.unidade_id,
+                    capability=solicitacao.capability.value,
+                    credential_source=item.credential_source,
+                    secret_reference=item.secret_reference,
+                )
+            else:
+                secret = self._credentials.resolve(
+                    tenant_id=solicitacao.tenant_id,
+                    credential_source=item.credential_source,
+                    secret_reference=item.secret_reference,
+                )
         except TenantCredentialDenied as exc:
             # A negacao BYOK nunca deve disparar fallback para uma rota FM-managed.
             raise FalhaRotaDefinitiva("core_ai_credential_unavailable") from exc
