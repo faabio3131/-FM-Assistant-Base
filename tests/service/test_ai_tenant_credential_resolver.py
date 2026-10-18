@@ -53,6 +53,15 @@ class StubTenantGateway:
             raise self.error
         return self.secret  # type: ignore[return-value]
 
+    def resolve_scoped_secret(
+        self, *, tenant_id: str, unit_id: str, capability: str, opaque_reference: str
+    ) -> SecretValue:
+        assert unit_id == "unit-a"
+        assert capability == "atendimento_interpretacao"
+        return self.resolve_active_secret(
+            tenant_id=tenant_id, opaque_reference=opaque_reference
+        )
+
 
 def _resolver(fm=None, gateway=None):
     fm = fm or StubFMResolver()
