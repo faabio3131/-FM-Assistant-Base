@@ -589,3 +589,12 @@ class PlanLimitORM(Base):
             ["assistant_plan_versions.plan_code", "assistant_plan_versions.revision"],
         ),
     )
+
+class PlanSyncNonceORM(Base):
+    """Signed Command plan imports reject network replay transactionally."""
+
+    __tablename__ = "assistant_plan_sync_nonces"
+
+    key_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    nonce: Mapped[str] = mapped_column(String(96), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
