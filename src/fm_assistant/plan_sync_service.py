@@ -6,7 +6,6 @@ not stored here: Command remains the only commercial price authority.
 """
 from __future__ import annotations
 
-import hashlib
 import hmac
 import re
 from datetime import UTC, datetime
@@ -45,7 +44,7 @@ class CommandPlanProjectionService:
     def apply(
         self, *, headers: dict[str, str | None], raw_body: bytes,
         organization_id: str, actor_user_id: str, step_up_at: int,
-        plan_code: str, revision: int, label: str,
+        product_code: str, plan_code: str, revision: int, label: str,
         allowances: tuple[dict[str, object], ...],
     ) -> str:
         now = datetime.now(UTC)
@@ -62,11 +61,13 @@ class CommandPlanProjectionService:
             or len(timestamp) != 10
             or abs(int(now.timestamp()) - int(timestamp)) > 60
             or organization_id != self._organization
+            or product_code != "VENDEATENDEIA"
             or not KEY.fullmatch(actor_user_id) or type(step_up_at) is not int
             or step_up_at > int(now.timestamp()) + 15
             or int(now.timestamp()) - step_up_at > 300
             or not KEY.fullmatch(plan_code) or len(plan_code) > 120
             or type(revision) is not int or revision < 1
+            or not isinstance(label, str)
             or not 2 <= len(label.strip()) <= 160
             or not 1 <= len(allowances) <= 32
         ):
