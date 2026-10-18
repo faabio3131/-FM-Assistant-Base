@@ -6,7 +6,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.db import (
-    Base, PlanLimitORM, PlanVersionORM, TenantLicenseORM, TenantORM, UnitORM,
+    Base,
+    PlanLimitORM,
+    PlanVersionORM,
+    TenantLicenseORM,
+    TenantORM,
+    UnitORM,
 )
 from fm_assistant.plan_limits import PlanLimitDenied, PlanLimitResolver
 
