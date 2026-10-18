@@ -6,9 +6,11 @@ referencias atuais no momento da execucao. Nenhum segredo e persistido aqui.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Protocol
 
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneError, ResolvedCoreRoute
+from core.ai_quota_store import QuotaReservations
 from core.ai_providers import GeminiExecutor, OpenAICompatibleExecutor
 from core.ai_router import (
     AIModelRouter,
@@ -122,7 +124,9 @@ class CoreControlPlaneAIRuntime:
         control_plane: AIControlPlaneStore,
         credentials: CoreCredentialResolver,
         metering: MedidorUsoIA | None = None,
+        quota: QuotaReservations | None = None,
     ) -> None:
+        self._quota = quota
         self._control_plane = control_plane
         self._credentials = credentials
         self._metering = metering or MedidorUsoIAEmMemoria()
@@ -138,6 +142,33 @@ class CoreControlPlaneAIRuntime:
             executor=ScopedCoreExecutor(routes=resolved, credentials=self._credentials),
             metering=self._metering,
         )
+
+    def _execute_guarded(self, router: AIModelRouter, request: SolicitacaoIA):
+        """Opt-in per-request quota admission before ANY provider attempt.
+
+        One request unit is reserved for the entire router/fallback chain.
+        On unknown outcome do not refund or retry automatically.
+        """
+        if self._quota is not None:
+            self._quota.reserve(
+                tenant_id=request.tenant_id,
+                unit_id=request.unidade_id,
+                capability=request.capability.value,
+                request_id=request.request_id,
+                units=1,
+                at=datetime.now(UTC),
+                for_execution=True,
+            )
+        result = router.executar(request)
+        if self._quota is not None:
+            self._quota.settle(
+                tenant_id=request.tenant_id,
+                unit_id=request.unidade_id,
+                capability=request.capability.value,
+                request_id=request.request_id,
+                consumed_units=1,
+            )
+        return result
 
     def generate_text(
         self,
@@ -155,7 +186,8 @@ class CoreControlPlaneAIRuntime:
             capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
         )
         return _result(
-            router.executar(
+            self._execute_guarded(
+                router,
                 SolicitacaoIA(
                     tenant_id=tenant_id,
                     unidade_id=unit_id,
@@ -186,7 +218,8 @@ class CoreControlPlaneAIRuntime:
             capability=CapabilityIA.ATENDIMENTO_TRANSCRICAO,
         )
         return _result(
-            router.executar(
+            self._execute_guarded(
+                router,
                 SolicitacaoIA(
                     tenant_id=tenant_id,
                     unidade_id=unit_id,
