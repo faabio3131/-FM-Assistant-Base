@@ -29,5 +29,6 @@ jobs:
           alembic/versions/20261018_0004_integration_control_plane.py
           alembic/versions/20261018_0005_core_service_identity.py
           alembic/versions/20261018_0006_command_bridge_control.py
+          alembic/versions/20261018_0009_plan_limit_catalog.py
       - name: Pytest
         run: pytest tests/saas
