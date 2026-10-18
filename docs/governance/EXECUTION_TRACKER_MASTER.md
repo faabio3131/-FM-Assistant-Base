@@ -653,3 +653,29 @@ GATES REMANESCENTES:
 - E2E Node Command→Python Assistant, security review independente, TLS/ACL/rate limits, Vault externo, providers, quotas/circuit/FinOps, homologações.
 RESULTADO: F3.7.4 GREEN INTERMEDIÁRIO; F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED.
 PROIBIÇÕES: sem merge prematuro, segredo real, banco/deploy produtivo ou escrita Kordena.
+
+
+2026-10-18 — F3.7.5 COMMAND NEGATIVE AUDIT + NODE/PYTHON CROSS-RUNTIME GATE
+FASE: F3 = IN_PROGRESS; F4 NOT_STARTED; Command gate = NOT_TESTED/BLOCKED_EXTERNAL.
+REPOSITÓRIOS:
+- Command corporativo faabio3131/FM-CONTROL-CENTER PR #90 Draft na branch feat/f3-command-core-bridge-governance;
+- Assistant faabio3131/-FM-Assistant-Base PR #1 Draft; Core PR #1 Draft;
+- fm-command-v2 não é o controlador corporativo; Kordena read-only.
+ALTERAÇÕES NO COMMAND:
+- audit de negativas corporativas e payload inválido: commits ff150ef3 e 021cdef1;
+- cliente REAL Node assina envelope, entregue ao FastAPI ASGI REAL do Assistant com fixture sintética: teste test/f3_command_assistant_cross_runtime.py no Command e helper .mts (commits c5790c9,1693a93);
+- Command Foundation workflow estendido para checkout Assistant público PINNED no SHA funcional 45b35a6900c59825a987d9db47e98ad18073dec2, rodar Python 3.12+pytest após suite Node (commit 0451681);
+- docs e AGENTS do Command atualizados; nenhum segredo/credencial real criado.
+ESCOPO DA PROVA PROPOSTA:
+- autoridade/escopo assinado, provision, grant, anti-replay, Core release, revoke_grant, revoke_identity e auditoria;
+- usa transporte capturado antes da rede e FastAPI TestClient: NÃO comprova HTTPS real, TLS, ACL, Vault, provider nem produção.
+EVIDÊNCIA CI:
+- Command SHA funcional 045168112162902111972c7bda819e436a5e7e69:
+  Foundation 39141682746, F21 39141682831, Cognitive 39141682750 concluíram FAIL sem steps;
+- re-run Foundation anterior 39139780483 (attempt 2) também falhou sem steps;
+- nenhuma execução do novo teste Python/Node foi confirmada; status NOT_TESTED / BLOCKED_EXTERNAL.
+RISCO TÉCNICO A FECHAR:
+- mutation pode persistir no Assistant antes da tentativa de auditoria Command; documentar reconciliação segura por command_request_id sem retry cego;
+- revisão independente, CI real, Vault, rede, quotas/circuit/FinOps, observabilidade e providers ainda pendentes.
+DECISÃO: NÃO mergear PR #90 ou PRs #1; não iniciar F4, não fazer deploy/credential real/migration produtiva.
+PRÓXIMO PASSO: obter CI Command executando steps e corrigir até 100% GREEN; passar teste cruzado e revisão independente; concluir gates restantes da F3 antes da promoção.
