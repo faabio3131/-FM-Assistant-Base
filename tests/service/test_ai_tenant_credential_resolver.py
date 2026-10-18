@@ -6,7 +6,17 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from core.ai_control_plane import ControlPlaneError
+from core.ai_control_plane import ControlPlaneError, ResolvedCoreRoute
+from core.ai_control_plane_runtime import ScopedCoreExecutor
+from core.ai_router import (
+    AIModelRouter,
+    CapabilityIA,
+    FalhaRotaDefinitiva,
+    MedidorUsoIAEmMemoria,
+    OutcomeIA,
+    RotaIA,
+    SolicitacaoIA,
+)
 from core.ai_tenant_credential_resolver import (
     GovernedCredentialResolver,
     TenantCredentialDenied,
@@ -160,3 +170,66 @@ def test_fm_secret_cannot_be_obtained_using_tenant_origin():
         )
     assert fm.calls == []
     assert tenant.calls == []
+
+
+def test_byok_authorization_denial_does_not_trigger_fm_route_fallback():
+    capability = CapabilityIA.ATENDIMENTO_INTERPRETACAO
+    byok_route = RotaIA(
+        configuracao_id="byok-priority",
+        provider="byok-provider",
+        model="model-b",
+        capability=capability,
+        prioridade=100,
+        price_snapshot_id="price-1",
+    )
+    fm_route = RotaIA(
+        configuracao_id="fm-fallback",
+        provider="fm-provider",
+        model="model-f",
+        capability=capability,
+        prioridade=50,
+        price_snapshot_id="price-2",
+    )
+    routes = (
+        ResolvedCoreRoute(
+            route=byok_route,
+            scope="tenant",
+            adapter="openai_compatible",
+            base_url="https://provider.invalid",
+            credential_source="tenant_managed",
+            secret_reference="integration:tenant-a:disabled-key",
+            timeout_seconds=3,
+        ),
+        ResolvedCoreRoute(
+            route=fm_route,
+            scope="platform",
+            adapter="openai_compatible",
+            base_url="https://provider.invalid",
+            credential_source="fm_managed",
+            secret_reference="env:FM_TEST_KEY",
+            timeout_seconds=3,
+        ),
+    )
+    fm = StubFMResolver(error=PermissionError("FM route must never be attempted"))
+    gateway = StubTenantGateway(error=PermissionError("revoked tenant credential"))
+    resolver, _, _ = _resolver(fm=fm, gateway=gateway)
+    metering = MedidorUsoIAEmMemoria()
+    router = AIModelRouter(
+        rotas=(byok_route, fm_route),
+        executor=ScopedCoreExecutor(routes=routes, credentials=resolver),
+        metering=metering,
+    )
+    request = SolicitacaoIA(
+        tenant_id="tenant-a",
+        unidade_id="unit-a",
+        request_id="request-1",
+        correlation_id="correlation-1",
+        capability=capability,
+        conteudo=object(),
+    )
+    with pytest.raises(FalhaRotaDefinitiva, match="core_ai_credential_unavailable"):
+        router.executar(request)
+    assert gateway.calls == [("tenant-a", "disabled-key")]
+    assert fm.calls == []
+    assert len(metering.eventos) == 1
+    assert metering.eventos[0].outcome is OutcomeIA.FALHA_DEFINITIVA
