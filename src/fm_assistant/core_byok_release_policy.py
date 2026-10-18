@@ -78,6 +78,12 @@ class CoreBYOKReleasePolicy:
                 )
             ):
                 return False
+            if (
+                license_row.status == "active"
+                and license_row.period_ends_at is not None
+                and _utc(license_row.period_ends_at) <= current
+            ):
+                return False
             provider = db.get(IntegrationProviderORM, connection.provider_key)
             if (
                 provider is None or not provider.enabled
