@@ -254,3 +254,10 @@ A única barreira humana operacional permanente após gates verdes é deploy/pro
 - Próximos gates F3: PostgreSQL concorrente (nonce/revoke/locks), contratos Command↔Assistant, Vault/TLS/ACL/rate limits/secret lifecycle, quotas/circuit/FinOps/provider real/observabilidade, revisão independente de segurança.
 - Testes sintéticos não equivalem a homologação; segredos reais, migrations de produção, deploy e cutover requerem autorização humana específica.
 - Autonomia: corrigir, testar, documentar, atualizar tracker/PR e avançar tarefas **dentro de F3** enquanto houver gates parciais. Merge autorizado somente após 100% GREEN. Não usar computador remoto quando GitHub ou ambiente próprio bastar.
+
+
+## 14. EVIDÊNCIA ASSISTANT F3.7.4 (2026-10-18)
+
+O consumidor Core↔Assistant tem novo gate PostgreSQL 16, validando nonce concorrente e revogação em banco real descartável. **Assistant SHA funcional** `6dd2d9f7ebf84fa140ae7380f6f0386387500ca9`; Actions Postgres push `39139495756` e PR `39139500097`: SUCCESS; SaaS/contrato Core verdes. Isto é GREEN INTERMEDIÁRIO do contrato, não homologação de credencial real.
+
+O Core não deverá considerar F3 global aprovada enquanto o Command corporativo `FM-CONTROL-CENTER` PR #90 não executar CI efetivo lint/typecheck/test/build, revisão independente e E2E completo. Jobs com zero steps são `BLOCKED_EXTERNAL`, jamais GREEN. Próxima sequência: segurança Command, Vault/rede, provider catalog, circuit/quotas/FinOps, homologação real. Sem merge prematuro nem deploy/segredos/migration produtivos.
