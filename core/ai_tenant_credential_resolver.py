@@ -151,7 +151,7 @@ class GovernedCredentialResolver:
                 opaque_reference=parsed.opaque_id,
             )
             if not isinstance(result, SecretValue):
-                raise ValueError("invalid_result")
+                raise TypeError("invalid_result")
             return result
         except Exception as exc:
             raise TenantCredentialDenied(
