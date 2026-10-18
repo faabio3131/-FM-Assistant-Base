@@ -16,10 +16,13 @@ from fastapi import (
     Response,
     status,
 )
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, ValidationError
+from fastapi.responses import JSONResponse
 
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.whatsapp_meta import WhatsAppProviderError
+from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
+from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
 from .core_client import CoreAIClient, CoreAudioTranscriber
 from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
@@ -115,6 +118,14 @@ class MessageResponse(BaseModel):
 class HandoffRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
+
+
+
+class CoreBridgeResolvePayload(BaseModel):
+    tenant_id: str = Field(min_length=1, max_length=128)
+    unit_id: str = Field(min_length=1, max_length=128)
+    capability: str = Field(min_length=1, max_length=160)
+    connection_id: str = Field(min_length=1, max_length=64)
 
 SESSION_COOKIE_NAME = "fm_assistant_session"
 
@@ -383,9 +394,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     integration_repository = IntegrationRepository(session_factory)
+    vault = FernetCredentialVault(cfg.channel_encryption_key)
     integration_service = IntegrationService(
         repository=integration_repository,
-        vault=FernetCredentialVault(cfg.channel_encryption_key),
+        vault=vault,
+    )
+    core_bridge = CoreBridgeService(
+        sessions=session_factory,
+        vault=vault,
+        key_id=cfg.core_bridge_key_id,
+        signing_key=cfg.core_bridge_signing_key,
     )
     whatsapp_channels = WhatsAppChannelRepository(integration_service)
     whatsapp_inbound = WhatsAppInboundRepository(session_factory)
@@ -1196,6 +1214,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             for row in rows
         ]
+
+
+    @app.post("/internal/v1/core/credentials/resolve", include_in_schema=False)
+    async def internal_core_credential_resolve(request: Request) -> JSONResponse:
+        # Internal-only ingress with network ACL/TLS; never trust browser auth.
+        raw = await request.body()
+        if len(raw) > 4096:
+            raise HTTPException(status_code=401, detail="core_bridge_denied")
+        try:
+            payload = CoreBridgeResolvePayload.model_validate_json(raw)
+            secret = core_bridge.resolve(
+                headers={
+                    "key_id": request.headers.get("X-FM-Core-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Core-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Core-Nonce"),
+                    "signature": request.headers.get("X-FM-Core-Signature"),
+                },
+                raw_body=raw,
+                tenant_id=payload.tenant_id,
+                unit_id=payload.unit_id,
+                capability=payload.capability,
+                connection_id=payload.connection_id,
+            )
+        except (CoreBridgeDenied, ValidationError) as exc:
+            raise HTTPException(status_code=401, detail="core_bridge_denied") from exc
+        return JSONResponse(
+            {"secret": secret}, headers={"Cache-Control": "no-store"}
+        )
 
     @app.put("/v1/channels/whatsapp", response_model=WhatsAppChannelResponse)
     def configure_whatsapp(
