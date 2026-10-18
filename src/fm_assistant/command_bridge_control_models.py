@@ -21,6 +21,6 @@ class CommandBridgeControlEventORM(Base):
     capability: Mapped[str] = mapped_column(String(160), nullable=False)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     actor_user_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    command_request_id: Mapped[str] = mapped_column(String(96), nullable=False)
+    command_request_id: Mapped[str] = mapped_column(String(96), nullable=False, unique=True)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
