@@ -8,13 +8,16 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from alembic import command
 from core.ai_quota_store import (
-    AIQuotaPolicyRecord, AIQuotaReservationRecord, QuotaDenied, QuotaReservations,
+    AIQuotaPolicyRecord,
+    AIQuotaReservationRecord,
+    QuotaDenied,
+    QuotaReservations,
 )
 
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
