@@ -240,3 +240,17 @@ O agente deve continuar automaticamente enquanto os gates forem verificáveis e 
 Só pode promover estado quando 100% dos critérios obrigatórios estiverem verdes.
 
 A única barreira humana operacional permanente após gates verdes é deploy/produção.
+
+---
+
+## 13. CHECKPOINT F3.7.3 — CORE↔ASSISTANT↔COMMAND (2026-10-18)
+
+- F3 do cronograma mestre Assistant é a fase ativa. F4 não pode iniciar antes de F3 100% GREEN.
+- O Core **consome** credenciais BYOK do Assistant via S2S autenticado, sem ler seu banco. Toda chamada exige tenant/unidade/capability. Negação, expiração, revogação e falha de política BYOK são **definitivas**, sem troca silenciosa para FM-managed.
+- O Assistant mantém identidade Core, grants e auditoria transacional de provisionamento/revogação (migration `20261018_0006`).
+- O **Command corporativo** `faabio3131/FM-CONTROL-CENTER` (PR #90 Draft) gerencia o lifecycle humano; `fm-command-v2` é produto diferente e NÃO é essa autoridade.
+- **Evidências inter-repositórios**: CI do Core deve estar verde no HEAD pertinente, Assistant CI e integração HMAC sintética no HEAD pertinente, e Command CI lint/typecheck/test/build e revisão de segurança também. Um participante verde não torna os demais verdes.
+- CI Command encerrado antes de executar steps é `BLOCKED_EXTERNAL / NOT_TESTED`, não GREEN. Não mergear PRs F3 enquanto faltar gate. Não iniciar F4 antecipadamente.
+- Próximos gates F3: PostgreSQL concorrente (nonce/revoke/locks), contratos Command↔Assistant, Vault/TLS/ACL/rate limits/secret lifecycle, quotas/circuit/FinOps/provider real/observabilidade, revisão independente de segurança.
+- Testes sintéticos não equivalem a homologação; segredos reais, migrations de produção, deploy e cutover requerem autorização humana específica.
+- Autonomia: corrigir, testar, documentar, atualizar tracker/PR e avançar tarefas **dentro de F3** enquanto houver gates parciais. Merge autorizado somente após 100% GREEN. Não usar computador remoto quando GitHub ou ambiente próprio bastar.
