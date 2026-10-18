@@ -340,3 +340,42 @@ PRÓXIMO PASSO:
 - provider health/circuit breaker/timeout;
 - validar contratos Assistant ↔ Core;
 - homologação real somente com credenciais/ambiente autorizados.
+
+
+2026-10-18 — F3.1 A F3.4 EXECUCAO E CERTIFICACAO INTERMEDIARIA
+FASE: F3 — FM Core Production Control Plane
+CORE BRANCH: feat/ai-service-v1
+CORE HEAD VALIDADO: 2f5300fb55e7885cc649b6f87ada4158e1de7681
+ASSISTANT STATUS: F2 GREEN; F3 EM ANDAMENTO
+ACOES:
+- F3.1 catalogos persistentes de provider/model/capability, route policies platform/tenant/unit e provider-health;
+- politica de escopo unit > tenant > platform, fail-closed para prioridade ambigua e health/circuit indisponiveis;
+- somente referencias opacas de segredo FM-managed e BYOK, verificacao de isolamento BYOK;
+- F3.2 runtime bridge ligado ao AIModelRouter existente, resolucao de rotas por request, sem segundo motor cognitivo;
+- adapter FM-managed, porta BYOK governada (integracao real ainda pendente);
+- redaction de API key no repr de ProviderRouteSettings;
+- F3.3 catalogo de price snapshots imutaveis na API e ledger persistente de eventos de uso;
+- estimativa de custo deterministica so com snapshot e tokens validos; custo desconhecido explicitamente registrado;
+- read model FinOps tenant/unidade e deduplicacao por tentativa de request;
+- F3.4 Alembic f3_0001 aditivo e downgrade reversivel em banco descartavel;
+- falha Ruff por ordem de imports registrada e corrigida sem enfraquecer regras.
+EVIDENCIA:
+- commits Core: e2e0b012c304cd385d68e784d7af78f285620536;
+  6fbfcef71e2a951ebc7d229877296bf025323e8d;
+  3862d2946fa12010f97d5f166f63e54778564cfc;
+  e7597edae32d3b389adb7576210b20de33ba7261;
+  fix 2f5300fb55e7885cc649b6f87ada4158e1de7681.
+- GitHub Actions Core push #39103858031 = SUCCESS;
+- GitHub Actions Core pull_request #39103860464 = SUCCESS;
+- Ruff, testes AI Router e testes service (inclusive Alembic upgrade/downgrade) = GREEN.
+GATE: GREEN INTERMEDIARIO; F3 GLOBAL = IN_PROGRESS (NAO PROMOVER F4).
+PENDENCIAS OBRIGATORIAS:
+- ligar Control Plane e metering persistente ao startup comercial de forma governada;
+- adapter do Credential Vault real compartilhado com Assistant e BYOK de tenant;
+- separar e proteger API administrativa, CRUD com autorizacao canônica;
+- pricing/usage quota hook, auditoria administrativa persistente, readiness e circuit breaker operacionais;
+- migration/rollback e integridade comprovados em PostgreSQL descartavel;
+- regressao ponta a ponta Assistant -> Core, observabilidade, varreduras e security gates completos;
+- homologacao de provider real somente com credenciais/ambiente autorizados.
+PROIBICOES: merge sem todos os gates; nenhum deploy/producao; Kordena read-only.
+PROXIMO PASSO: seguir F3.5 a F3.n, corrigindo e retestando autonomamente, sem declarar F3 encerrada antecipadamente.
