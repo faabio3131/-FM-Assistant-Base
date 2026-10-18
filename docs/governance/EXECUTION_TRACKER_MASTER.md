@@ -46,18 +46,11 @@
 - [x] seis decisões registradas no ledger institucional.
 - [x] diff comprovou alterações documentais, sem código funcional desde os últimos SHAs certificados.
 
-### Gate pendente
+### Gate final
 
-- [ ] GitHub Actions remoto verde no HEAD atual.
-
-### Blocker
-
-GitHub Actions não iniciou os jobs por bloqueio externo de Billing/Plans da conta.  
-Classificação: `BLOCKED_EXTERNAL`.
-
-### Regra de avanço
-
-F1 não pode ser declarada fase ativa/fechável enquanto o gate obrigatório de F0 permanecer indisponível. Tarefas preparatórias não destrutivas podem ser estudadas, mas nenhuma promoção de fase ocorre sem GREEN.
+- [x] Assistant CI remoto verde.
+- [x] Core CI remoto verde.
+- [x] F0 encerrada com evidência antes da promoção de F1.
 
 ---
 
@@ -67,11 +60,11 @@ F1 não pode ser declarada fase ativa/fechável enquanto o gate obrigatório de 
 
 ## F2 — Integration & Credential Control Plane
 
-**Status:** IN_PROGRESS
+**Status:** GREEN
 
 ## F3 — FM Core Production Control Plane
 
-**Status:** NOT_STARTED
+**Status:** IN_PROGRESS
 
 ## F4 — Knowledge & Retrieval
 
@@ -297,37 +290,53 @@ PRÓXIMO PASSO:
 - desenhar e implementar Integration & Credential Control Plane universal;
 - migrar WhatsApp preservando HMAC/idempotência/reconcile_required/no-blind-retry.
 
-
-2026-10-18 ? F2 IMPLEMENTATION LOCAL GATE
+2026-10-18 — F2 IMPLEMENTATION LOCAL GATE
 FASE: F2
 BASELINE: e580ee3cc36f979d633c0618b329a025f01fa6bd
-A??O:
+AÇÃO:
 - Integration & Credential Control Plane universal implementado;
 - provider catalog inicial whatsapp_meta;
 - Credential Vault abstraction + db_encrypted/Fernet backend;
 - lifecycle DRAFT/VALIDATING/ACTIVE/DEGRADED/DISABLED/REVOKED;
 - connect/config/validate/activate/rotate/disable/revoke/list/catalog API;
 - secret metadata sem disclosure de valor/ciphertext;
-- secret versioning e revoga??o integral;
+- secret versioning e revogação integral;
 - migration 0004 aditiva com backfill do WhatsApp sem recriptografia;
 - WhatsAppChannelRepository migrado para facade sobre Integration Fabric;
 - inbound idempotency migrado para ledger universal;
 - workflow atualizado para lintar migration 0004.
-EVID?NCIA LOCAL:
+EVIDÊNCIA LOCAL:
 - secret scan: NO_SECRET_PATTERN_MATCHES;
 - pip check: PASS;
 - Ruff: PASS;
-- git diff --check: PASS;
+- git diff --check: PASS após cleanup;
 - Integration lifecycle/control plane: 5/5 PASS;
 - revoked-state regression adicional: PASS;
 - migration 0004 + WhatsApp regression: 6/6 PASS.
 FALHA CORRIGIDA:
-- revoke marcava revoked_at apenas na vers?o ativa;
-- corrigido para revogar todas as vers?es ainda n?o formalmente revogadas.
+- revoke marcava revoked_at apenas na versão ativa;
+- corrigido para revogar todas as versões ainda não formalmente revogadas.
 RESULTADO:
-- implementa??o F2 local espec?fica = GREEN;
-- F2 geral permanece IN_PROGRESS at? CI remoto executar pytest tests/saas integral no SHA publicado.
-PR?XIMO PASSO:
-- commit/push;
-- CI remoto integral;
-- se GREEN 100%, atualizar documenta??o Current, fechar F2 e promover F3.
+- implementação F2 local específica = GREEN.
+GATE: GREEN local / aguardava CI remoto integral.
+
+2026-10-18 — F2 FINAL REMOTE GATE
+FASE: F2 -> F3
+SHA F2: 54d1ea67182fd12a182bde1a903ecbc92e0f467d
+EVIDÊNCIA REMOTA:
+- GitHub Actions push 39095136709: SUCCESS;
+- GitHub Actions pull_request 39095139131: SUCCESS;
+- Install: GREEN;
+- Pip check: GREEN;
+- Ruff: GREEN;
+- Pytest tests/saas integral: GREEN.
+RESULTADO:
+- F2 = GREEN 100%;
+- F3 promovida para IN_PROGRESS conforme AGENTS.md.
+PRÓXIMO PASSO:
+- executar Current Discovery do FM Core Production Control Plane;
+- persistir catálogo/rotas/usage/FinOps;
+- governar FM-managed/BYOK;
+- provider health/circuit breaker/timeout;
+- validar contratos Assistant ↔ Core;
+- homologação real somente com credenciais/ambiente autorizados.

@@ -121,20 +121,37 @@ recebe uma mensagem determinística informando que o áudio será encaminhado.
 - `failed`: falha definitiva/retryable do processamento interno.
 - `reconcile_required`: entrega externa incerta; não reenviar cegamente.
 
-## CURRENT e evolução aprovada
+## CURRENT certificado após F2
 
-Já existe transcrição via FM Core Base no backend `core`.
+O WhatsApp agora opera sobre o **Integration & Credential Control Plane universal**.
 
-Ainda permanecem fora do CURRENT:
+A fonte canônica de configuração e segredos passa a ser o Integration Fabric:
+
+- provider `whatsapp_meta`;
+- connection tenant/unit-scoped;
+- configuração não secreta separada de credenciais;
+- Credential Vault com ciphertext no banco e master key externa;
+- versionamento de segredos;
+- lifecycle de conexão;
+- catálogo e capabilities;
+- validação remota;
+- eventos/auditoria;
+- ledger inbound universal.
+
+Os endpoints `/v1/channels/whatsapp` permanecem como **facade de compatibilidade** e
+não criam uma segunda autoridade.
+
+A migration `20261018_0004` preserva as tabelas legadas para rollback/evidência e
+faz backfill do estado existente sem descriptografar ou recriptografar os ciphertexts.
+
+Continuam fora do CURRENT:
 
 - templates outbound iniciados pela empresa;
 - gestão de opt-in/opt-out de campanhas;
 - mídia de imagem/documento/vídeo;
 - status de leitura/entrega;
 - billing por mensagem;
-- painel visual do canal;
-- lifecycle universal do Integration Fabric.
+- painel visual do canal.
 
-Conforme ADR-003, a configuração específica atual do WhatsApp será migrada para o
-Integration & Credential Control Plane universal, preservando os controles certificados
-e sem reintroduzir dependências do Kordena.
+Os controles previamente certificados permanecem obrigatórios: HMAC, idempotência,
+sender opaco, áudio, handoff, no-blind-retry e `reconcile_required`.

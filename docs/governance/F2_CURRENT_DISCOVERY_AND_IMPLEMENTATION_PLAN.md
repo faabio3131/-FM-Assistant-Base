@@ -2,10 +2,10 @@
 ## Integration & Credential Control Plane
 
 **Data:** 2026-10-18
-**Status:** IN_PROGRESS
+**Status:** GREEN — CERTIFICADO
 **Baseline:** F1 GREEN 100%
 
-## CURRENT
+## CURRENT no início da F2
 
 WhatsApp V1 possui:
 
@@ -26,7 +26,7 @@ Limitação arquitetural:
 A configuração é específica do WhatsApp. Cada nova integração exigiria schema/repository/API
 próprios se esse padrão fosse repetido.
 
-## TARGET
+## TARGET aprovado para F2
 
 Criar fabric universal:
 
@@ -152,3 +152,34 @@ Nenhuma API de leitura retorna valor secreto.
 - pip check;
 - pytest;
 - GitHub Actions GREEN.
+
+## Certificação final F2
+
+**SHA técnico certificado:** `54d1ea67182fd12a182bde1a903ecbc92e0f467d`
+
+Evidência local específica:
+
+- secret scan: PASS;
+- `pip check`: PASS;
+- Ruff: PASS;
+- `git diff --check`: PASS após cleanup;
+- control plane/lifecycle: 5/5 PASS;
+- revoked-state regression: PASS;
+- migration 0004 + regressão WhatsApp: 6/6 PASS.
+
+Evidência remota integral:
+
+- push workflow `39095136709`: SUCCESS;
+- pull_request workflow `39095139131`: SUCCESS;
+- Install: GREEN;
+- Pip check: GREEN;
+- Ruff: GREEN;
+- `pytest tests/saas`: GREEN.
+
+Falha encontrada e corrigida durante o gate:
+
+- `revoke` marcava `revoked_at` somente na versão ativa;
+- corrigido para formalizar revogação em todas as versões ainda não revogadas;
+- teste de regressão adicionado.
+
+**Resultado:** F2 = GREEN 100%.

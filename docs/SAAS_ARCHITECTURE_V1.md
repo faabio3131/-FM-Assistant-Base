@@ -13,7 +13,19 @@ Cliente / Canal
       v
 FM Assistant API
       |
-      +--> Auth -> TenantContext
+      +--> Identity / Session / RBAC
+      |       |
+      |       +--> humano -> sessão tenant/unit-scoped
+      |       +--> máquina -> API credential tenant/unit-scoped
+      |
+      +--> Tenant / Unit / License / Entitlements
+      |
+      +--> Integration & Credential Control Plane
+      |       |
+      |       +--> provider catalog
+      |       +--> connection lifecycle
+      |       +--> Credential Vault / secret versions
+      |       +--> WhatsApp Meta
       |
       +--> Persona por tenant/unidade
       |
@@ -36,11 +48,13 @@ FM Assistant API
 
 ## Regra de isolamento
 
-Tenant e unidade são derivados da credencial autenticada. O cliente não escolhe
-`tenant_id` ou `unit_id` no payload das operações normais.
+Tenant e unidade são derivados da autoridade autenticada.
 
-Todas as consultas persistentes de persona, conversa, mensagem e conhecimento incluem
-o escopo autenticado.
+Para usuários humanos, o contexto vem da sessão + membership + unidade ativa autorizada.
+Para integrações de máquina, o contexto vem da API credential tenant/unit-scoped.
+O cliente não obtém privilégio enviando `tenant_id` ou `unit_id` arbitrários.
+
+Todas as consultas persistentes sensíveis devem aplicar o escopo autenticado.
 
 ## O que saiu do núcleo universal
 
@@ -83,37 +97,52 @@ formal aprovada.
 
 ## Segurança
 
-- credenciais de tenant armazenadas somente como HMAC-SHA256
-- API key retornada uma única vez no provisionamento
-- contexto de tenant derivado da credencial
-- auditoria persistida
-- SQLite proibido em staging/production
-- gateway de desenvolvimento proibido em staging/production
-- handoff explícito para humano
+- identidade humana separada de API credential;
+- senhas com Argon2;
+- sessão por token opaco armazenado somente como hash;
+- cookies HttpOnly/SameSite Strict;
+- RBAC por permissions explícitas e deny-by-default;
+- tenant/unidade derivados da autoridade autenticada;
+- API key de máquina armazenada somente como HMAC-SHA256;
+- Integration Vault sem retorno de segredo/ciphertext em APIs;
+- versionamento/rotação/revogação de credenciais de integração;
+- auditoria persistida;
+- SQLite proibido em staging/production;
+- FM Core obrigatório em staging/production;
+- handoff explícito para humano.
 
 ## CURRENT certificado
 
 Já fazem parte da linha canônica:
 
 1. integração oficial com FM Core Base;
-2. WhatsApp/Meta como channel adapter desacoplado;
-3. texto e áudio;
-4. persona tenant-scoped;
-5. knowledge textual tenant-scoped;
-6. conversation engine;
-7. handoff state;
-8. auditoria;
-9. migrations;
-10. CI/testes da fundação.
+2. Identity, sessão e RBAC humanos;
+3. Tenant/Unit authority;
+4. License/Entitlements foundation;
+5. API credentials separadas de identidade humana;
+6. Integration & Credential Control Plane universal;
+7. provider catalog inicial (`whatsapp_meta`);
+8. Credential Vault + secret versioning/rotation/revocation;
+9. WhatsApp/Meta como facade/canal sobre o Integration Fabric;
+10. texto e áudio;
+11. persona tenant-scoped;
+12. knowledge textual tenant-scoped;
+13. conversation engine;
+14. handoff state;
+15. auditoria;
+16. migrations versionadas;
+17. CI/testes da fundação.
 
 ## TARGET aprovado
 
 A sequência futura é regida por:
 
 - `docs/governance/SYSTEM_DESIGN_MASTER_V1.md`;
-- ADR-001 a ADR-006;
-- `docs/governance/PROMPT_MESTRE_EXECUCAO_INTEGRAL_V1.md`.
+- ADRs aprovados;
+- `docs/governance/PROMPT_MESTRE_EXECUCAO_INTEGRAL_V1.md`;
+- `docs/governance/EXECUTION_TRACKER_MASTER.md`.
 
-Inclui Identity/RBAC, Control Plane, Integration Fabric, BYOK, CRM/Sales Pack,
-follow-up, RAG governado, human inbox, frontend comercial, billing, observabilidade
-e readiness de produção.
+A próxima fase é F3 — FM Core Production Control Plane. Permanecem posteriores:
+Knowledge/Retrieval avançado, Human Inbox, CRM/Sales Pack, follow-up/agenda,
+frontend comercial, billing/quotas, observabilidade, hardening, backup/restore,
+staging/homologação e readiness comercial.
