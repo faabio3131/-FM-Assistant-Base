@@ -490,3 +490,32 @@ LIMITES:
 GATE: GREEN INTERMEDIÁRIO; F3 GLOBAL IN_PROGRESS; F4 NOT_STARTED.
 PRÓXIMO PASSO: concluir F3.6.2 integrando autoridade real do Command e mutações com auditabilidade, após definição de contrato; continuar F3.7 BYOK/shared vault e demais gates F3.
 RESTRIÇÕES: sem merge da PR enquanto F3 e todos os gates aplicáveis não estiverem 100% verdes; sem deploy ou migration real; Kordena read-only.
+
+
+2026-10-18 — F3.7 BYOK TENANT GATEWAY PORT + ROUTING SECURITY
+FASE: F3 — IN_PROGRESS; F3.7 CONTRATO/BOOTSTRAP = GREEN INTERMEDIÁRIO.
+CORE FUNCIONAL HEAD: 5ee93dbe3d43baf7503ccc211ecf6b8989e4f176
+ACOES:
+- CoreCredentialResolver com porta TenantCredentialGateway explícita, sem dependência vertical ou acesso direto ao banco Assistant;
+- GovernedCredentialResolver separa FM-managed de tenant-managed, rejeitando origem ambígua;
+- validação estrita de integration:<tenant_id>:<opaque_id>;
+- BYOK negado/revogado falha definitivamente no roteador e NÃO troca para rota FM-managed;
+- bootstrap Core aceita injeção controlada de gateway, mas BYOK continua desabilitado por padrão;
+- testes de cross-tenant, referência falsa, segredo revogado, bloqueio do FM fallback e bootstrap.
+EVIDENCIA REMOTA:
+- Core GitHub Actions push 39132968727 SUCCESS;
+- Core GitHub Actions pull_request 39132973708 SUCCESS;
+- Ruff e AI service tests PASS;
+- documentação Core docs/F3_7_BYOK_GATEWAY_BOUNDARY.md.
+GATE:
+- F3.7 port e política de fallback: GREEN INTERMEDIÁRIO;
+- F3.7 integração real Assistant/Core: PENDENTE;
+- F3 GLOBAL: IN_PROGRESS; F4 NOT_STARTED.
+PENDENCIAS:
+- gateway real com identidade serviço autorizada e contrato de secret resolution tenant/unit/capability/entitlement;
+- rotação, revogação, concurrency, security audit, E2E, Vault real;
+- F3 demais gates: Command real, gestão admin, quotas/circuit, PostgreSQL, provider homologation.
+RESTRICOES:
+- merge somente após 100% gates aplicáveis da entrega/fase;
+- deploy/segredos reais/migrations de produção exigem autorização humana;
+- Kordena read-only.
