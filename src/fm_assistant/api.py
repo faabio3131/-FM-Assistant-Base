@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.whatsapp_meta import WhatsAppProviderError
+from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
 from .core_client import CoreAIClient, CoreAudioTranscriber
@@ -119,6 +120,18 @@ class HandoffRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+
+
+class CommandBridgeManagePayload(BaseModel):
+    action: str = Field(pattern=r"^(provision|grant|revoke_grant|revoke_identity)$")
+    tenant_id: str = Field(min_length=1, max_length=128)
+    unit_id: str = Field(min_length=1, max_length=128)
+    capability: str = Field(min_length=1, max_length=160)
+    target_key_id: str = Field(min_length=1, max_length=64)
+    actor_user_id: str = Field(min_length=1, max_length=128)
+    organization_id: str = Field(min_length=1, max_length=128)
+    step_up_at: int
+    command_request_id: str = Field(min_length=1, max_length=96)
 
 
 class CoreBridgeResolvePayload(BaseModel):
@@ -404,6 +417,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         vault=vault,
         key_id=cfg.core_bridge_key_id,
         signing_key=cfg.core_bridge_signing_key,
+    )
+    command_bridge = CommandBridgeControlService(
+        sessions=session_factory,
+        command_key_id=cfg.command_control_key_id,
+        command_signing_key=cfg.command_control_signing_key,
+        trusted_organization=cfg.trusted_command_organization_id,
+        core_key_id=cfg.core_bridge_key_id,
     )
     whatsapp_channels = WhatsAppChannelRepository(integration_service)
     whatsapp_inbound = WhatsAppInboundRepository(session_factory)
@@ -1215,6 +1235,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for row in rows
         ]
 
+
+    @app.post("/internal/v1/command/core-bridge/manage", include_in_schema=False)
+    async def internal_command_core_bridge_manage(request: Request) -> JSONResponse:
+        body = await request.body()
+        if len(body) > 4096:
+            raise HTTPException(status_code=401, detail="command_bridge_denied")
+        try:
+            payload = CommandBridgeManagePayload.model_validate_json(body)
+            result = command_bridge.execute(
+                raw_body=body,
+                headers={
+                    "key_id": request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Command-Nonce"),
+                    "signature": request.headers.get("X-FM-Command-Signature"),
+                },
+                action=payload.action,
+                tenant_id=payload.tenant_id,
+                unit_id=payload.unit_id,
+                capability=payload.capability,
+                target_key_id=payload.target_key_id,
+                actor_user_id=payload.actor_user_id,
+                organization_id=payload.organization_id,
+                step_up_at=payload.step_up_at,
+                command_request_id=payload.command_request_id,
+            )
+        except (CommandBridgeDenied, ValidationError) as exc:
+            raise HTTPException(status_code=401, detail="command_bridge_denied") from exc
+        return JSONResponse(
+            {"status": result},
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.post("/internal/v1/core/credentials/resolve", include_in_schema=False)
     async def internal_core_credential_resolve(request: Request) -> JSONResponse:
