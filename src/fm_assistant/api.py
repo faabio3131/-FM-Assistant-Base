@@ -1268,6 +1268,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.post("/internal/v1/command/core-bridge/status", include_in_schema=False)
+    async def internal_command_core_bridge_status(request: Request) -> JSONResponse:
+        """Signed, scope-restricted mutation lookup. Never performs a mutation."""
+        body = await request.body()
+        if len(body) > 4096:
+            raise HTTPException(status_code=401, detail="command_bridge_denied")
+        try:
+            payload = CommandBridgeManagePayload.model_validate_json(body)
+            result = command_bridge.reconcile_status(
+                raw_body=body,
+                headers={
+                    "key_id": request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Command-Nonce"),
+                    "signature": request.headers.get("X-FM-Command-Signature"),
+                },
+                action=payload.action,
+                tenant_id=payload.tenant_id,
+                unit_id=payload.unit_id,
+                capability=payload.capability,
+                target_key_id=payload.target_key_id,
+                actor_user_id=payload.actor_user_id,
+                organization_id=payload.organization_id,
+                step_up_at=payload.step_up_at,
+                command_request_id=payload.command_request_id,
+            )
+        except (CommandBridgeDenied, ValidationError) as exc:
+            raise HTTPException(status_code=401, detail="command_bridge_denied") from exc
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
     @app.post("/internal/v1/core/credentials/resolve", include_in_schema=False)
     async def internal_core_credential_resolve(request: Request) -> JSONResponse:
         # Internal-only ingress with network ACL/TLS; never trust browser auth.
