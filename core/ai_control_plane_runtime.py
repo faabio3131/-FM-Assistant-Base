@@ -72,6 +72,9 @@ class ScopedCoreExecutor(ExecutorModeloIA):
         item = self._routes.get(rota.configuracao_id)
         if item is None:
             raise FalhaRotaDefinitiva("ai_provider.executor_missing")
+        # Verify circuit scope before resolving any BYOK secret.
+        if self._circuit is not None and item.credential_source != "fm_managed":
+            raise FalhaRotaDefinitiva("core_circuit.byok_partition_required")
         try:
             if item.credential_source == "tenant_managed":
                 scoped = getattr(self._credentials, "resolve_for_request", None)
@@ -117,8 +120,6 @@ class ScopedCoreExecutor(ExecutorModeloIA):
         if self._circuit is not None:
             # Provider-wide health cannot safely represent independent BYOK
             # credential health; reject until credential-partitioned fencing exists.
-            if item.credential_source != "fm_managed":
-                raise FalhaRotaDefinitiva("core_circuit.byok_partition_required")
             try:
                 lease, version = self._circuit.claim(
                     provider_id=rota.provider, now=datetime.now(UTC),
