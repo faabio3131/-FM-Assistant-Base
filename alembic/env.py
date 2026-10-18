@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import create_engine, pool
 
-from core.ai_control_plane import ControlPlaneBase
 import core.ai_usage_ledger  # noqa: F401 - registra tabelas do ledger
+from alembic import context
+from core.ai_control_plane import ControlPlaneBase
 
 config = context.config
 if config.config_file_name and config.get_section("loggers"):

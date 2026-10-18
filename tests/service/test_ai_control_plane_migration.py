@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 
-from core.ai_control_plane import ControlPlaneBase
 import core.ai_usage_ledger  # noqa: F401 - registra metadata
+from alembic import command
+from core.ai_control_plane import ControlPlaneBase
 
 
 def test_f3_versioned_migration_upgrade_downgrade(tmp_path):
