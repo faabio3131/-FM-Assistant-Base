@@ -34,6 +34,7 @@ class ProviderRouteSettings:
     base_url: str
     api_key: str = field(repr=False)
     timeout_seconds: float = 30.0
+    max_output_tokens: int | None = None
 
     def __post_init__(self) -> None:
         required = (
@@ -53,6 +54,11 @@ class ProviderRouteSettings:
             raise ValueError("core_ai_base_url_requires_https")
         if not 0 < self.timeout_seconds <= 120:
             raise ValueError("core_ai_timeout_invalid")
+        if self.max_output_tokens is not None and (
+            type(self.max_output_tokens) is not int
+            or not 1 <= self.max_output_tokens <= 1_000_000
+        ):
+            raise ValueError("core_ai_output_ceiling_invalid")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -155,6 +161,11 @@ def _route_from_payload(payload: Any) -> ProviderRouteSettings:
             base_url=str(payload["base_url"]).rstrip("/"),
             api_key=api_key,
             timeout_seconds=float(payload.get("timeout_seconds", 30.0)),
+            max_output_tokens=(
+                payload.get("max_output_tokens")
+                if payload.get("max_output_tokens") is None
+                else int(payload["max_output_tokens"])
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("configuraÃ§Ã£o de rota de IA invÃ¡lida") from exc
