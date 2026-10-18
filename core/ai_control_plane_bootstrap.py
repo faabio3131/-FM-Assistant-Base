@@ -10,7 +10,7 @@ from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-import core.ai_admin_audit
+import core.ai_admin_audit as admin_audit
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
 from core.ai_control_plane_runtime import (
     CoreControlPlaneAIRuntime,
@@ -22,6 +22,7 @@ from core.seguranca.segredos import ReferenceSecretStore
 
 REQUIRED_REVISION = "f3_0002"
 REQUIRED_TABLES = frozenset(ControlPlaneBase.metadata.tables) | {
+    admin_audit.CommandAdminAuditRecord.__tablename__,
     "core_ai_price_snapshots",
     "core_ai_price_tariffs",
     "core_ai_usage_events",
