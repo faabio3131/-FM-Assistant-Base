@@ -355,6 +355,7 @@ class TenantLicenseORM(Base):
         primary_key=True,
     )
     plan_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    plan_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     trial_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -556,3 +557,34 @@ def create_session_factory(database_url: str):
 
 def create_schema(engine) -> None:
     Base.metadata.create_all(engine)
+
+
+class PlanVersionORM(Base):
+    """Immutable catalog revision; never stores price or provider secrets."""
+
+    __tablename__ = "assistant_plan_versions"
+
+    plan_code: Mapped[str] = mapped_column(String(120), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PlanLimitORM(Base):
+    """Per-plan metric ceiling; no implicit unlimited fallback."""
+
+    __tablename__ = "assistant_plan_limits"
+
+    plan_code: Mapped[str] = mapped_column(String(120), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resource: Mapped[str] = mapped_column(String(80), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(12), nullable=False)
+    limit_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["plan_code", "revision"],
+            ["assistant_plan_versions.plan_code", "assistant_plan_versions.revision"],
+        ),
+    )
