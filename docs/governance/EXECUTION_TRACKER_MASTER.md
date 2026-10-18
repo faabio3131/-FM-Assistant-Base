@@ -742,3 +742,11 @@ HISTÓRICO DE CORREÇÕES:
 COMMAND:
 - PR #90 mantém CI anterior GREEN em 811f0cf5d7d99ec078577b1fa35948a1120a921e; runbook documental de staging isolado docs/FMCC_F3_CONTROLLED_STAGING_VALIDATION_RUNBOOK.md criado no Command.
 RESTRIÇÕES: F3 GLOBAL IN_PROGRESS, Command e Core não sofrem deploy. Falta reviewer independente, ambiente/credenciais governados, TLS/ACL/Vault, quotas/circuit/FinOps, política de retenção para nonces e homologação controlada. Não promover PRs, F4 ou produção antecipadamente.
+
+2026-10-18 — F3.8 GOVERNED QUOTAS/CIRCUIT/FINOPS DESIGN CANDIDATE
+FASE: F3 IN_PROGRESS, F4 NOT_STARTED.
+CORE: docs/F3_8_QUOTAS_CIRCUIT_FINOPS_DESIGN_CANDIDATE.md criado na branch feat/ai-service-v1.
+CURRENT: provider health/circuit configuráveis e leitura de rotas fechadas/saudáveis; não há prova de circuit breaker distribuído automático, reserva preventiva de quotas, single half-open probe e settlement reconciliável entre retries/fallback.
+TARGET (NÃO IMPLEMENTADO): quota transaction reserve/settle/refund por tenant/unidade/capability e request_id; circuit persistent state/lease/fencing; fallback governado compatível com BYOK e teto de custo; observabilidade/FinOps sem inventar custo desconhecido.
+GATE: somente proposta para revisão técnica; sem alterar política de custo, aplicação produtiva ou classificação F3.8 GREEN.
+PENDÊNCIAS: revisão ADR/System Design, state machine, migrations aditivas, testes de concorrência PostgreSQL, integração ao runtime, CI Core/Assistant, revisão independente, providers reais e Vault/rede.
