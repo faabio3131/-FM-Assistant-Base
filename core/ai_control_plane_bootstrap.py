@@ -17,6 +17,10 @@ from core.ai_control_plane_runtime import (
     CoreCredentialResolver,
     FMManagedCredentialResolver,
 )
+from core.ai_tenant_credential_resolver import (
+    GovernedCredentialResolver,
+    TenantCredentialGateway,
+)
 from core.ai_usage_ledger import PersistentAIFinOps
 from core.seguranca.segredos import ReferenceSecretStore
 
@@ -48,18 +52,32 @@ def build_persistent_core(
     database_url: str,
     *,
     credential_resolver: CoreCredentialResolver | None = None,
+    tenant_gateway: TenantCredentialGateway | None = None,
 ) -> tuple[CoreControlPlaneAIRuntime, Engine]:
+    # O gateway de tenant deve ser injetado explicitamente por integrador confiável.
+    # O runtime comercial não constrói gateway nem aceita BYOK por padrão.
+    if credential_resolver is not None and tenant_gateway is not None:
+        raise ValueError("core_credential_resolver_ambiguous")
     # The caller validates the URL and commercial environment before invoking.
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         if not control_plane_is_ready(engine):
             raise RuntimeError("core_control_plane_database_not_ready")
         sessions = sessionmaker(engine, expire_on_commit=False)
+        fm_credentials = FMManagedCredentialResolver(ReferenceSecretStore())
+        credentials: CoreCredentialResolver = (
+            credential_resolver
+            or (
+                GovernedCredentialResolver(
+                    fm_credentials=fm_credentials, tenant_gateway=tenant_gateway
+                )
+                if tenant_gateway is not None
+                else fm_credentials
+            )
+        )
         runtime = CoreControlPlaneAIRuntime(
             control_plane=AIControlPlaneStore(sessions),
-            credentials=credential_resolver or FMManagedCredentialResolver(
-                ReferenceSecretStore()
-            ),
+            credentials=credentials,
             metering=PersistentAIFinOps(sessions),
         )
         return runtime, engine
