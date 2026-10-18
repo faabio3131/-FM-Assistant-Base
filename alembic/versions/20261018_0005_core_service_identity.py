@@ -8,6 +8,7 @@ Migration DOES NOT create, enable or distribute service credentials.
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "20261018_0005"
