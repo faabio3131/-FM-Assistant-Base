@@ -22,6 +22,7 @@ from .core_bridge_models import CoreBridgeGrantORM, CoreBridgeIdentityORM
 from .db import TenantORM, UnitORM
 
 PATH = "/internal/v1/command/core-bridge/manage"
+STATUS_PATH = "/internal/v1/command/core-bridge/status"
 _ACTIONS = frozenset({"provision", "grant", "revoke_grant", "revoke_identity"})
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _NONCE = re.compile(r"^[A-Za-z0-9_-]{22,96}$")
@@ -35,21 +36,22 @@ class CommandBridgeDenied(PermissionError):
 
 
 def signed_control_message(
-    *, key_id: str, timestamp: str, nonce: str, body: bytes
+    *, key_id: str, timestamp: str, nonce: str, body: bytes, path: str = PATH
 ) -> bytes:
     return (
-        f"POST\n{PATH}\n{key_id}\n{timestamp}\n{nonce}\n"
+        f"POST\n{path}\n{key_id}\n{timestamp}\n{nonce}\n"
         f"{hashlib.sha256(body).hexdigest()}"
     ).encode("ascii")
 
 
 def sign_command_control(
-    *, key: str, key_id: str, timestamp: str, nonce: str, body: bytes
+    *, key: str, key_id: str, timestamp: str, nonce: str, body: bytes,
+    path: str = PATH,
 ) -> str:
     return hmac.new(
         key.encode("utf-8"),
         signed_control_message(
-            key_id=key_id, timestamp=timestamp, nonce=nonce, body=body
+            key_id=key_id, timestamp=timestamp, nonce=nonce, body=body, path=path
         ),
         hashlib.sha256,
     ).hexdigest()
@@ -228,3 +230,98 @@ class CommandBridgeControlService:
         if outcome == "denied":
             raise CommandBridgeDenied("command_bridge_denied")
         return outcome
+
+
+    def reconcile_status(
+        self,
+        *,
+        raw_body: bytes,
+        headers: dict[str, str | None],
+        action: str,
+        tenant_id: str,
+        unit_id: str,
+        capability: str,
+        target_key_id: str,
+        actor_user_id: str,
+        organization_id: str,
+        step_up_at: int,
+        command_request_id: str,
+    ) -> dict[str, str | None]:
+        """Inspect an existing mutation outcome without mutating grants or identities.
+
+        Unknown is never evidence that a timed-out mutation did NOT commit.
+        Status signatures have a different path from mutation signatures.
+        """
+        if not all((
+            self._command_key_id,
+            self._command_key,
+            self._organization,
+            self._core_key_id,
+        )) or len(self._command_key or "") < 32:
+            raise CommandBridgeDenied("command_bridge_denied")
+        key_id = headers.get("key_id") or ""
+        timestamp = headers.get("timestamp") or ""
+        nonce = headers.get("nonce") or ""
+        signature = headers.get("signature") or ""
+        if (
+            not _KEY_ID.fullmatch(key_id)
+            or key_id != self._command_key_id
+            or not _NONCE.fullmatch(nonce)
+            or not timestamp.isascii()
+            or not timestamp.isdecimal()
+            or len(timestamp) != 10
+            or len(signature) != 64
+            or len(raw_body) > 4096
+        ):
+            raise CommandBridgeDenied("command_bridge_denied")
+        now_unix = int(datetime.now(UTC).timestamp())
+        if abs(now_unix - int(timestamp)) > WINDOW_SECONDS:
+            raise CommandBridgeDenied("command_bridge_denied")
+        expected = sign_command_control(
+            key=self._command_key or "",
+            key_id=key_id,
+            timestamp=timestamp,
+            nonce=nonce,
+            body=raw_body,
+            path=STATUS_PATH,
+        )
+        if not hmac.compare_digest(signature, expected):
+            raise CommandBridgeDenied("command_bridge_denied")
+        if (
+            action not in _ACTIONS
+            or organization_id != self._organization
+            or target_key_id != self._core_key_id
+            or not all(
+                isinstance(value, str) and _SCOPE.fullmatch(value)
+                for value in (
+                    tenant_id, unit_id, capability, actor_user_id,
+                    command_request_id,
+                )
+            )
+            or type(step_up_at) is not int
+            or step_up_at > now_unix + 15
+            or now_unix - step_up_at > STEP_UP_SECONDS
+        ):
+            raise CommandBridgeDenied("command_bridge_denied")
+        with self._sessions() as db:
+            event = db.scalar(
+                select(CommandBridgeControlEventORM).where(
+                    CommandBridgeControlEventORM.command_request_id
+                    == command_request_id
+                )
+            )
+            if event is None:
+                return {"status": "unknown", "outcome": None}
+            if (
+                event.key_id != target_key_id
+                or event.tenant_id != tenant_id
+                or event.unit_id != unit_id
+                or event.capability != capability
+                or event.action != action
+                or event.actor_user_id != actor_user_id
+            ):
+                # Hide the presence of an event in another scope or actor.
+                return {"status": "unknown", "outcome": None}
+            if event.outcome in {"provisioned", "granted", "revoked"}:
+                return {"status": "applied", "outcome": event.outcome}
+            return {"status": "denied", "outcome": "denied"}
