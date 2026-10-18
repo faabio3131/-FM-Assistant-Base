@@ -379,3 +379,20 @@ PENDENCIAS OBRIGATORIAS:
 - homologacao de provider real somente com credenciais/ambiente autorizados.
 PROIBICOES: merge sem todos os gates; nenhum deploy/producao; Kordena read-only.
 PROXIMO PASSO: seguir F3.5 a F3.n, corrigindo e retestando autonomamente, sem declarar F3 encerrada antecipadamente.
+
+
+2026-10-18 — AUTORIZACAO EXPlicITA DE MERGE RECONFIRMADA EM 2026-10-18
+DECISAO DO PROPRIETARIO:
+- o executor tem autorizacao para efetuar merge de PRs quando estiverem aptas para integracao.
+INTERPRETACAO OPERACIONAL VINCULADA AO AGENTS.md:
+- GitHub mergeable=true e condicao necessaria, mas nao suficiente;
+- so efetuar merge quando a entrega/fase correspondente e TODOS os gates obrigatorios aplicaveis estiverem GREEN 100%: testes, seguranca, migrations, CI, revisao do diff, ausencia de STOP e tracker atualizado;
+- PR em Draft nao deve ser mergeada sem passar por todos os criterios e promover para ready-for-review quando cabivel;
+- em caso de RED, BLOCKED_EXTERNAL ou verificacao inconclusiva, nao fazer merge; corrigir e validar;
+- apos merge, verificar CI pos-merge e registrar SHA;
+- deploy/cutover/producao seguem dependendo de autorizacao humana explicita distinta.
+EVIDENCIA DE ESTADO NA DATA:
+- Assistant PR #1: mergeable=true, draft=true, merged=false;
+- Core PR #1: mergeable=true, draft=true, merged=false;
+- F3 permanece IN_PROGRESS, portanto estas PRs nao estao prontas para merge por governanca, embora GitHub indique mergeability tecnica.
+RESULTADO: AUTORIZACAO CONFIRMADA, NENHUM MERGE EXECUTADO.
