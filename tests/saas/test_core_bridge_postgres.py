@@ -168,6 +168,7 @@ def postgres_bridge():
             display_name="AI Fixture", definition_version=1,
             enabled=True, created_at=now, updated_at=now,
         ))
+        db.flush()  # Provider FK before connection registration.
         db.add(IntegrationConnectionORM(
             connection_id=CONNECTION_ID,
             tenant_id=TENANT_ID, unit_id=UNIT_ID,
@@ -175,6 +176,7 @@ def postgres_bridge():
             status="active", config_json="{}", revision=1,
             created_at=now, updated_at=now,
         ))
+        db.flush()  # Connection FK before capabilities and secret versions.
         db.add(IntegrationCapabilityORM(
             connection_id=CONNECTION_ID, capability=CAPABILITY,
         ))
