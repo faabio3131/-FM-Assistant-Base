@@ -79,3 +79,14 @@ Se a entrega de saída para a Meta ficar incerta depois de uma resposta do Core,
 ## Resultado
 
 Provider routing, fallback e evolução multimodelo passam a ser responsabilidade exclusiva do FM Core Base. A Assistente permanece focada em conversa, contexto, canais, handoff e capabilities de negócio.
+
+
+## Governança comercial aprovada em 2026-10-17
+
+Conforme ADR-002, staging/produção devem usar `FM_ASSISTANT_MODEL_BACKEND=core`
+como caminho cognitivo normal. Provider direto no Assistant permanece apenas para
+development/test, diagnóstico controlado ou exceção formal.
+
+Conforme ADR-003 e ADR-004, configuração de providers/credenciais por cliente evoluirá
+para Control Plane data-driven e BYOK governado. Novo cliente não pode exigir alteração
+de código nem deploy.
