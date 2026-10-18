@@ -114,3 +114,16 @@ def test_fail_closed_for_bad_policy_or_request(quota):
     reserve(store, "only", units=1)
     with pytest.raises(QuotaDenied, match="reservation_unavailable"):
         settle(store, "only", consumed=2)
+
+
+def test_request_replay_after_policy_revision_is_rejected(quota):
+    store, sessions = quota
+    reserve(store, "prior", units=1)
+    with sessions.begin() as db:
+        policy = db.get(AIQuotaPolicyRecord, ("a", "u1", "text"))
+        policy.revision = 2
+        policy.limit_units = 1
+    with pytest.raises(QuotaDenied, match="request_conflict"):
+        reserve(store, "prior", units=1)
+    with pytest.raises(QuotaDenied, match="limit_exceeded"):
+        reserve(store, "new", units=1)
