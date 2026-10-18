@@ -319,3 +319,12 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - O produtor do request continua impedido de executar novamente o mesmo request_id em caso de resultado ambiguo.
 - Este gate nao equivale a conciliacao monetaria, provider usage settlement, cobranca ou verificacao de saldo real.
 - CI verde no HEAD atual e revisao independente sao condicoes de certificacao. Nao ativar em producao.
+
+## F3.8 — DECISÃO SUPERIOR: SOFTWARE 100% ANTES DE HOMOLOGAÇÃO EXTERNA (2026-10-18)
+
+- Ordem expressa do proprietário: concluir **todo o código, migrations, contratos e testes internos de software**, avançando autonomamente pelas próximas tarefas e fases. Nenhuma pendência de provider real, Vault, DNS, TLS, rede, credencial externa ou homologação impede a construção.
+- Depêndencias de terceiros devem ter adapters completos, mock/fake e testes determinísticos de falha/sucesso; as provas reais ficam registradas exclusivamente como `EXTERNAL_HOMOLOGATION_DEFERRED`, para após `BUILD_COMPLETE_INTERNAL_GREEN`.
+- Não confundir testes PostgreSQL descartáveis/contract CI com homologação real. Manter isolamento de tenant, fail-closed, quota/circuit/FinOps, segurança, migrations aditivas, lint e CI como gates obrigatórios **internos**.
+- A progressão para F4 e subsequentes depende da conclusão de implementação e CI interno da fase anterior, não de testes contra provedores reais.
+- Não ativar providers, segredos reais, deploy, migration produtiva ou custos sem autorização específica; merge condicionado à certificação interna integral e à verificação de que não provoca deploy automático.
+- Registrar conclusão comprovada em `docs/governance/EXECUTION_TRACKER_MASTER.md` do Assistant. Autoridade: `docs/governance/F3_BUILD_FIRST_EXTERNAL_HOMOLOGATION_LAST_2026-10-18.md` naquele repositório. Esta decisão substitui a restrição antiga somente quanto ao bloqueio de **construção** por dependências externas.
