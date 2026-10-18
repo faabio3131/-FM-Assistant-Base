@@ -17,7 +17,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from .command_bridge_control_models import CommandBridgeControlEventORM
+from .command_bridge_control_models import (CommandBridgeControlEventORM, CommandBridgeStatusNonceORM)
 from .core_bridge_models import CoreBridgeGrantORM, CoreBridgeIdentityORM
 from .db import TenantORM, UnitORM
 
@@ -303,25 +303,38 @@ class CommandBridgeControlService:
             or now_unix - step_up_at > STEP_UP_SECONDS
         ):
             raise CommandBridgeDenied("command_bridge_denied")
-        with self._sessions() as db:
-            event = db.scalar(
-                select(CommandBridgeControlEventORM).where(
-                    CommandBridgeControlEventORM.command_request_id
-                    == command_request_id
+        try:
+            with self._sessions.begin() as db:
+                # Persist a one-time status nonce in the SAME transaction as
+                # the lookup. The read-only status never changes grants.
+                db.add(CommandBridgeStatusNonceORM(
+                    nonce=nonce,
+                    command_request_id=command_request_id,
+                    key_id=key_id,
+                    created_at=datetime.now(UTC),
+                ))
+                db.flush()
+                event = db.scalar(
+                    select(CommandBridgeControlEventORM).where(
+                        CommandBridgeControlEventORM.command_request_id
+                        == command_request_id
+                    )
                 )
-            )
-            if event is None:
-                return {"status": "unknown", "outcome": None}
-            if (
-                event.key_id != target_key_id
-                or event.tenant_id != tenant_id
-                or event.unit_id != unit_id
-                or event.capability != capability
-                or event.action != action
-                or event.actor_user_id != actor_user_id
-            ):
-                # Hide the presence of an event in another scope or actor.
-                return {"status": "unknown", "outcome": None}
-            if event.outcome in {"provisioned", "granted", "revoked"}:
-                return {"status": "applied", "outcome": event.outcome}
-            return {"status": "denied", "outcome": "denied"}
+                if event is None:
+                    return {"status": "unknown", "outcome": None}
+                if (
+                    event.key_id != target_key_id
+                    or event.tenant_id != tenant_id
+                    or event.unit_id != unit_id
+                    or event.capability != capability
+                    or event.action != action
+                    or event.actor_user_id != actor_user_id
+                ):
+                    # Hide the presence of an event in another scope or actor.
+                    return {"status": "unknown", "outcome": None}
+                if event.outcome in {"provisioned", "granted", "revoked"}:
+                    return {"status": "applied", "outcome": event.outcome}
+                return {"status": "denied", "outcome": "denied"}
+
+        except IntegrityError as exc:
+            raise CommandBridgeDenied("command_bridge_denied") from exc
