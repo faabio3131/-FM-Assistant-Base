@@ -19,11 +19,14 @@ import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
-from fm_assistant.command_bridge_control_models import (CommandBridgeControlEventORM, CommandBridgeStatusNonceORM)
+from fm_assistant.command_bridge_control_models import (
+    CommandBridgeControlEventORM,
+    CommandBridgeStatusNonceORM,
+)
 from fm_assistant.command_bridge_control_service import (
+    STATUS_PATH,
     CommandBridgeControlService,
     CommandBridgeDenied,
-    STATUS_PATH,
     sign_command_control,
 )
 from fm_assistant.core_bridge_models import (
