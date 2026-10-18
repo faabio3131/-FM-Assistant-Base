@@ -835,3 +835,17 @@ O Prompt Mestre só está concluído quando:
 6. deploy/produção continuam aguardando autorização humana específica.
 
 Até lá, o executor deve avançar fase a fase dentro das autorizações deste documento, corrigindo gates vermelhos antes de progredir.
+
+# 25. ADITIVO EXECUTIVO — BUILD FIRST (DECISÃO DE 18/10/2026)
+
+Esta instrução posterior e expressa do proprietário **altera a ordem de execução**, mantendo os objetivos e a integridade de todas as fases.
+
+1. **Primeiro concluir 100% da construção do software:** executar autonomamente F0–F12, construir também todas as peças internas de F14 (interfaces, onboarding, runbooks, segurança, QA, operações e materiais que não dependem de prova real) e concluir os testes executáveis com dados fictícios e bancos descartáveis.
+2. **Depois homologar externamente:** as etapas F13 de cloud staging, terceiros, WhatsApp, credenciais, Vault, gateway, TLS, DNS e demais provas reais passam para a fase única de homologação de conclusão, executada **após** BUILD_COMPLETE_INTERNAL_GREEN. A certificação comercial real e o cutover continuam dependentes de evidência e consentimento.
+3. **Sem paralisia de execução:** ausência de conta externa, chave, provedor, ambiente de produção ou aprovação de parceiro é `EXTERNAL_HOMOLOGATION_DEFERRED`; registrar e avançar para a próxima tarefa de software. Não tratar como GREEN nem como impeditivo da construção ou do próximo módulo/fase técnica.
+4. **Gates internos continuam obrigatórios:** lint, typecheck, build, testes, segurança, RBAC, isolamento, contratos, migrations em banco descartável, concorrência PostgreSQL, E2E simulados, CI e documentação devem ficar verdes antes de declarar construção completa.
+5. **Merge:** aplicar autorização prévia somente quando gates internos do conjunto a integrar estiverem completos e quando não houver publicação, deployment ou migração automática decorrente do merge. Caso isso não esteja demonstrado, manter PR isolada; não confundir merge de código com lançamento.
+6. **Estados distintos e verificáveis:** `BUILD_IN_PROGRESS`, `BUILD_COMPLETE_INTERNAL_GREEN`, `EXTERNAL_HOMOLOGATION_DEFERRED` e `REAL_HOMOLOGATION_APPROVED`. Apenas o último, com demais gates finais e autorização humana, permite declarar o produto pronto para uso real.
+7. **Autonomia integral:** implementar, corrigir e prosseguir pelo cronograma sem pedir confirmação para tarefas internas; interromper apenas por risco crítico ou ação real irreversível que exija consentimento específico.
+
+Referência canônica: `docs/governance/F3_BUILD_FIRST_EXTERNAL_HOMOLOGATION_LAST_2026-10-18.md`. Nenhum requisito funcional, proteção de dados, autoridade humana ou controle de segurança foi removido; somente a dependência temporal de provas externas foi adiada.
