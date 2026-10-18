@@ -6,18 +6,18 @@ from pathlib import Path
 
 import httpx
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from alembic import command
 from core.ai_control_plane import AIControlPlaneStore, RouteDefinition
+from core.ai_pricing import PriceSnapshotIA, TarifaIA
 from core.ai_router import CapabilityIA
 from core.ai_service_api import create_app
 from core.ai_service_settings import CoreEnvironment, CoreSettings
 from core.ai_usage_ledger import PersistentAIFinOps
-from core.ai_pricing import PriceSnapshotIA, TarifaIA
 
 
 def migrated_db(tmp_path: Path) -> tuple[str, AIControlPlaneStore, PersistentAIFinOps]:
@@ -100,9 +100,8 @@ def test_boot_fails_closed_without_migrations(tmp_path):
         environment=CoreEnvironment.TEST, service_key="test-key",
         routes=(), control_plane_database_url=url,
     ).validate()
-    with pytest.raises(RuntimeError, match="database_not_ready"):
-        with TestClient(create_app(cfg)):
-            pass
+    with pytest.raises(RuntimeError, match="database_not_ready"), TestClient(create_app(cfg)):
+        pass
 
 
 def test_missing_provider_secret_responds_without_leaking_reference(

@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
-
 from sqlalchemy.exc import SQLAlchemyError
 
 from core.ai_control_plane import ControlPlaneError
