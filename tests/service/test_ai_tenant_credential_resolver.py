@@ -9,6 +9,7 @@ import pytest
 from core.ai_control_plane import ControlPlaneError
 from core.ai_tenant_credential_resolver import (
     GovernedCredentialResolver,
+    TenantCredentialDenied,
     parse_tenant_secret_reference,
 )
 from core.seguranca.segredos import SecretValue
@@ -93,7 +94,7 @@ def test_byok_resolution_uses_exact_tenant_and_opaque_reference():
 )
 def test_invalid_reference_is_denied_before_gateway(tenant, ref):
     resolver, fm, gateway = _resolver()
-    with pytest.raises(ControlPlaneError):
+    with pytest.raises(TenantCredentialDenied):
         resolver.resolve(
             tenant_id=tenant,
             credential_source="tenant_managed",
@@ -119,7 +120,7 @@ def test_invalid_origin_never_falls_back_to_other_provider():
 def test_byok_denied_or_unavailable_must_not_fallback_to_fm():
     gateway = StubTenantGateway(error=PermissionError("not active"))
     resolver, fm, _ = _resolver(gateway=gateway)
-    with pytest.raises(PermissionError):
+    with pytest.raises(TenantCredentialDenied):
         resolver.resolve(
             tenant_id="tenant-a",
             credential_source="tenant_managed",
@@ -131,7 +132,7 @@ def test_byok_denied_or_unavailable_must_not_fallback_to_fm():
 def test_unexpected_gateway_return_is_denied_without_leaking():
     gateway = StubTenantGateway(secret=None)
     resolver, fm, _ = _resolver(gateway=gateway)
-    with pytest.raises(ControlPlaneError, match="credential_result_invalid"):
+    with pytest.raises(TenantCredentialDenied, match="byok_credential_unavailable"):
         resolver.resolve(
             tenant_id="tenant-a",
             credential_source="tenant_managed",
@@ -151,7 +152,7 @@ def test_reference_object_repr_hides_opaque_identifier():
 
 def test_fm_secret_cannot_be_obtained_using_tenant_origin():
     resolver, fm, tenant = _resolver()
-    with pytest.raises(ControlPlaneError):
+    with pytest.raises(TenantCredentialDenied):
         resolver.resolve(
             tenant_id="tenant-a",
             credential_source="tenant_managed",
