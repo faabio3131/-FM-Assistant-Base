@@ -155,7 +155,12 @@ def create_app(
                 status_code=503, detail="core_control_plane_dependency_unavailable"
             ) from exc
         except (SemRotaCompativel, FalhaRotaTransitoria) as exc:
-            raise HTTPException(status_code=503, detail=exc.codigo) from exc
+            detail = (
+                "core_control_plane_dependency_unavailable"
+                if exc.codigo == "core_ai_credential_unavailable"
+                else exc.codigo
+            )
+            raise HTTPException(status_code=503, detail=detail) from exc
         except FalhaRotaDefinitiva as exc:
             raise HTTPException(status_code=502, detail=exc.codigo) from exc
         return _response(result)
@@ -189,7 +194,12 @@ def create_app(
                 status_code=503, detail="core_control_plane_dependency_unavailable"
             ) from exc
         except (SemRotaCompativel, FalhaRotaTransitoria) as exc:
-            raise HTTPException(status_code=503, detail=exc.codigo) from exc
+            detail = (
+                "core_control_plane_dependency_unavailable"
+                if exc.codigo == "core_ai_credential_unavailable"
+                else exc.codigo
+            )
+            raise HTTPException(status_code=503, detail=detail) from exc
         except FalhaRotaDefinitiva as exc:
             raise HTTPException(status_code=502, detail=exc.codigo) from exc
         return _response(result)
