@@ -6,6 +6,7 @@ Revises: 20261018_0009
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "20261018_0010"
