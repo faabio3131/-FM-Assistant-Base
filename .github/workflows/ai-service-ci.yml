@@ -22,6 +22,7 @@ jobs:
         run: >
           ruff check
           core/ai_router.py
+          core/ai_control_plane.py
           core/ai_service_contracts.py
           core/ai_service_settings.py
           core/ai_providers.py
