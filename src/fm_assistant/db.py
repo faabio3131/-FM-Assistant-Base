@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -580,7 +581,7 @@ class PlanLimitORM(Base):
     revision: Mapped[int] = mapped_column(Integer, primary_key=True)
     resource: Mapped[str] = mapped_column(String(80), primary_key=True)
     scope: Mapped[str] = mapped_column(String(12), nullable=False)
-    limit_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    limit_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
     window_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     __table_args__ = (
         ForeignKeyConstraint(
