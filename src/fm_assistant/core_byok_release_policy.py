@@ -53,9 +53,9 @@ class CoreBYOKReleasePolicy:
         current = _utc(now or datetime.now(UTC))
         with (nullcontext(db) if db is not None else self._sessions()) as session:
             tenant = session.get(TenantORM, tenant_id)
-            unit = db.get(UnitORM, (tenant_id, unit_id))
-            license_row = db.get(TenantLicenseORM, tenant_id)
-            entitlement = db.get(EntitlementORM, (tenant_id, "ai.byok"))
+            unit = session.get(UnitORM, (tenant_id, unit_id))
+            license_row = session.get(TenantLicenseORM, tenant_id)
+            entitlement = session.get(EntitlementORM, (tenant_id, "ai.byok"))
             connection = session.scalar(
                 select(IntegrationConnectionORM).where(
                     IntegrationConnectionORM.connection_id == connection_id,
@@ -86,20 +86,20 @@ class CoreBYOKReleasePolicy:
                 and _utc(license_row.period_ends_at) <= current
             ):
                 return False
-            provider = db.get(IntegrationProviderORM, connection.provider_key)
+            provider = session.get(IntegrationProviderORM, connection.provider_key)
             if (
                 provider is None or not provider.enabled
                 or provider.integration_type != "ai"
             ):
                 return False
-            permission = db.get(
+            permission = session.get(
                 IntegrationCapabilityORM, (connection_id, capability)
             )
             if permission is None:
                 return False
             # Não retorna ciphertext. Apenas confirma a existência de uma
             # versão BYOK ainda ativa, não expirada e não revogada.
-            secret = db.scalar(
+            secret = session.scalar(
                 select(IntegrationSecretVersionORM)
                 .where(
                     IntegrationSecretVersionORM.connection_id == connection_id,
