@@ -1,6 +1,6 @@
 # F3.8 — Quotas, circuit breaker e governança FinOps (candidata de design)
 
-**Estado:** DESIGN CANDIDATE / NOT_IMPLEMENTED, 2026-10-18.
+**Estado:** F3.8.1 e F3.8.2 implementados como gates intermediários; demais partes continuam candidatas não implementadas. Evidências em `docs/F3_8_1_2_EXECUTION_CERTIFICATION.md`.
 **Autoridade:** Prompt Mestre F3, AGENTS.md, tracker mestre Assistant.
 Não promover para GREEN, não criar recursos nem ativar providers por este documento.
 
