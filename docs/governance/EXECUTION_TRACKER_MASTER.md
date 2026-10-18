@@ -63,11 +63,11 @@ F1 não pode ser declarada fase ativa/fechável enquanto o gate obrigatório de 
 
 ## F1 — Identity / RBAC / Tenant / License Control Plane
 
-**Status:** IN_PROGRESS
+**Status:** GREEN
 
 ## F2 — Integration & Credential Control Plane
 
-**Status:** NOT_STARTED
+**Status:** IN_PROGRESS
 
 ## F3 — FM Core Production Control Plane
 
@@ -269,3 +269,30 @@ PRÓXIMO PASSO:
 - commit/push;
 - validar GitHub Actions;
 - se GREEN 100%, fechar F1 e promover F2 automaticamente.
+
+
+2026-10-18 — F1 FINAL REMOTE GATE
+FASE: F1 -> F2
+SHA F1: 678ea0c7d201af1c61ffcf5cc689b4b2eca8c6d1
+EVIDÊNCIA REMOTA:
+- GitHub Actions pull_request 39091973547: SUCCESS;
+- GitHub Actions push 39091970851: SUCCESS;
+- Install: GREEN;
+- Pip check: GREEN;
+- Ruff: GREEN;
+- Pytest: GREEN.
+EVIDÊNCIA LOCAL:
+- secret scan: NO_SECRET_PATTERN_MATCHES;
+- Ruff: PASS;
+- pip check: PASS;
+- git diff --check: PASS;
+- pytest tests/saas: 27/27 PASS;
+- migration 0003/backfill: PASS;
+- security identity/RBAC/recovery: PASS.
+RESULTADO:
+- F1 = GREEN 100%;
+- F2 promovida para IN_PROGRESS conforme AGENTS.md.
+PRÓXIMO PASSO:
+- executar Current Discovery do WhatsApp/segredos/configuração;
+- desenhar e implementar Integration & Credential Control Plane universal;
+- migrar WhatsApp preservando HMAC/idempotência/reconcile_required/no-blind-retry.
