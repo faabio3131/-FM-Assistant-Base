@@ -144,3 +144,26 @@ RESULTADO:
 GATE:
 PRÓXIMO PASSO:
 ```
+
+
+2026-10-17 22:50-23:00 BRT
+FASE: F0
+HEAD ASSISTANT: 016656d7498c91601aca1e310af17136663fbc28
+HEAD CORE: bd6a93e64a92f327a576aa72c578d90378e294e5
+AÇÃO:
+- criado AGENTS.md na raiz do FM Assistant Base;
+- criado AGENTS.md na raiz do FM Core Base;
+- criado Execution Tracker canônico;
+- Prompt Mestre atualizado para correção autônoma e merge pré-autorizado com 100% GREEN;
+- decisão institucional registrada em C:\Nova-FM-Tecnologia\.fm\APPROVED_DECISIONS.md.
+EVIDÊNCIA:
+- Assistant workflow runs mais recentes no HEAD atual: 39089172739 / 39089175534;
+- Core workflow runs mais recentes no HEAD atual: 39089190930 / 39089193385.
+RESULTADO:
+- jobs remotos continuam sem validação verde;
+- F0 permanece BLOCKED_EXTERNAL até CI obrigatório executar e passar.
+GATE: BLOCKED_EXTERNAL
+PRÓXIMO PASSO:
+- restabelecer capacidade do GitHub Actions/Billing;
+- rerodar CI nos HEADs atuais;
+- se 100% GREEN, marcar F0 GREEN e avançar automaticamente para F1.
