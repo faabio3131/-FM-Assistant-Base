@@ -557,3 +557,13 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - Testes SQLite e PostgreSQL 16 (incluindo concorrência) e migration foram certificados no HEAD funcional `303747d8efe33536af796d75c698bf01864409a5`: **6/6 SUCCESS** em push e PR. Os testes intermediários RED por import sorting e asserção de ledger pré-existente foram corrigidos sem desabilitar regras.
 - Nonces de status exigem política de retenção/expurgo auditável e observabilidade antes de escala produtiva; replay nunca deve ser permitido dentro da janela, mesmo após futura limpeza.
 - A homologação de ambiente real (rede TLS/ACL, secret manager, política de quotas, circuit breakers, credenciais e revisão independente) não foi feita. **F3 IN_PROGRESS, F4 NOT_STARTED, sem merge/deploy/segredos reais/migrations não descartáveis.**
+
+## 25. DECISÃO SUPERIOR — BUILD FIRST, HOMOLOGAÇÃO EXTERNA AO FINAL (2026-10-18)
+
+- Autoridade: determinação direta do proprietário; ver `docs/governance/F3_BUILD_FIRST_EXTERNAL_HOMOLOGATION_LAST_2026-10-18.md`.
+- CONSTRUIR E CERTIFICAR INTERNAMENTE todas as funcionalidades de F3, F4 e fases seguintes de forma autônoma. Não bloquear programação pela falta de chaves, gateway, Vault real, domínio, TLS, provider real ou testes externos. Simular dependências com contratos, stubs e fixtures validados e registrar a prova interna específica.
+- GATES DE CONSTRUÇÃO obrigatórios: código, segurança, autorização, isolamento de tenant, lint, testes, migrations descartáveis, concorrência, build e CI real. Fase internamente completa pode iniciar a próxima fase com pendências externas classificadas separadamente.
+- HOMOLOGAÇÃO EXTERNA somente DEPOIS de concluir 100% do build: integrações e segredos verdadeiros, rede, infraestrutura real, ensaios com terceiros, cutover. Classificar como `EXTERNAL_HOMOLOGATION_DEFERRED`, nunca como GREEN ou como impedimento à construção.
+- Status distintos: `BUILD_IN_PROGRESS`, `BUILD_COMPLETE_INTERNAL_GREEN`, `EXTERNAL_HOMOLOGATION_DEFERRED`, `REAL_HOMOLOGATION_APPROVED`. Não confundir código completo com software homologado em produção.
+- Manter autorização especial para ações irreversíveis, deploy, credenciais reais, gastos e migrations não descartáveis. Merge interno pré-autorizado apenas se gates de software verdes, proteção de branches e ausência de deploy implícito forem comprovados.
+- Esta decisão substitui apenas a leitura antiga que exigia provas externas para avançar a construção; o restante dos controles de segurança e auditoria continua em vigor.
