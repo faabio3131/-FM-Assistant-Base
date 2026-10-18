@@ -750,3 +750,25 @@ CURRENT: provider health/circuit configuráveis e leitura de rotas fechadas/saud
 TARGET (NÃO IMPLEMENTADO): quota transaction reserve/settle/refund por tenant/unidade/capability e request_id; circuit persistent state/lease/fencing; fallback governado compatível com BYOK e teto de custo; observabilidade/FinOps sem inventar custo desconhecido.
 GATE: somente proposta para revisão técnica; sem alterar política de custo, aplicação produtiva ou classificação F3.8 GREEN.
 PENDÊNCIAS: revisão ADR/System Design, state machine, migrations aditivas, testes de concorrência PostgreSQL, integração ao runtime, CI Core/Assistant, revisão independente, providers reais e Vault/rede.
+
+
+2026-10-18 — F3.8.1-2 CORE CIRCUIT AND QUOTA INCREMENTAL GATE
+FASE: F3 IN_PROGRESS; F4 NOT_STARTED. SUBGATES F3.8.1/2 = GREEN INTERMEDIÁRIO.
+AUDITORIA DE PROVENIÊNCIA: System Design Mestre, Prompt Mestre F3 e ADR-008/ADR-004 revisados. O Core NÃO assume autorização de plano/licença ou billing do Assistant.
+CORE: PR #1 Draft, branch feat/ai-service-v1. HEAD funcional 3dbab732d8fa9c2425d6ebaa8d560cd6b1fbcf21.
+IMPLEMENTADO:
+- Máquina de estados pura em core/ai_circuit_breaker.py com CLOSED/OPEN/HALF_OPEN, threshold, cooldown, lease token lógico, resultado tardio negado e recuperação fail-closed para probe expirada. Sem uso no runtime.
+- Ledger de quota SQLAlchemy core/ai_quota_store.py, policy tenant/unidade/capability, request idempotente, reserve/settle/refund lógico, lock em policy row. Sem alterar licenças/billing e sem ativar providers.
+- Migration f3_0003 aditiva, novo bootstrap exige revisão correta; nenhuma migration em banco não descartável foi executada.
+- Novo gate PostgreSQL 16 descartável executa duas reservas concorrentes com mesmo budget, confirmando apenas uma admitida, e duas reservas idempotentes com o mesmo request ID.
+EVIDÊNCIAS FUNCIONAIS CORE:
+- AI Service CI push 39153783479 SUCCESS e PR 39153787266 SUCCESS.
+- F3 Quota PostgreSQL Security Gate push 39153783598 SUCCESS e PR 39153787264 SUCCESS.
+- Falhas antigas de Ruff imports e fixture cross-scope preservadas no histórico de Actions, corrigidas sem enfraquecer testes.
+DOCUMENTAÇÃO: docs/F3_8_1_2_EXECUTION_CERTIFICATION.md no Core. HEAD após docs deve ser revalidado.
+PENDÊNCIAS:
+- Circuit breaker compartilhado: persistência, row locks, half-open probe com fencing atômico e transições automáticas.
+- Hook de preflight quota no runtime apenas após autoridade/entitlement do Assistant, política de limite configurável e mecanismos de expiração.
+- FinOps de custo/token real, preço desconhecido auditado (nunca zero fictício), fallback seguro BYOK/FM, observabilidade, revisão independente e homologação de provedores/TLS/ACL/Vault.
+- Real PostgreSQL de staging/credenciais/provedores exige autorização humana específica.
+RESTRIÇÕES: sem merge das PRs F3, deploy, migration real, mudança produtiva de secret ou promoção de F4. Kordena read-only.
