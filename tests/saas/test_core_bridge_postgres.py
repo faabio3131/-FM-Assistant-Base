@@ -147,10 +147,12 @@ def postgres_bridge():
             tenant_id=TENANT_ID, display_name="Postgres Fixture", slug=TENANT_ID,
             status="active", created_at=now, updated_at=now,
         ))
+        db.flush()  # PostgreSQL FK: tenant must exist before dependent rows.
         db.add(UnitORM(
             tenant_id=TENANT_ID, unit_id=UNIT_ID, display_name="Unit",
             status="active", created_at=now, updated_at=now,
         ))
+        db.flush()  # PostgreSQL FK: unit must exist before bridge grants.
         db.add(TenantLicenseORM(
             tenant_id=TENANT_ID, plan_code="test", status="active",
             trial_started_at=None, trial_ends_at=None,
