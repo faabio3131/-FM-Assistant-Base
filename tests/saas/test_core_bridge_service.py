@@ -21,6 +21,8 @@ from fm_assistant.core_bridge_models import (
     CoreBridgeIdentityORM,
 )
 from fm_assistant.core_bridge_service import sign_core_bridge
+from fm_assistant.command_bridge_control_models import CommandBridgeControlEventORM
+from fm_assistant.command_bridge_control_service import sign_command_control
 from fm_assistant.credential_vault import FernetCredentialVault
 from fm_assistant.db import (
     EntitlementORM,
@@ -35,6 +37,9 @@ from fm_assistant.db import (
 from fm_assistant.settings import Environment, Settings
 
 SIGNING_KEY = "only-synthetic-core-bridge-hmac-secret-000001"
+COMMAND_KEY = "synthetic-command-control-signing-key-000002"
+COMMAND_KEY_ID = "command-platform-key-v1"
+PLATFORM_ORG_ID = "fm-company-organization"
 KEY_ID = "fm-core-dev-v1"
 PATH = "/internal/v1/core/credentials/resolve"
 PAYLOAD = {
@@ -64,6 +69,9 @@ def bridge_client(tmp_path):
         auto_create_schema=True,
         core_bridge_key_id=KEY_ID,
         core_bridge_signing_key=SIGNING_KEY,
+        command_control_key_id=COMMAND_KEY_ID,
+        command_control_signing_key=COMMAND_KEY,
+        trusted_command_organization_id=PLATFORM_ORG_ID,
     ).validate()
     app = create_app(cfg)
     with TestClient(app) as client:
@@ -294,3 +302,119 @@ def test_signed_core_gateway_end_to_end(bridge_client):
             assert len({row.nonce for row in rows}) == 2
     finally:
         transport.close()
+
+
+COMMAND_PATH = "/internal/v1/command/core-bridge/manage"
+
+
+def command_request(
+    action: str, *, nonce: str | None = None, key: str = COMMAND_KEY,
+    organization: str = PLATFORM_ORG_ID, timestamp: str | None = None,
+):
+    payload = {
+        "action": action,
+        "tenant_id": "tenant-a",
+        "unit_id": "unit-a",
+        "capability": "ai.text",
+        "target_key_id": KEY_ID,
+        "actor_user_id": "fm-human-admin-1",
+        "organization_id": organization,
+        "step_up_at": int(datetime.now(UTC).timestamp()),
+        "command_request_id": secrets.token_urlsafe(24),
+    }
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    timestamp = timestamp or str(int(datetime.now(UTC).timestamp()))
+    nonce = nonce or secrets.token_urlsafe(24)
+    headers = {
+        "X-FM-Command-Key-ID": COMMAND_KEY_ID,
+        "X-FM-Command-Timestamp": timestamp,
+        "X-FM-Command-Nonce": nonce,
+        "X-FM-Command-Signature": sign_command_control(
+            key=key, key_id=COMMAND_KEY_ID,
+            timestamp=timestamp, nonce=nonce, body=body,
+        ),
+    }
+    return body, headers
+
+
+def test_command_revokes_grant_and_denies_next_core_call(bridge_client):
+    client, sessions = bridge_client
+    data, headers = command_request("revoke_grant")
+    response = client.post(COMMAND_PATH, content=data, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "revoked"}
+    core_body, core_headers = signed_request()
+    assert client.post(PATH, content=core_body, headers=core_headers).status_code == 401
+    with sessions() as db:
+        grant = db.get(CoreBridgeGrantORM, (KEY_ID, "tenant-a", "unit-a", "ai.text"))
+        assert not grant.active and grant.revoked_at is not None
+        events = db.scalars(select(CommandBridgeControlEventORM)).all()
+        assert len(events) == 1 and events[0].outcome == "revoked"
+        assert events[0].actor_user_id == "fm-human-admin-1"
+
+
+def test_command_revokes_identity_and_all_grants(bridge_client):
+    client, sessions = bridge_client
+    data, headers = command_request("revoke_identity")
+    response = client.post(COMMAND_PATH, content=data, headers=headers)
+    assert response.status_code == 200
+    with sessions() as db:
+        identity = db.get(CoreBridgeIdentityORM, KEY_ID)
+        assert not identity.active and identity.revoked_at is not None
+        assert not db.get(
+            CoreBridgeGrantORM, (KEY_ID, "tenant-a", "unit-a", "ai.text")
+        ).active
+    core_body, core_headers = signed_request()
+    assert client.post(PATH, content=core_body, headers=core_headers).status_code == 401
+    data, headers = command_request("provision")
+    assert client.post(COMMAND_PATH, content=data, headers=headers).status_code == 401
+
+
+def test_command_provision_then_grant_scoped_identity(bridge_client):
+    client, sessions = bridge_client
+    with sessions.begin() as db:
+        db.delete(db.get(CoreBridgeGrantORM, (KEY_ID, "tenant-a", "unit-a", "ai.text")))
+        db.delete(db.get(CoreBridgeIdentityORM, KEY_ID))
+    data, headers = command_request("provision")
+    response = client.post(COMMAND_PATH, content=data, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "provisioned"}
+    core_body, core_headers = signed_request()
+    assert client.post(PATH, content=core_body, headers=core_headers).status_code == 401
+    data, headers = command_request("grant")
+    response = client.post(COMMAND_PATH, content=data, headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"status": "granted"}
+    core_body, core_headers = signed_request()
+    assert client.post(PATH, content=core_body, headers=core_headers).status_code == 200
+
+
+def test_command_rejects_cross_org_bad_signature_and_expiry(bridge_client):
+    client, sessions = bridge_client
+    for kwargs in (
+        {"organization": "another-company"},
+        {"key": "wrong-command-control-hmac-key-1234567"},
+        {"timestamp": str(int(datetime.now(UTC).timestamp()) - 120)},
+    ):
+        data, headers = command_request("revoke_grant", **kwargs)
+        assert client.post(COMMAND_PATH, content=data, headers=headers).status_code == 401
+    with sessions() as db:
+        assert db.scalars(select(CommandBridgeControlEventORM)).all() == []
+        assert db.get(
+            CoreBridgeGrantORM, (KEY_ID, "tenant-a", "unit-a", "ai.text")
+        ).active
+
+
+def test_command_replay_does_not_repeat_mutation(bridge_client):
+    client, sessions = bridge_client
+    data, headers = command_request("revoke_grant")
+    assert client.post(COMMAND_PATH, content=data, headers=headers).status_code == 200
+    assert client.post(COMMAND_PATH, content=data, headers=headers).status_code == 401
+    with sessions() as db:
+        assert len(db.scalars(select(CommandBridgeControlEventORM)).all()) == 1
+
+
+def test_command_control_missing_configuration_is_denied(client):
+    data, headers = command_request("provision")
+    response = client.post(COMMAND_PATH, content=data, headers=headers)
+    assert response.status_code == 401
