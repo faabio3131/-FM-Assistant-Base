@@ -10,6 +10,8 @@ from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
+import core.ai_admin_audit  # noqa: F401 - registra tabela administrativa
+
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
 from core.ai_control_plane_runtime import (
     CoreControlPlaneAIRuntime,
@@ -19,7 +21,7 @@ from core.ai_control_plane_runtime import (
 from core.ai_usage_ledger import PersistentAIFinOps
 from core.seguranca.segredos import ReferenceSecretStore
 
-REQUIRED_REVISION = "f3_0001"
+REQUIRED_REVISION = "f3_0002"
 REQUIRED_TABLES = frozenset(ControlPlaneBase.metadata.tables) | {
     "core_ai_price_snapshots",
     "core_ai_price_tariffs",
