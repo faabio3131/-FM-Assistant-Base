@@ -41,6 +41,9 @@ class Settings:
     auto_create_schema: bool
     core_bridge_key_id: str | None = None
     core_bridge_signing_key: str | None = field(default=None, repr=False)
+    command_control_key_id: str | None = None
+    command_control_signing_key: str | None = field(default=None, repr=False)
+    trusted_command_organization_id: str | None = None
 
     @property
     def production_like(self) -> bool:
@@ -74,6 +77,28 @@ class Settings:
                 self.core_service_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_CORE_BRIDGE_KEY_REUSED")
+        command_fields = (
+            self.command_control_key_id,
+            self.command_control_signing_key,
+            self.trusted_command_organization_id,
+        )
+        if any(command_fields) and not all(command_fields):
+            raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_CONFIG_INCOMPLETE")
+        if all(command_fields):
+            if not self.core_bridge_key_id or not self.core_bridge_signing_key:
+                raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_REQUIRES_CORE_IDENTITY")
+            if len(self.command_control_signing_key or "") < 32:
+                raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_KEY_INVALID")
+            if len(self.command_control_key_id or "") > 64:
+                raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_KEY_ID_INVALID")
+            if len(self.trusted_command_organization_id or "") > 128:
+                raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_ORGANIZATION_INVALID")
+            if self.command_control_signing_key in {
+                self.core_bridge_signing_key, self.admin_key,
+                self.credential_pepper, self.session_pepper,
+                self.core_service_key,
+            }:
+                raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_KEY_REUSED")
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible", "core"}:
             raise RuntimeError("FM_ASSISTANT_MODEL_BACKEND inválido")
@@ -158,6 +183,11 @@ def load_settings() -> Settings:
         core_service_key=os.getenv("FM_ASSISTANT_CORE_SERVICE_KEY"),
         core_bridge_key_id=os.getenv("FM_ASSISTANT_CORE_BRIDGE_KEY_ID") or None,
         core_bridge_signing_key=os.getenv("FM_ASSISTANT_CORE_BRIDGE_SIGNING_KEY") or None,
+        command_control_key_id=os.getenv("FM_ASSISTANT_COMMAND_CONTROL_KEY_ID") or None,
+        command_control_signing_key=os.getenv("FM_ASSISTANT_COMMAND_CONTROL_SIGNING_KEY") or None,
+        trusted_command_organization_id=os.getenv(
+            "FM_ASSISTANT_TRUSTED_COMMAND_ORGANIZATION_ID"
+        ) or None,
         auto_create_schema=_bool(
             "FM_ASSISTANT_AUTO_CREATE_SCHEMA",
             default=environment in {Environment.DEVELOPMENT, Environment.TEST},
