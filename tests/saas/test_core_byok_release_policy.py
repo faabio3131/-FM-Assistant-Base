@@ -154,3 +154,11 @@ def test_policy_does_not_return_or_decrypt_secret_values(policy_db):
     result = _eligible(policy_db)
     assert type(result) is bool
     assert result is True
+
+
+
+def test_expired_active_subscription_cannot_use_byok(policy_db):
+    with policy_db.begin() as db:
+        license_row = db.get(TenantLicenseORM, "tenant-a")
+        license_row.period_ends_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert _eligible(policy_db) is False
