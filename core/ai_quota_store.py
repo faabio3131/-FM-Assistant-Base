@@ -106,10 +106,13 @@ class QuotaReservations:
     def reserve(
         self, *, tenant_id: str, unit_id: str, capability: str,
         request_id: str, units: int, at: datetime,
+        for_execution: bool = False,
     ) -> AIQuotaReservationRecord:
         scope = (tenant_id, unit_id, capability)
         if not all(_valid_id(i) for i in (*scope, request_id)) or len(capability) > 80:
             raise QuotaDenied("core_quota.invalid_scope")
+        if type(for_execution) is not bool:
+            raise QuotaDenied("core_quota.invalid_mode")
         if type(units) is not int or not 0 < units <= 2_000_000_000:
             raise QuotaDenied("core_quota.invalid_units")
         now = _utc(at)
@@ -125,6 +128,9 @@ class QuotaReservations:
                     or old.policy_revision != policy.revision
                 ):
                     raise QuotaDenied("core_quota.request_conflict")
+                # Accounting idempotency must never become a second provider call.
+                if for_execution:
+                    raise QuotaDenied("core_quota.execution_replay_denied")
                 return old
             consumed = db.scalar(select(func.coalesce(func.sum(
                 AIQuotaReservationRecord.reserved_units,
