@@ -25,7 +25,7 @@ def quota(tmp_path):
     ControlPlaneBase.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as db:
-        for tenant, unit, limit in (("a", "u1", 3), ("a", "u2", 1), ("b", "u1", 1)):
+        for tenant, unit, limit in (("a", "u1", 3), ("a", "u2", 1), ("b", "u1", 1), ("b", "u2", 1)):
             db.add(AIQuotaPolicyRecord(
                 tenant_id=tenant, unit_id=unit, capability="text",
                 limit_units=limit, window_seconds=60, revision=1,
