@@ -121,3 +121,35 @@ Esses campos seguem até o metering do Router.
 ## Estado desta versão
 
 Os adapters Gemini e OpenAI-compatible possuem testes com transporte simulado. Credenciais reais de produção não foram usadas nesta certificação. Homologação real de cada provider será um gate separado.
+
+
+## Governança Nova FM aprovada em 2026-10-17
+
+O FM Core Base é o caminho cognitivo obrigatório para consumidores comerciais Nova FM
+em staging/produção, salvo exceção formal aprovada.
+
+A configuração atual por `FM_CORE_AI_ROUTES_JSON` + secret environment é o
+**bootstrap CURRENT** do serviço. Ela não deve ser confundida com o Target comercial
+de onboarding/configuração por cliente.
+
+O Target aprovado é um Control Plane data-driven capaz de resolver, sem alteração de
+código ou deploy por cliente:
+
+- provider;
+- modelo;
+- capability;
+- prioridade;
+- política de fallback;
+- credencial FM-managed;
+- credencial tenant-managed/BYOK;
+- quotas/entitlements;
+- health/availability;
+- price snapshot.
+
+Segredos continuarão fora do código e fora das respostas de API. O Core deve receber
+referências/credenciais governadas pelo Credential Vault, preservando isolamento tenant
+e auditoria.
+
+A implementação desse Target é regida pelo System Design e ADRs canônicos do produto
+FM Assistant + Sales AI V1. O Core não deve duplicar o Control Plane do produto nem
+criar segunda autoridade de tenant/licença.
