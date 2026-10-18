@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from .db import PlanLimitORM, PlanVersionORM, PlanSyncNonceORM
 from .command_bridge_control_service import sign_command_control
+from .db import PlanLimitORM, PlanSyncNonceORM, PlanVersionORM
 
 PATH = "/internal/v1/command/assistant-plans/project"
 KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
