@@ -11,8 +11,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 import core.ai_admin_audit as admin_audit
-from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
 import core.ai_quota_store  # noqa: F401 - registers quota reservation tables
+from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
 from core.ai_control_plane_runtime import (
     CoreControlPlaneAIRuntime,
     CoreCredentialResolver,
