@@ -24,3 +24,14 @@ class CommandBridgeControlEventORM(Base):
     command_request_id: Mapped[str] = mapped_column(String(96), nullable=False, unique=True)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CommandBridgeStatusNonceORM(Base):
+    """Durable replay ledger for signed read-only Command status lookups."""
+
+    __tablename__ = "assistant_command_bridge_status_nonce"
+
+    nonce: Mapped[str] = mapped_column(String(96), primary_key=True)
+    command_request_id: Mapped[str] = mapped_column(String(96), nullable=False)
+    key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
