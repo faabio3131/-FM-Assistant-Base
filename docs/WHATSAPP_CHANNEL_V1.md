@@ -106,10 +106,13 @@ O adapter já:
 3. baixa apenas conteúdo `audio/*` dentro do limite;
 4. expõe a porta `AudioTranscriber`.
 
-Enquanto nenhum transcriber estiver conectado, o comportamento é fail-safe: a conversa
-entra em handoff humano e o cliente recebe uma mensagem determinística informando que o
-áudio será encaminhado. A próxima integração natural é o transcriber governado pelo
-FM Core Base.
+O `CoreAudioTranscriber` já está conectado ao FM Core Base quando
+`FM_ASSISTANT_MODEL_BACKEND=core`. Nesse modo, tenant, unidade, correlation ID,
+bytes de áudio e MIME seguem para a capability governada de transcrição do Core.
+
+Quando não existe transcriber configurado (por exemplo em desenvolvimento sem Core),
+o comportamento permanece fail-safe: a conversa entra em handoff humano e o cliente
+recebe uma mensagem determinística informando que o áudio será encaminhado.
 
 ## Estados de idempotência
 
@@ -118,7 +121,11 @@ FM Core Base.
 - `failed`: falha definitiva/retryable do processamento interno.
 - `reconcile_required`: entrega externa incerta; não reenviar cegamente.
 
-## Fora do escopo desta V1
+## CURRENT e evolução aprovada
+
+Já existe transcrição via FM Core Base no backend `core`.
+
+Ainda permanecem fora do CURRENT:
 
 - templates outbound iniciados pela empresa;
 - gestão de opt-in/opt-out de campanhas;
@@ -126,7 +133,8 @@ FM Core Base.
 - status de leitura/entrega;
 - billing por mensagem;
 - painel visual do canal;
-- transcrição multimodelo via FM Core Base.
+- lifecycle universal do Integration Fabric.
 
-Esses itens devem ser adicionados sobre o mesmo contrato de canal, sem reintroduzir
-dependências do Kordena.
+Conforme ADR-003, a configuração específica atual do WhatsApp será migrada para o
+Integration & Credential Control Plane universal, preservando os controles certificados
+e sem reintroduzir dependências do Kordena.
