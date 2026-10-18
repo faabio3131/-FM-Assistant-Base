@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -30,7 +30,7 @@ class ProviderRouteSettings:
     price_snapshot_id: str
     adapter: str
     base_url: str
-    api_key: str
+    api_key: str = field(repr=False)
     timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
