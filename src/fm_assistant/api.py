@@ -24,7 +24,6 @@ from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
-from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
 from .core_client import CoreAIClient, CoreAudioTranscriber
 from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
@@ -44,6 +43,7 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
 from .repositories import (
     ConversationSQLAlchemyRepository,
     CredentialRepository,
