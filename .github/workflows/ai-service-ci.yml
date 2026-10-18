@@ -25,6 +25,7 @@ jobs:
           core/ai_circuit_breaker.py
           core/ai_circuit_state_store.py
           core/ai_quota_store.py
+          core/ai_finops_preflight.py
           core/ai_control_plane.py
           core/ai_control_plane_runtime.py
           core/ai_control_plane_bootstrap.py
