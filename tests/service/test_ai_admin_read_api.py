@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+from pathlib import Path
+
+import pytest
+from alembic import command
+from alembic.config import Config
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from core.ai_control_plane import AIControlPlaneStore, RouteDefinition
+from core.ai_router import AIUsageEvent, CapabilityIA, OutcomeIA
+from core.ai_service_api import create_app
+from core.ai_service_settings import CoreEnvironment, CoreSettings
+from core.ai_usage_ledger import PersistentAIFinOps
+
+
+@pytest.fixture
+def fixture(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    url = f"sqlite:///{tmp_path / 'operator.db'}"
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    store = AIControlPlaneStore(sessions)
+    store.register_provider(
+        provider_id="openai", adapter="openai_compatible",
+        base_url="https://private-provider.invalid/v1",
+    )
+    store.register_model(model_id="model-id", provider_id="openai", name="model-test")
+    cap = CapabilityIA.ATENDIMENTO_INTERPRETACAO
+    store.grant_capability(model_id="model-id", capability=cap)
+    store.set_provider_health(provider_id="openai", status="healthy", circuit="closed")
+    store.add_route(RouteDefinition(
+        policy_id="route", scope="tenant", tenant_id="tenant-a", unit_id=None,
+        model_id="model-id", capability=cap, priority=99,
+        price_snapshot_id="p1", credential_source="tenant_managed",
+        secret_reference="integration:tenant-a:very-private-key-ref",
+    ))
+    PersistentAIFinOps(sessions).registrar(AIUsageEvent(
+        tenant_id="tenant-a", unidade_id="unit-1", request_id="req",
+        correlation_id="corr", capability=cap, provider="openai",
+        model="model-test", route_reason="reason", fallback_used=False,
+        fallback_reason=None, input_tokens=None, output_tokens=None,
+        cached_tokens=None, latency_ms=1, outcome=OutcomeIA.SUCESSO,
+        custo_real_calculado=None, moeda=None, price_snapshot_id="missing",
+        timestamp=datetime(2026, 10, 18, 10, tzinfo=UTC),
+    ))
+    yield url
+    engine.dispose()
+
+
+def _cfg(db: str, *, with_admin: bool = True) -> CoreSettings:
+    return CoreSettings(
+        environment=CoreEnvironment.TEST,
+        service_key="consumer-only",
+        admin_key="operator-secret" if with_admin else None,
+        routes=(), control_plane_database_url=db,
+    ).validate()
+
+
+def test_operator_endpoints_are_readonly_and_require_separate_key(fixture):
+    with TestClient(create_app(_cfg(fixture))) as client:
+        base = "/v1/admin/ai/routes?tenant_id=tenant-a&unit_id=unit-1"
+        assert client.get(base).status_code == 401
+        assert client.get(base, headers={"X-Core-Service-Key": "consumer-only"}).status_code == 401
+        assert client.get(base, headers={"X-Core-Admin-Key": "invalid"}).status_code == 401
+        auth = {"X-Core-Admin-Key": "operator-secret"}
+        routes = client.get(base, headers=auth)
+        assert routes.status_code == 200
+        assert routes.json()[0]["policy_id"] == "route"
+        assert "private" not in routes.text
+        assert client.get(
+            "/v1/admin/ai/providers/health", headers=auth
+        ).json()[0]["health"] == "healthy"
+        usage = client.get(
+            "/v1/admin/ai/usage",
+            params={
+                "tenant_id": "tenant-a", "unit_id": "unit-1",
+                "start_date": "2026-10-18", "end_date": "2026-10-18",
+            },
+            headers=auth,
+        )
+        assert usage.status_code == 200
+        assert usage.json()[0]["cost_unknown_events"] == 1
+        assert usage.json()[0]["cost_total"] == "0"
+        assert client.get(
+            "/v1/admin/ai/usage",
+            params={
+                "tenant_id": "tenant-b", "unit_id": "unit-1",
+                "start_date": "2026-10-18", "end_date": "2026-10-18",
+            },
+            headers=auth,
+        ).json() == []
+        assert client.post("/v1/admin/ai/routes", headers=auth).status_code == 405
+
+
+def test_operator_read_api_disabled_without_admin_key(fixture):
+    with TestClient(create_app(_cfg(fixture, with_admin=False))) as client:
+        response = client.get(
+            "/v1/admin/ai/routes?tenant_id=tenant-a&unit_id=unit-1",
+            headers={"X-Core-Admin-Key": "operator-secret"},
+        )
+        assert response.status_code == 404

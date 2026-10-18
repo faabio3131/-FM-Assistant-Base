@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
+from core.ai_admin_read_api import register_admin_read_routes
 from core.ai_control_plane import ControlPlaneError
 from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
@@ -204,4 +205,5 @@ def create_app(
             raise HTTPException(status_code=502, detail=exc.codigo) from exc
         return _response(result)
 
+    register_admin_read_routes(app)
     return app
