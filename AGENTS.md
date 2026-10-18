@@ -270,3 +270,12 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Command recebeu auditoria de negativas e teste cross-runtime real do cliente Node assinador contra o ASGI FastAPI do Assistant. **Não confundir teste definido com teste executado**: Foundation/F21/Cognitive do Command falharam sem steps, portanto novo teste é NOT_TESTED/BLOCKED_EXTERNAL.
 - Risco restante: consistência/reconciliação da auditoria interserviços, Vault, TLS/ACL, quotas/circuit/FinOps, provider homologation e revisão independente.
 - F3 GLOBAL permanece IN_PROGRESS; sem merge enquanto todos os gates obrigatórios não forem GREEN. Nenhum deploy/credencial real/migration produtiva sem autorização específica. Kordena read-only.
+
+
+## F3.7.7 — Governança da reconciliação de identidade (2026-10-18)
+
+- Assistant implementou `command_request_id` único e consulta read-only HMAC de outcome do Command, sem modificar identidades/grants. Assistant gate 6/6 verde no SHA funcional `c65f05f73546380f1641611d96d6a3bd74c3a0b3`.
+- A consulta tem resultados `applied`, `denied` e `unknown`; só a auditoria transacional exata no Assistant comprova execução. `unknown` jamais autoriza retry de grant/revoke/provision.
+- FM Core é **somente consumidor governado**, não consulta Command para promover a si próprio nem pode substituir auditoria/grants/ACL por resposta de UI. Respeitar revogação em cada request.
+- Command corporativo real `FM-CONTROL-CENTER` PR #90 Draft já tem código e testes de lookup, mas CI privado não inicia steps. Continuar `NOT_TESTED / BLOCKED_EXTERNAL` até teste efetivo.
+- F3 global IN_PROGRESS, F4 NOT_STARTED, sem merge/deploy/segredos reais/migrations produtivas sem gates e autoridade humana.
