@@ -115,6 +115,29 @@ class EvolutionClient:
             raise EvolutionUnavailable("evolution_delivery_uncertain")
         return reference
 
+    def connection_state(self, instance: str, *, instance_token: str) -> str:
+        """Read current remote state on the Evolution v2-compatible adapter."""
+        data = self._request(
+            "GET", "/instance/connectionState/" + self._instance(instance),
+            instance_token=instance_token,
+        )
+        obj = data.get("instance")
+        state = obj.get("state") if isinstance(obj, dict) else None
+        if state not in {"open", "close", "connecting"}:
+            raise EvolutionUnavailable("evolution_state_unverified")
+        return state
+
+    def logout(self, instance: str, *, instance_token: str) -> None:
+        """Single remote logout attempt; never assume success from HTTP alone."""
+        data = self._request(
+            "DELETE", "/instance/logout/" + self._instance(instance),
+            instance_token=instance_token,
+        )
+        if data.get("status") not in {"success", "SUCCESS"} and (
+            data.get("message") not in {"success", "SUCCESS"}
+        ):
+            raise EvolutionUnavailable("evolution_logout_unconfirmed")
+
     def connect(self, instance: str) -> str | None:
         data = self._request("GET", "/instance/connect/" + self._instance(instance))
         instance_state = data.get("instance")
