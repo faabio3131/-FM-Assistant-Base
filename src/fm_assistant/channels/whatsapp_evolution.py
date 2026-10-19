@@ -92,6 +92,39 @@ class EvolutionClient:
             raise EvolutionUnavailable("evolution_token_missing")
         return token
 
+    API_FAMILY = "evolution_v2_whatsapp_baileys"
+    WEBHOOK_EVENTS = ("MESSAGES_UPSERT", "CONNECTION_UPDATE")
+
+    def set_native_webhook(
+        self, instance: str, *, instance_token: str,
+        url: str, auth_token: str,
+    ) -> None:
+        """Configure the per-instance v2 webhook, never a global unauthenticated hook."""
+        endpoint = urlsplit(url)
+        if (
+            endpoint.scheme != "https" or not endpoint.hostname
+            or endpoint.username or endpoint.password or endpoint.fragment
+            or endpoint.query or endpoint.port not in (None, 443)
+            or not endpoint.path.startswith("/webhooks/evolution-native/")
+            or not isinstance(auth_token, str) or len(auth_token) < 32
+        ):
+            raise ValueError("evolution_native_hook_invalid")
+        data = self._request(
+            "POST", "/webhook/set/" + self._instance(instance),
+            instance_token=instance_token,
+            payload={"webhook": {
+                "enabled": True, "url": url, "byEvents": False,
+                "base64": False,
+                "headers": {"X-FM-Evolution-Token": auth_token},
+                "events": list(self.WEBHOOK_EVENTS),
+            }},
+        )
+        webhook = data.get("webhook")
+        if not isinstance(webhook, dict) or webhook.get("enabled") is not True:
+            raise EvolutionUnavailable("evolution_native_hook_unconfirmed")
+        if webhook.get("url") != url:
+            raise EvolutionUnavailable("evolution_native_hook_unconfirmed")
+
     def send_text(
         self, instance: str, *, instance_token: str, recipient: str,
         message: str,
