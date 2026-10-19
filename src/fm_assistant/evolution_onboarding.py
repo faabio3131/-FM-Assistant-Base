@@ -92,6 +92,47 @@ class EvolutionOnboarding:
         )
         return updated
 
+    def logout(self, context: TenantContext, connection_id: str) -> IntegrationConnection:
+        """Governed remote WhatsApp logout, guarded against ambiguous success.
+
+        First disable locally to stop further inbound/worker processing.
+        A failed remote operation NEVER becomes a claimed remote revocation.
+        """
+        connection = self._repository.get(context, connection_id)
+        if connection is None or connection.provider_key != self.PROVIDER:
+            raise LookupError("evolution_connection_not_found")
+        if connection.status is IntegrationStatus.REVOKED:
+            return connection
+        # Leave local session disabled even if the remote request times out.
+        if connection.status is not IntegrationStatus.DISABLED:
+            connection = self.pause(context, connection_id)
+        secrets = self._repository.active_secret_ciphertexts(connection_id)
+        token_cipher = secrets.get("instance_token")
+        if token_cipher is None:
+            raise RuntimeError("evolution_logout_requires_review")
+        self._repository.record_event(
+            context, connection_id, event_type="evolution.logout_requested",
+        )
+        try:
+            self._transport.logout(
+                str(connection.config["instance_name"]),
+                instance_token=self._vault.decrypt(token_cipher),
+            )
+        except EvolutionUnavailable:
+            self._repository.record_event(
+                context, connection_id, event_type="evolution.logout_ambiguous",
+            )
+            raise
+        self._repository.revoke_secrets(context, connection_id)
+        result = self._repository.update_connection(
+            context, connection_id, status=IntegrationStatus.REVOKED,
+            bump_revision=True,
+        )
+        self._repository.record_event(
+            context, connection_id, event_type="evolution.logout_confirmed",
+        )
+        return result
+
     def quarantine_stale(
         self, context: TenantContext, *, connection_id: str,
         inbox: WhatsAppInboundRepository, older_than_seconds: int = 300,
