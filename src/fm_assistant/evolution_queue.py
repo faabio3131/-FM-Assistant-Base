@@ -6,6 +6,7 @@ quarantine instead of replay to prevent duplicate model charges and messages.
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -63,7 +64,7 @@ class EvolutionInboundQueue:
             pending = session.scalar(
                 select(func.count()).select_from(EvolutionInboundJobORM).where(
                     EvolutionInboundJobORM.connection_id == connection_id,
-                    EvolutionInboundJobORM.state.in_(("pending", "processing")),
+                    EvolutionInboundJobORM.state.in_(("pending", "processing", "sending")),
                 )
             )
             if int(pending or 0) >= self._max_pending:
@@ -156,7 +157,7 @@ class EvolutionInboundQueue:
             conditions = [
                 EvolutionInboundJobORM.connection_id == connection_id,
                 EvolutionInboundJobORM.message_id == message_id,
-                EvolutionInboundJobORM.state == "processing",
+                EvolutionInboundJobORM.state.in_(("processing", "sending")),
                 EvolutionInboundJobORM.claimed_at >= cutoff,
             ]
             if claim_generation is not None:
@@ -187,7 +188,7 @@ class EvolutionInboundQueue:
                 .where(
                     EvolutionInboundJobORM.connection_id == connection_id,
                     EvolutionInboundJobORM.message_id == message_id,
-                    EvolutionInboundJobORM.state == "processing",
+                    EvolutionInboundJobORM.state.in_(("processing", "sending")),
                     EvolutionInboundJobORM.attempt_count == claim_generation,
                     EvolutionInboundJobORM.claimed_at >= now - timedelta(seconds=max_age_seconds),
                 )
@@ -209,7 +210,7 @@ class EvolutionInboundQueue:
             conditions = [
                 EvolutionInboundJobORM.connection_id == connection_id,
                 EvolutionInboundJobORM.message_id == message_id,
-                EvolutionInboundJobORM.state == "processing",
+                EvolutionInboundJobORM.state.in_(("processing", "sending")),
             ]
             if claim_generation is not None:
                 conditions.append(EvolutionInboundJobORM.attempt_count == claim_generation)
@@ -237,7 +238,7 @@ class EvolutionInboundQueue:
             stmt = (
                 select(EvolutionInboundJobORM)
                 .where(
-                    EvolutionInboundJobORM.state == "processing",
+                    EvolutionInboundJobORM.state.in_(("processing", "sending")),
                     EvolutionInboundJobORM.claimed_at < cutoff,
                 )
                 .order_by(EvolutionInboundJobORM.claimed_at)
@@ -253,7 +254,7 @@ class EvolutionInboundQueue:
                     .where(
                         EvolutionInboundJobORM.connection_id == job.connection_id,
                         EvolutionInboundJobORM.message_id == job.message_id,
-                        EvolutionInboundJobORM.state == "processing",
+                        EvolutionInboundJobORM.state.in_(("processing", "sending")),
                         EvolutionInboundJobORM.claimed_at < cutoff,
                     )
                     .execution_options(synchronize_session=False)
@@ -263,6 +264,66 @@ class EvolutionInboundQueue:
                 changed += result.rowcount
             session.commit()
             return changed
+
+
+    def begin_outbound(
+        self, *, connection_id: str, message_id: str, claim_generation: int,
+        max_age_seconds: int = 300,
+    ) -> str:
+        """Persist one send intent before HTTP; uncertain sends are not retried."""
+        if type(claim_generation) is not int or claim_generation < 1:
+            raise ValueError("evolution_claim_generation_invalid")
+        if type(max_age_seconds) is not int or not 60 <= max_age_seconds <= 86400:
+            raise ValueError("evolution_claim_max_age_invalid")
+        now = datetime.now(UTC)
+        operation_id = uuid.uuid4().hex
+        with self._sessions() as session:
+            result = session.execute(
+                update(EvolutionInboundJobORM).where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.message_id == message_id,
+                    EvolutionInboundJobORM.state == "processing",
+                    EvolutionInboundJobORM.attempt_count == claim_generation,
+                    EvolutionInboundJobORM.claimed_at >= now - timedelta(seconds=max_age_seconds),
+                    EvolutionInboundJobORM.outbound_operation_id.is_(None),
+                ).values(
+                    state="sending", outbound_operation_id=operation_id,
+                    outbound_status="uncertain", send_started_at=now, updated_at=now,
+                )
+            )
+            if result.rowcount != 1:
+                session.rollback()
+                raise RuntimeError("evolution_outbound_intent_conflict")
+            session.commit()
+        return operation_id
+
+    def record_outbound_result(
+        self, *, connection_id: str, message_id: str, claim_generation: int,
+        operation_id: str, outbound_reference: str,
+    ) -> None:
+        """Persist provider receipt for later reconciliation."""
+        if not isinstance(operation_id, str) or not operation_id:
+            raise ValueError("evolution_outbound_operation_invalid")
+        if not isinstance(outbound_reference, str) or not 0 < len(outbound_reference) <= 160:
+            raise ValueError("evolution_outbound_reference_invalid")
+        with self._sessions() as session:
+            result = session.execute(
+                update(EvolutionInboundJobORM).where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.message_id == message_id,
+                    EvolutionInboundJobORM.state == "sending",
+                    EvolutionInboundJobORM.attempt_count == claim_generation,
+                    EvolutionInboundJobORM.outbound_operation_id == operation_id,
+                ).values(
+                    outbound_status="provider_acknowledged",
+                    outbound_reference=outbound_reference,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            if result.rowcount != 1:
+                session.rollback()
+                raise RuntimeError("evolution_outbound_result_conflict")
+            session.commit()
 
     def state(self, *, connection_id: str, message_id: str) -> str | None:
         with self._sessions() as session:
@@ -297,7 +358,7 @@ class EvolutionInboundQueue:
                 )
                 .where(
                     EvolutionInboundJobORM.connection_id == connection_id,
-                    EvolutionInboundJobORM.state.in_(("pending", "processing")),
+                    EvolutionInboundJobORM.state.in_(("pending", "processing", "sending")),
                 )
                 .group_by(EvolutionInboundJobORM.state)
             ).all()
@@ -317,6 +378,9 @@ class EvolutionInboundQueue:
                         "message_id": row.message_id,
                         "error_code": row.error_code,
                         "attempt_count": row.attempt_count,
+                        "outbound_status": row.outbound_status,
+                        "outbound_operation_id": row.outbound_operation_id,
+                        "outbound_reference": row.outbound_reference,
                         "updated_at": row.updated_at.isoformat(),
                     }
                     for row in jobs
