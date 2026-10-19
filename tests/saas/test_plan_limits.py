@@ -186,7 +186,7 @@ def test_core_grant_derived_from_license_and_signed(catalog):
     assert hmac.compare_digest(
         signature,
         hmac.new(
-            secret, b"/internal/v1/assistant/core-plan-grant\\n" + body,
+            secret, b"/internal/v1/assistant/core-plan-grant\n" + body,
             hashlib.sha256,
         ).hexdigest(),
     )
