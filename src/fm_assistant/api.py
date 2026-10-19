@@ -17,7 +17,7 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
@@ -45,6 +45,7 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
 from .plan_limits import PlanLimitDenied
 from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
@@ -838,6 +839,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except PlanLimitDenied as exc:
             raise HTTPException(status_code=403, detail="plan_unavailable") from exc
         return JSONResponse(view, headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/plan/consumption/dashboard", response_class=HTMLResponse)
+    def customer_plan_dashboard(
+        principal: SessionPrincipal = Depends(human_permission(Permission.BILLING_READ)),
+    ) -> HTMLResponse:
+        try:
+            data = consumption_view.get(
+                tenant_id=principal.tenant_id, unit_id=principal.unit_id,
+                now=datetime.now(UTC),
+            )
+        except PlanLimitDenied as exc:
+            raise HTTPException(status_code=403, detail="plan_unavailable") from exc
+        return HTMLResponse(
+            render_consumption_dashboard(data),
+            headers={"Cache-Control": "no-store",
+                     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+                     "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.post("/v1/api-credentials", response_model=ProvisionCredentialResponse)
     def create_api_credential(
