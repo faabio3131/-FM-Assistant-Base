@@ -258,6 +258,14 @@ class EvolutionRuntime:
                     conversation_id=conversation.conversation_id,
                     content=item.text,
                 )
+                # Recheck after potentially long AI execution: if the owner
+                # paused/revoked the channel meanwhile, do not initiate send.
+                latest = self._integrations.get_unscoped(item.connection_id)
+                if (
+                    latest is None or latest.status is not IntegrationStatus.ACTIVE
+                    or latest.revision != connection.revision
+                ):
+                    raise PermissionError("evolution_connection_changed_during_processing")
                 outbound_id = self._transport.send_text(
                     instance, instance_token=self._vault.decrypt(token),
                     recipient=item.sender, message=reply.content,
