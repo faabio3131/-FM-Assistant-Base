@@ -210,3 +210,34 @@ def test_bootstrap_rejects_ambiguous_credential_resolvers(tmp_path):
             credential_resolver=Stub(),
             tenant_gateway=Stub(),
         )
+
+
+def test_bootstrap_can_wire_governed_plan_guard_without_real_provider(tmp_path):
+    from datetime import timedelta
+
+    from core.ai_plan_usage_guard import PlanQuotaPolicy
+
+    url, _, _ = migrated_db(tmp_path)
+
+    class SyntheticAuthority:
+        def __init__(self):
+            self.calls = 0
+
+        def resolve(self, *, tenant_id, unit_id, capability, now):
+            self.calls += 1
+            return PlanQuotaPolicy(
+                tenant_id=tenant_id, unit_id=unit_id,
+                plan_code="ALL_FEATURES", revision=1,
+                valid_until=now + timedelta(hours=1),
+                input_bound=100, output_bound=100,
+                scopes=(("ai.requests", "tenant"), ("ai.total_tokens", "tenant")),
+            )
+
+    authority = SyntheticAuthority()
+    runtime, engine = build_persistent_core(url, plan_authority=authority)
+    try:
+        assert runtime._plan_usage is not None
+        assert runtime._quota is None
+        assert authority.calls == 0  # boot cannot silently spend or provision
+    finally:
+        engine.dispose()
