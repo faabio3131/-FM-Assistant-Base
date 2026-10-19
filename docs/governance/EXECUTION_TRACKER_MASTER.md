@@ -829,3 +829,11 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 - Core AI Service CI `39189526526` SUCCESS; Core F3 Quota PostgreSQL Security Gate `39189526538` SUCCESS on functional SHA. No external provider, production migration or real credentials involved.
 - This is a functional safety subgate, **NOT** automatic Assistant→Core policy synchronization or production quota enforcement. Pending: signed/version-monotonic policy transport, revocation/expiry, composition-root enforcement, per-attempt token/cost settlement, multi-service E2E and remaining F3 internal gates.
 - FM Command V2 untouched. Corporate FM-CONTROL-CENTER remains sole commercial management authority; Kordena read-only. F3 BUILD_IN_PROGRESS, F4 NOT_STARTED; EXTERNAL_HOMOLOGATION_DEFERRED. No merge/deploy.
+
+
+2026-10-18 — F3/F9 AUTHENTICATED CORE PLAN GRANT READ-THROUGH (INTERNAL SUBGATE)
+- CORE `faabio3131/FM-Core-Base-` PR #1 Draft, functional SHA `cf1fd77fd7271b7eae8aa589f58a79bc78f61882`: dynamic challenge-bound signed grant verifier and explicit HTTPS no-redirect transport. Internal AI Service CI #39190989920 SUCCESS; quota PostgreSQL security #39190990006 SUCCESS.
+- ASSISTANT `faabio3131/-FM-Assistant-Base` PR #1 Draft, functional SHA `9b971d64ed8224641c58a3be5def886f7fb6d16d`: private request-signature verified plan-grant route, canonical live licensed manifest, 30s response signature/challenge, separate plan signing key. SaaS CI #39190924170 SUCCESS; cross-service bridge #39190924237 SUCCESS; PG16 bridge #39190924161 SUCCESS.
+- All referenced checks use synthetic credentials/disposable databases/mocked HTTPS or internal contracts. No real provider/Vault/production network tested.
+- NEXT INTERNAL BUILD: trusted composition of `SignedAssistantPlanAuthority` into mandatory persistent Core runtime; signed versioned/revocable quota-policy projection into PostgreSQL, bounded provider input/output/attempt accounting, hard stops and immediate revocation checks, cross-runtime E2E and independent security review. Do not describe the contract as automatic production enforcement.
+- F3 `BUILD_IN_PROGRESS`; F4 `NOT_STARTED`; external F13 homologation `EXTERNAL_HOMOLOGATION_DEFERRED`. Kordena read-only; Command V2 untouched; no deploy, non-disposable migration or merge.
