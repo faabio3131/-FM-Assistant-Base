@@ -192,3 +192,43 @@ def test_native_hook_ambiguous_setup_is_not_replayed(client, provision_credentia
     assert connection is not None
     assert connection.status is IntegrationStatus.DRAFT
     assert "native_webhook_token" in repo.active_secret_ciphertexts(connection.connection_id)
+
+
+def test_native_webhook_backpressure_returns_retryable_429(client, provision_credential):
+    key, _other, hooks, names, repo, _queue = _prepare(client, provision_credential)
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision",
+        headers={"Authorization": "Bearer " + key},
+    )
+    assert created.status_code == 200, created.text
+    cid = created.json()["connection_id"]
+    token = hooks[0]["headers"]["X-FM-Evolution-Token"]
+    edge = "/webhooks/evolution-native/" + cid
+    auth = {"X-FM-Evolution-Token": token}
+    connect = {"event": "connection.update", "instance": names[0],
+               "data": {"state": "open"}}
+    assert client.post(edge, content=json.dumps(connect).encode(), headers=auth).status_code == 204
+    client.app.state.evolution_runtime._queue = EvolutionInboundQueue(
+        repo._session_factory,
+        FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        max_pending_per_connection=1,
+    )
+
+    def message(message_id: str) -> bytes:
+        return json.dumps({
+            "event": "messages.upsert", "instance": names[0],
+            "data": [{"key": {
+                "id": message_id, "fromMe": False,
+                "remoteJid": "5511999999999@s.whatsapp.net",
+            }, "message": {"conversation": "Olá"}}],
+        }).encode()
+
+    assert client.post(edge, content=message("FULL-1"), headers=auth).status_code == 204
+    full = client.post(edge, content=message("FULL-2"), headers=auth)
+    assert full.status_code == 429, full.text
+    assert full.headers["retry-after"] == "5"
+    duplicate = client.post(edge, content=message("FULL-1"), headers=auth)
+    assert duplicate.status_code == 204
+    assert client.app.state.evolution_runtime._queue.state(
+        connection_id=cid, message_id="FULL-2",
+    ) is None
