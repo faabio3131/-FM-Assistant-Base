@@ -14,6 +14,7 @@ from fm_assistant.db import (
     UnitORM,
 )
 from fm_assistant.plan_limits import PlanLimitDenied, PlanLimitResolver
+from fm_assistant.plan_policy_manifest import LicensedQuotaManifestService
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
 
@@ -136,3 +137,28 @@ def test_trial_without_expiry_and_suspended_subscription_denied(catalog):
             tenant_id="tenant-a", unit_id="unit-1",
             resource="ai.total_tokens", now=NOW,
         )
+
+
+def test_manifest_matches_exact_pinned_subscription_revision(catalog):
+    _, sessions = catalog
+    with sessions.begin() as db:
+        for revision in (1, 2):
+            db.add(PlanLimitORM(
+                plan_code="business", revision=revision,
+                resource="ai.requests", scope="tenant",
+                limit_units=100 * revision, window_seconds=86400,
+            ))
+    manifest = LicensedQuotaManifestService(sessions)
+    first = manifest.resolve(tenant_id="tenant-a", unit_id="unit-1", now=NOW)
+    second = manifest.resolve(tenant_id="tenant-b", unit_id="unit-1", now=NOW)
+    assert first.revision == 1 and second.revision == 2
+    assert first.plan_code == second.plan_code
+    assert {g.resource for g in first.grants} == {"ai.requests", "ai.total_tokens"}
+    assert next(g.limit_units for g in first.grants if g.resource=="ai.total_tokens") == 1000
+    assert next(g.limit_units for g in second.grants if g.resource=="ai.total_tokens") == 2000
+    assert first.policy_fingerprint() != second.policy_fingerprint()
+    with sessions.begin() as db:
+        license_row=db.get(TenantLicenseORM,"tenant-a")
+        license_row.status="suspended"
+    with pytest.raises(PlanLimitDenied):
+        manifest.resolve(tenant_id="tenant-a", unit_id="unit-1", now=NOW)
