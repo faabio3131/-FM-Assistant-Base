@@ -417,3 +417,10 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Synthetic regression `tests/service/test_ai_plan_usage_guard.py::test_oversized_utf8_prompt_denied_before_any_quota_reservation` verifies no quota records are reserved for denied Unicode input.
 - Functional SHA `d63621cf916ad47a1de8b70385196d9bb1359f0e` — AI Service CI `39273574128` SUCCESS, F3 Quota PostgreSQL Gate `39273575267` SUCCESS.
 - This is a conservative byte envelope, NOT a provider-specific token counter. F3 remains BUILD_IN_PROGRESS until model-aware counting, particularly multimodal/audio, governed reconciliation of ambiguous paid provider attempts, signed cross-system E2E and independent security review. User requires external provider homologation only after software construction completes; do not treat it as an internal coding gate. PR draft; no merge or deploy.
+
+
+## F3 — 2026-10-19 audio upload envelope gate
+
+- Core now enforces an FM-configurable `FM_CORE_ASSISTANT_MAX_AUDIO_BYTES` audio payload ceiling (default 10 MiB, absolute max 64 MiB), validated at startup, injected from commercial CoreSettings through `build_persistent_core` into `PlanUsageGuard`. An oversize audio payload is denied before quota reservation, credential resolution and provider call. It is a *byte transport limit*, not audio token metering or model-aware token estimation.
+- Functional SHA `a343b3af2374cc5ceae08b65ffe72f12841a12ac`; Core AI Service CI `39274933331` SUCCESS, F3 Quota PostgreSQL Security Gate `39274933453` SUCCESS. Regression tests cover oversize uploads, untouched quota reservations and malformed FM configuration.
+- F3 BUILD_IN_PROGRESS. Pending provider-aware text/audio token accounting, uncertain-charge governed reconciliation, cross-service identity and PostgreSQL E2E, independent audit. No merge, deploy or external homologation.
