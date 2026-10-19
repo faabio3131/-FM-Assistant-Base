@@ -903,3 +903,9 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 2026-10-19 — WHATSAPP QR LOCAL CHANNEL PAUSE CONSTRUCTION
 - Add customer-local pause endpoint protected by tenant/unit integration.manage, revision and event audit. No remote logout is implied and restart is blocked pending governed resume implementation. UI respects disabled status and avoids misleading connected indicators. Regression test demonstrates signed stale "open" webhook cannot reactivate locally disabled channel.
 - Separate upstream native Evolution authentication, real remote disconnect/reconnect, durable inbox/worker and cross-SaaS Command policy delivery remain NOT_DONE; Command architectural review held by user; no real VPS credentials or homologation.
+
+
+2026-10-19 — QR WHATSAPP SIGNED LIFECYCLE REPLAY PROTECTION
+- Evolution `connection.update` signed-event replay receipts now persist across workers using composite unique key and additive migration `20261019_0012`. Exact duplicate signed lifecycle payloads cannot reapply state after new transitions. Event body/timestamp are digested; no raw WhatsApp payload or sensitive token is persisted in the receipt.
+- Additional test replays an earlier signed `open` after `degraded` and asserts it cannot reactivate; a genuinely distinct authenticated event may activate. Remains fail-closed pending authentic upstream FM broker, provider event ordering and durable work queue/outbox.
+- Continue software construction and internal CI first. No external homologation, production migrations, merges, or changes to the Command cross-SaaS architecture.
