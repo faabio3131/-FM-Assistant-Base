@@ -867,3 +867,8 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 2026-10-19 — F3 COMMERCIAL TEXT INPUT PRE-ADMISSION SUBGATE
 - Core functional `d63621cf916ad47a1de8b70385196d9bb1359f0e`: conservative byte-envelope text request validation (including Unicode and system/user messages) denies oversized input before tenant quota reservation and provider credentials; tests certified AI Service CI `39273574128` SUCCESS, PostgreSQL Security Gate `39273575267` SUCCESS.
 - Canonical status `F3 = IN_PROGRESS`; this is not exact provider tokenization. Remaining work: provider/model-aware input counters, full audio bound and accounting, governed post-provider uncertain-cost resolution, cross-system Command/Assistant/Core end-to-end with disposable PostgreSQL and negative-security tests, independent security review. Defer only real external credentials and homologation until software 100% built; internal work continues. No merge/deploy, do not modify Kordena or fm-command-v2.
+
+
+2026-10-19 — F3 INTERNAL AUDIO PAYLOAD SAFETY SUBGATE
+- Core functional SHA `a343b3af2374cc5ceae08b65ffe72f12841a12ac`, AI Service CI `39274933331` SUCCESS, PG security `39274933453` SUCCESS. FM-managed maximum audio upload bytes now validates settings and denies oversized audio pre-quota; 10MiB default, 64MiB upper configuration bound, strict false-positive-free byte limit. Audio bytes are NOT token accounting.
+- Core and Assistant production homologation remains deferred until software construction complete. F3 IN_PROGRESS: model-specific token accounting, ambiguous usage reconciliation, Command/Assistant/Core PostgreSQL E2E, independent security review. PRs remain Draft without merge/deploy, Kordena and fm-command-v2 unchanged.
