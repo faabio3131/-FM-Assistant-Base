@@ -145,9 +145,9 @@ class CoreSettings:
                     AssistantPlanHTTPSFetch(
                         origin=self.assistant_plan_url or "",
                         secret=(self.assistant_plan_signing_key or "").encode(),
-                        bounds=lambda capability: dict(
-                            (c, (i, o)) for c, i, o in caps
-                        )[capability],
+                        bounds=lambda capability: {
+                            c: (i, o) for c, i, o in caps
+                        }[capability],
                         client=verify_client,
                     )
                 except ValueError as exc:
@@ -227,7 +227,7 @@ def _load_assistant_plan_bounds() -> tuple[tuple[str, int, int], ...]:
     try:
         payload = json.loads(raw)
         if not isinstance(payload, dict):
-            raise ValueError("not a mapping")
+            raise TypeError("not a mapping")
         if set(payload) != {
             "atendimento_interpretacao", "atendimento_transcricao",
         }:
