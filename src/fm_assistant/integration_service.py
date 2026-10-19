@@ -136,6 +136,8 @@ class IntegrationService:
         source: CredentialSource = CredentialSource.TENANT_MANAGED,
     ) -> IntegrationConnection:
         definition = self._definition(provider_key)
+        if definition.provider_key == "whatsapp_evolution":
+            raise ValueError("evolution_fm_provision_only")
         normalized_config = self._normalize_config(definition, config)
         normalized_secrets = self._normalize_secrets(
             definition,
