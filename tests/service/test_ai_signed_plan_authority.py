@@ -201,3 +201,43 @@ def test_partial_core_plan_authority_configuration_is_rejected():
             routes=(), control_plane_database_url="sqlite:///synthetic.db",
             assistant_plan_url="https://assistant.example.test",
         ).validate()
+
+
+def test_fm_token_bound_configuration_is_strict_and_capability_scoped(monkeypatch):
+    import json
+
+    from core.ai_service_settings import (
+        CoreEnvironment,
+        CoreSettings,
+        _load_assistant_plan_bounds,
+    )
+
+    config = {
+        "atendimento_interpretacao": [3000, 600],
+        "atendimento_transcricao": [5000, 700],
+    }
+    monkeypatch.setenv("FM_CORE_ASSISTANT_PLAN_BOUNDS_JSON", json.dumps(config))
+    bounds = _load_assistant_plan_bounds()
+    settings = CoreSettings(
+        environment=CoreEnvironment.TEST, service_key="synthetic-key",
+        routes=(), control_plane_database_url="sqlite:///synthetic.db",
+        assistant_plan_bounds=bounds,
+    ).validate()
+    assert dict((k, (i, o)) for k, i, o in settings.assistant_plan_bounds) == {
+        "atendimento_interpretacao": (3000, 600),
+        "atendimento_transcricao": (5000, 700),
+    }
+    for invalid in (
+        {"atendimento_interpretacao": [3000, 600]},
+        {**config, "atendimento_transcricao": [True, 600]},
+        {**config, "atendimento_transcricao": [-1, 600]},
+    ):
+        monkeypatch.setenv(
+            "FM_CORE_ASSISTANT_PLAN_BOUNDS_JSON", json.dumps(invalid),
+        )
+        with pytest.raises(RuntimeError, match="bounds_invalid"):
+            CoreSettings(
+                environment=CoreEnvironment.TEST, service_key="synthetic",
+                routes=(), control_plane_database_url="sqlite:///synthetic.db",
+                assistant_plan_bounds=_load_assistant_plan_bounds(),
+            ).validate()
