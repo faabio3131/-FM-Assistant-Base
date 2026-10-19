@@ -190,3 +190,35 @@ def test_catalog_registers_qr_provider_without_requiring_user_tokens(
     )
     assert "whatsapp.qr" in entry["capabilities"]
     assert entry["integration_type"] == "whatsapp"
+
+
+def test_qr_panel_is_human_session_only_and_has_strict_csp(client, provision_credential):
+    key = provision_credential(client, "tenant-a", "unit-a")
+    assert client.get("/v1/channels/whatsapp/qr/panel").status_code == 401
+    # Machine credentials are not equivalent to an owner session.
+    assert client.get(
+        "/v1/channels/whatsapp/qr/panel", headers=_headers(key),
+    ).status_code == 401
+    from test_identity_rbac import _bootstrap, _login
+
+    _bootstrap(client, tenant_id="tenant-owner-qr", unit_id="unit-owner-qr",
+               email="qr-owner@example.com")
+    _login(client, tenant_id="tenant-owner-qr", email="qr-owner@example.com")
+    html = client.get("/v1/channels/whatsapp/qr/panel")
+    assert html.status_code == 200, html.text
+    assert "Conecte seu WhatsApp" in html.text
+    assert "script-src 'nonce-" in html.headers["content-security-policy"]
+    assert html.headers["cache-control"] == "no-store"
+    assert "frame-ancestors 'none'" in html.headers["content-security-policy"]
+    # A customer can access their panel even before the FM transport is activated,
+    # while API calls remain explicitly unavailable instead of using fake QR codes.
+    assert client.get("/v1/channels/whatsapp/qr/current").status_code == 503
+
+
+def test_qr_current_is_scoped_and_never_returns_secrets(
+    client, provision_credential,
+):
+    api_key = provision_credential(client, "tenant-read-qr", "unit-read-qr")
+    assert client.get(
+        "/v1/channels/whatsapp/qr/current", headers=_headers(api_key),
+    ).status_code == 503
