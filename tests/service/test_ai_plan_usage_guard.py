@@ -258,3 +258,24 @@ def test_fallback_budget_reconciles_aggregate_usage(guarded):
             output_bound=80, attempt_budget=9,
             scopes=(("ai.requests", "tenant"), ("ai.total_tokens", "tenant")),
         )
+
+
+def test_oversized_utf8_prompt_denied_before_any_quota_reservation(guarded):
+    from core.ai_service_contracts import TextMessage, TextRequestContent
+
+    guard, store = guarded
+    req = SolicitacaoIA(
+        tenant_id="a", unidade_id="u1", request_id="big-prompt",
+        correlation_id="big-prompt",
+        capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
+        conteudo=TextRequestContent(
+            system_prompt="system",
+            messages=(TextMessage(role="user", content="á" * 70),),
+        ),
+    )
+    with pytest.raises(QuotaDenied, match="input_envelope_exceeded"):
+        guard.admit(request=req, at=NOW)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 0
