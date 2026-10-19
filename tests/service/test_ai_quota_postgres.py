@@ -199,3 +199,38 @@ def test_pg_shared_tenant_budget_across_units_is_atomic(postgres_quota):
             "ai.requests", "ai.total_tokens",
         }
         assert len({item.request_id for item in rows}) == 1
+
+
+def test_pg_signed_projection_rejects_window_change_with_history(postgres_quota):
+    """Revision update and prior usage must not land in different periods."""
+    store, sessions = postgres_quota
+    grants = (
+        ("ai.requests", "tenant", 4, 60),
+        ("ai.total_tokens", "tenant", 500, 60),
+    )
+    store.project_signed_grants(
+        tenant_id="tenant-a", unit_id="unit-a", revision=1,
+        grants=grants,
+    )
+    store.reserve_bundle(
+        needs=(QuotaRequirement(
+            tenant_id="tenant-a", unit_id="__tenant__",
+            capability="ai.total_tokens", units=300, policy_revision=1,
+        ),), request_id="prior-history", at=NOW,
+    )
+    with pytest.raises(QuotaDenied, match="projection_window_change_blocked"):
+        store.project_signed_grants(
+            tenant_id="tenant-a", unit_id="unit-a", revision=2,
+            grants=(("ai.requests", "tenant", 5, 60),
+                    ("ai.total_tokens", "tenant", 700, 3600)),
+        )
+    with sessions() as db:
+        req = db.get(AIQuotaPolicyRecord, ("tenant-a", "__tenant__", "ai.requests"))
+        tokens = db.get(AIQuotaPolicyRecord, ("tenant-a", "__tenant__", "ai.total_tokens"))
+        assert (req.revision, req.limit_units) == (1, 4)
+        assert (tokens.revision, tokens.window_seconds) == (1, 60)
+    usage = store.usage_snapshot(
+        tenant_id="tenant-a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert (usage.reserved_units, usage.remaining_units) == (300, 200)
