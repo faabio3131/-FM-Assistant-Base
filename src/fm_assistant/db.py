@@ -496,6 +496,26 @@ class IntegrationInboundORM(Base):
     )
 
 
+class EvolutionWebhookReceiptORM(Base):
+    """Durable one-shot receipt for a VERIFIED signed ingress delivery."""
+
+    __tablename__ = "assistant_evolution_webhook_receipts"
+
+    connection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("assistant_integration_connections.connection_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    event_digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_assistant_evolution_receipts_created", "received_at"),
+    )
+
+
 class IntegrationValidationORM(Base):
     __tablename__ = "assistant_integration_validations"
 
