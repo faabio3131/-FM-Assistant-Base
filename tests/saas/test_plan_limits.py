@@ -14,7 +14,7 @@ from fm_assistant.db import (
     UnitORM,
 )
 from fm_assistant.plan_limits import PlanLimitDenied, PlanLimitResolver
-from fm_assistant.plan_policy_manifest import LicensedQuotaManifestService
+from fm_assistant.plan_policy_manifest import (\n    LicensedQuotaManifestService,\n    issue_core_plan_grant,\n)
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
 
@@ -162,3 +162,45 @@ def test_manifest_matches_exact_pinned_subscription_revision(catalog):
         license_row.status="suspended"
     with pytest.raises(PlanLimitDenied):
         manifest.resolve(tenant_id="tenant-a", unit_id="unit-1", now=NOW)
+
+
+def test_core_grant_derived_from_license_and_signed(catalog):
+    import hashlib
+    import hmac
+    import json
+
+    _, sessions = catalog
+    with sessions.begin() as db:
+        db.add(PlanLimitORM(
+            plan_code="business", revision=1,
+            resource="ai.requests", scope="tenant",
+            limit_units=100, window_seconds=86400,
+        ))
+    source = LicensedQuotaManifestService(sessions)
+    manifest = source.resolve(tenant_id="tenant-a", unit_id="unit-1", now=NOW)
+    secret = b"assistant-to-core-test-secret-key-32-bytes-12345"
+    body, signature = issue_core_plan_grant(
+        manifest=manifest, capability="atendimento_interpretacao",
+        input_bound=100, output_bound=50, secret=secret, now=NOW,
+    )
+    assert hmac.compare_digest(
+        signature,
+        hmac.new(
+            secret, b"/internal/v1/assistant/core-plan-grant\\n" + body,
+            hashlib.sha256,
+        ).hexdigest(),
+    )
+    decoded = json.loads(body)
+    assert decoded["revision"] == 1
+    assert decoded["tenant_id"] == "tenant-a"
+    assert decoded["expires_at"] - int(NOW.timestamp()) == 30
+    with pytest.raises(PlanLimitDenied, match="bounds_exceeded"):
+        issue_core_plan_grant(
+            manifest=manifest, capability="atendimento_interpretacao",
+            input_bound=900, output_bound=200, secret=secret, now=NOW,
+        )
+    with sessions.begin() as db:
+        license_row = db.get(TenantLicenseORM, "tenant-a")
+        license_row.status = "suspended"
+    with pytest.raises(PlanLimitDenied):
+        source.resolve(tenant_id="tenant-a", unit_id="unit-1", now=NOW)
