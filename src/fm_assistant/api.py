@@ -49,6 +49,7 @@ from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
 from .plan_license_binding import GovernedPlanLicenseBinding, PlanLicenseBindingDenied
 from .plan_limits import PlanLimitDenied
+from .plan_policy_manifest import authenticated_core_plan_grant
 from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
 from .repositories import (
     ConversationSQLAlchemyRepository,
@@ -1383,6 +1384,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="plan_sync_denied") from exc
         return JSONResponse(
             {"status": result}, headers={"Cache-Control": "no-store"}
+        )
+
+    @app.post("/internal/v1/assistant/core-plan-grant", include_in_schema=False)
+    async def internal_assistant_core_plan_grant(request: Request) -> Response:
+        """No browser auth: dedicated service signature and live license lookup."""
+        raw = await request.body()
+        try:
+            signed, signature = authenticated_core_plan_grant(
+                raw_body=raw,
+                request_signature=request.headers.get("X-FM-Core-Plan-Signature"),
+                secret=cfg.core_plan_signing_key,
+                sessions=session_factory,
+                now=datetime.now(UTC),
+            )
+        except PlanLimitDenied as exc:
+            raise HTTPException(
+                status_code=401, detail="plan_grant_denied"
+            ) from exc
+        return Response(
+            content=signed, media_type="application/json",
+            headers={
+                "X-FM-Assistant-Plan-Signature": signature,
+                "Cache-Control": "no-store",
+            },
         )
 
     @app.post("/internal/v1/command/core-bridge/manage", include_in_schema=False)
