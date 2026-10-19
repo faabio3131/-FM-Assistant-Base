@@ -214,6 +214,16 @@ class EvolutionInboundQueue:
             ]
             if claim_generation is not None:
                 conditions.append(EvolutionInboundJobORM.attempt_count == claim_generation)
+            # A network send can only be called complete with a persisted
+            # provider acknowledgement; an unacknowledged send stays uncertain.
+            if not reconciled:
+                conditions.append(
+                    (EvolutionInboundJobORM.state == "processing")
+                    | (
+                        (EvolutionInboundJobORM.state == "sending")
+                        & (EvolutionInboundJobORM.outbound_status == "provider_acknowledged")
+                    )
+                )
             result = session.execute(
                 update(EvolutionInboundJobORM)
                 .where(*conditions)
@@ -351,6 +361,13 @@ class EvolutionInboundQueue:
                 .order_by(EvolutionInboundJobORM.updated_at.desc())
                 .limit(limit)
             ).all()
+            recent = session.scalars(
+                select(EvolutionInboundJobORM)
+                .where(EvolutionInboundJobORM.connection_id == connection_id)
+                .order_by(EvolutionInboundJobORM.updated_at.desc(),
+                          EvolutionInboundJobORM.message_id)
+                .limit(limit)
+            ).all()
             oldest = session.execute(
                 select(
                     EvolutionInboundJobORM.state,
@@ -373,6 +390,25 @@ class EvolutionInboundQueue:
                 "counts": {state: total for state, total in counts},
                 "oldest_age_seconds": ages,
                 "capacity": self._max_pending,
+                "lifecycle": [
+                    {
+                        "message_id": row.message_id,
+                        "state": row.state,
+                        "attempt_count": row.attempt_count,
+                        "received_at": row.created_at.isoformat(),
+                        "claimed_at": row.claimed_at.isoformat() if row.claimed_at else None,
+                        "send_started_at": (
+                            row.send_started_at.isoformat() if row.send_started_at else None
+                        ),
+                        "last_transition_at": row.updated_at.isoformat(),
+                        "outbound_status": row.outbound_status,
+                        "outbound_operation_id": row.outbound_operation_id,
+                        "outbound_reference": row.outbound_reference,
+                        "requires_review": row.state == "reconcile_required",
+                        "provider_delivery_confirmed": False,
+                    }
+                    for row in recent
+                ],
                 "reconciliation": [
                     {
                         "message_id": row.message_id,
