@@ -1592,6 +1592,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return _integration_response(connection)
 
+    @app.post(
+        "/v1/channels/whatsapp/qr/{connection_id}/logout",
+        response_model=IntegrationResponse,
+    )
+    def logout_whatsapp_qr(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        onboarding = request.app.state.evolution_onboarding
+        if onboarding is None:
+            raise HTTPException(status_code=503, detail="evolution_gateway_unavailable")
+        try:
+            connection = onboarding.logout(context, connection_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="evolution_connection_not_found") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit.record(
+            context=context,
+            action="assistant.channel.whatsapp.qr.logout_confirmed",
+            resource_type="integration",
+            resource_id=connection.connection_id,
+            outcome="success",
+        )
+        return _integration_response(connection)
+
     @app.get("/v1/channels/whatsapp/qr/panel", response_class=HTMLResponse)
     def whatsapp_qr_panel(
         _principal: SessionPrincipal = Depends(
