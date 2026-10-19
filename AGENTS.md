@@ -409,3 +409,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Implemented additional disposable PostgreSQL integration regression for signed revision changes over existing consumption in `tests/service/test_ai_quota_postgres.py`, functional SHA `3b638e4800aa0925a27d340321a8036022198f68`. Core AI Service CI `39271248172` SUCCESS and F3 Quota PostgreSQL Security Gate `39271248045` SUCCESS.
 - Corporate Command `FM-CONTROL-CENTER` PR #90 remains Draft and has four passing workflows on SHA `626be1432cbd753edf3bf547dbe288dde3199b25`, but a green CI does not prove full cross-system end-to-end service identity/secret rotation.
 - F3 remains BUILD_IN_PROGRESS. No promotion, merge or deploy until reliable provider-specific input/audio admission, governed reconciliation and transactional window migration, plus full Command–Assistant–Core isolated integration and security review are complete. External real-provider homologation remains deferred, not a construction blocker.
+
+
+## F3 — 2026-10-19 TEXT PRE-ADMISSION ENVELOPE (INTERNAL SUBGATE)
+
+- Added conservative UTF-8 prompt envelope preflight in `core/ai_plan_usage_guard.py`, before any quota reservation, secret resolution, or external model execution. Includes system prompt, message bodies, roles and multibyte input. Oversized requests now deny with `core_plan.input_envelope_exceeded`; they do not consume a reservation.
+- Synthetic regression `tests/service/test_ai_plan_usage_guard.py::test_oversized_utf8_prompt_denied_before_any_quota_reservation` verifies no quota records are reserved for denied Unicode input.
+- Functional SHA `d63621cf916ad47a1de8b70385196d9bb1359f0e` — AI Service CI `39273574128` SUCCESS, F3 Quota PostgreSQL Gate `39273575267` SUCCESS.
+- This is a conservative byte envelope, NOT a provider-specific token counter. F3 remains BUILD_IN_PROGRESS until model-aware counting, particularly multimodal/audio, governed reconciliation of ambiguous paid provider attempts, signed cross-system E2E and independent security review. User requires external provider homologation only after software construction completes; do not treat it as an internal coding gate. PR draft; no merge or deploy.
