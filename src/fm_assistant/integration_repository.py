@@ -11,9 +11,9 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from .db import (
+    EvolutionWebhookReceiptORM,
     IntegrationCapabilityORM,
     IntegrationConnectionORM,
-    EvolutionWebhookReceiptORM,
     IntegrationEventORM,
     IntegrationProviderORM,
     IntegrationSecretVersionORM,
