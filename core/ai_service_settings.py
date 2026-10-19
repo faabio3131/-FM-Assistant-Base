@@ -71,6 +71,8 @@ class CoreSettings:
     assistant_bridge_url: str | None = None
     assistant_bridge_key_id: str | None = None
     assistant_bridge_signing_key: str | None = field(default=None, repr=False)
+    assistant_plan_url: str | None = None
+    assistant_plan_signing_key: str | None = field(default=None, repr=False)
     
     @property
     def persistent_control_plane(self) -> bool:
@@ -104,6 +106,31 @@ class CoreSettings:
                 raise RuntimeError("core_assistant_bridge_config_invalid") from exc
             if self.assistant_bridge_signing_key in (self.service_key, self.admin_key):
                 raise RuntimeError("core_assistant_bridge_key_reused")
+        plan_fields = (self.assistant_plan_url, self.assistant_plan_signing_key)
+        if any(plan_fields) and not all(plan_fields):
+            raise RuntimeError("core_plan_authority_config_incomplete")
+        if all(plan_fields):
+            if not self.persistent_control_plane:
+                raise RuntimeError("core_plan_authority_requires_control_plane")
+            if len(self.assistant_plan_signing_key or "") < 32:
+                raise RuntimeError("core_plan_authority_key_invalid")
+            if self.assistant_plan_signing_key in (
+                self.service_key, self.admin_key, self.assistant_bridge_signing_key,
+            ):
+                raise RuntimeError("core_plan_authority_key_reused")
+            from core.ai_signed_plan_authority import AssistantPlanHTTPSFetch
+            import httpx
+
+            with httpx.Client() as verify_client:
+                try:
+                    AssistantPlanHTTPSFetch(
+                        origin=self.assistant_plan_url or "",
+                        secret=(self.assistant_plan_signing_key or "").encode(),
+                        bounds=lambda capability: (4096, 2048),
+                        client=verify_client,
+                    )
+                except ValueError as exc:
+                    raise RuntimeError("core_plan_authority_url_invalid") from exc
         if not self.service_key.strip():
             raise RuntimeError("FM_CORE_SERVICE_KEY obrigatorio")
         if self.persistent_control_plane:
@@ -129,6 +156,8 @@ class CoreSettings:
                 raise RuntimeError("FM_CORE_SERVICE_KEY deve ter 32+ caracteres")
             if not self.persistent_control_plane:
                 raise RuntimeError("core_control_plane_required_in_commercial_env")
+            if not all(plan_fields):
+                raise RuntimeError("core_plan_authority_required_in_commercial_env")
             if not self.admin_key or len(self.admin_key) < 32:
                 raise RuntimeError("FM_CORE_ADMIN_KEY must have 32+ characters")
             if self.admin_key == self.service_key:
@@ -198,4 +227,6 @@ def load_settings() -> CoreSettings:
         assistant_bridge_url=os.getenv("FM_CORE_ASSISTANT_BRIDGE_URL") or None,
         assistant_bridge_key_id=os.getenv("FM_CORE_ASSISTANT_BRIDGE_KEY_ID") or None,
         assistant_bridge_signing_key=os.getenv("FM_CORE_ASSISTANT_BRIDGE_SIGNING_KEY") or None,
+        assistant_plan_url=os.getenv("FM_CORE_ASSISTANT_PLAN_URL") or None,
+        assistant_plan_signing_key=os.getenv("FM_CORE_ASSISTANT_PLAN_SIGNING_KEY") or None,
     ).validate()
