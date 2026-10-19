@@ -116,3 +116,66 @@ def test_unconfigured_webhook_denied(client):
         "/webhooks/fm-evolution/ba52d5cb-3742-4b75-916c-a7bdc3c4df20",
         json={"event": "messages.upsert"},
     ).status_code == 503
+
+
+def test_uncertain_outbound_is_quarantined_without_resend(client, provision_credential):
+    key = provision_credential(client, "tenant-fail-safe", "unit-fail-safe")
+    attempts = []
+
+    def provider(request):
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {"token": INSTANCE_TOKEN}})
+        if request.url.path.startswith("/message/sendText/"):
+            attempts.append(request.url.path)
+            return httpx.Response(503, json={"error": "unknown"})
+        return httpx.Response(503)
+
+    transport = EvolutionClient(
+        EvolutionSettings(
+            origin="https://evolution.example.test", global_key="f" * 40,
+        ),
+        client=httpx.Client(transport=httpx.MockTransport(provider)),
+    )
+    vault = FernetCredentialVault(client.app.state.settings.channel_encryption_key)
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository, vault=vault, transport=transport,
+    )
+    inbox = WhatsAppInboundRepository(repository._session_factory)
+    client.app.state.evolution_runtime = EvolutionRuntime(
+        integrations=repository, inbox=inbox,
+        assistant=client.app.state.assistant_service,
+        vault=vault, transport=transport,
+        verifier=EvolutionEventVerifier(signing_key=SIGNER),
+        sender_pepper=client.app.state.settings.credential_pepper,
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_auth(key),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    instance = created.json()["config"]["instance_name"]
+    body, headers = _signed(
+        cid, {"event": "connection.update", "instance": instance,
+              "data": {"state": "open"}},
+    )
+    assert client.post(
+        f"/webhooks/fm-evolution/{cid}", content=body, headers=headers,
+    ).status_code == 204
+    assert client.put(
+        "/v1/persona", headers=_auth(key),
+        json={"public_name": "Atendente", "language": "pt-BR", "tone": "consultivo"},
+    ).status_code == 200
+    message = {
+        "event": "messages.upsert", "instance": instance,
+        "data": [{"key": {
+            "id": "WA-UNCERTAIN", "fromMe": False,
+            "remoteJid": "5511999999999@s.whatsapp.net",
+        }, "message": {"conversation": "Preciso de ajuda"}}],
+    }
+    body, headers = _signed(cid, message)
+    endpoint = f"/webhooks/fm-evolution/{cid}"
+    assert client.post(endpoint, content=body, headers=headers).status_code == 204
+    assert inbox.status(channel_id=cid, message_id="WA-UNCERTAIN") == "reconcile_required"
+    assert client.post(endpoint, content=body, headers=headers).status_code == 204
+    assert len(attempts) == 1
