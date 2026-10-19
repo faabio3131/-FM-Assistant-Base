@@ -1,6 +1,7 @@
 """Durable encrypted async inbound queue, synthetic storage and worker tests."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -96,3 +97,19 @@ def test_queue_refuses_invalid_worker_controls(client, provision_credential):
     for window in (0, 59, 86401, True):
         with pytest.raises(ValueError):
             queue.quarantine_stale(older_than_seconds=window)
+
+
+def test_two_workers_do_not_claim_same_pending_job(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    assert queue.enqueue(
+        connection_id=cid, message_id="race-one",
+        sender="5511999999999", text="One message",
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claimed = list(pool.map(lambda _: queue.claim(), range(2)))
+    actual = [item for item in claimed if item is not None]
+    assert len(actual) == 1
+    assert actual[0].message_id == "race-one"
+    assert queue.state(connection_id=cid, message_id="race-one") == "processing"
+    queue.finish(connection_id=cid, message_id="race-one", reconciled=False)
+    assert queue.claim() is None
