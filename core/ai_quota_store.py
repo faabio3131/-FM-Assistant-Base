@@ -101,6 +101,7 @@ class QuotaUsageSnapshot:
     unit_id: str
     capability: str
     limit_units: int
+    window_seconds: int
     reserved_units: int
     consumed_units: int
     remaining_units: int
@@ -370,7 +371,8 @@ class QuotaReservations:
             )
             return QuotaUsageSnapshot(
                 tenant_id=tenant_id, unit_id=unit_id, capability=capability,
-                limit_units=policy.limit_units, reserved_units=reserved,
+                limit_units=policy.limit_units, window_seconds=policy.window_seconds,
+                reserved_units=reserved,
                 consumed_units=spent,
                 remaining_units=max(0, policy.limit_units - reserved - spent),
                 period_ends_at=datetime.fromtimestamp(
