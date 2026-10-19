@@ -15,8 +15,8 @@ from .channels.evolution_events import EvolutionEventVerifier
 from .channels.whatsapp_evolution import EvolutionClient
 from .credential_vault import CredentialVault
 from .domain import Channel, ConversationStatus, TenantContext
-from .integration import IntegrationStatus
 from .evolution_queue import EvolutionInboundQueue, QueuedInbound
+from .integration import IntegrationStatus
 from .integration_repository import IntegrationRepository
 from .service import AssistantService
 from .whatsapp_repository import WhatsAppInboundRepository
