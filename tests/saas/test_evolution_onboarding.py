@@ -28,6 +28,9 @@ def _transport(on_request):
 
 
 def test_https_and_separate_global_key_required():
+    assert "x" * 40 not in repr(EvolutionSettings(
+        origin="https://evolution.example.test", global_key="x" * 40,
+    ))
     for origin in (
         "http://evolution.example.test", "https://localhost",
         "https://user:pass@evolution.example.test",
@@ -116,6 +119,11 @@ def test_tenant_scoped_api_provision_and_qr(client, provision_credential):
         "/v1/channels/whatsapp/qr/provision", headers=_headers(key_a),
     )
     assert repeat.status_code == 409
+    forbidden_config_change = client.put(
+        f"/v1/integrations/{cid}/config", headers=_headers(key_a),
+        json={"config": {"instance_name": "attacker-supplied"}},
+    )
+    assert forbidden_config_change.status_code == 409
     invalid_generic = client.post(
         "/v1/integrations", headers=_headers(key_a),
         json={
