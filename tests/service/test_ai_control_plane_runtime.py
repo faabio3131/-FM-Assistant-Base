@@ -293,3 +293,44 @@ def test_signed_plan_output_cap_is_applied_to_provider_after_admission(monkeypat
     assert current.policy_revision == 7
     assert current.consumed_units == 15
     assert current.reserved_units == 0
+
+
+def test_revoked_license_never_contacts_model_or_resolves_credentials(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from core.ai_plan_usage_guard import PlanQuotaPolicy, PlanUsageGuard
+    from core.ai_quota_store import QuotaDenied, QuotaReservations
+
+    store = _plane()
+    store.add_route(_policy(identifier="revoked", scope="platform"))
+    resolver = Resolver()
+    attempts = []
+    monkeypatch.setattr(
+        "core.ai_providers.httpx.post",
+        lambda *args, **kwargs: attempts.append((args, kwargs)),
+    )
+
+    class RevokedAuthority:
+        def resolve(self, *, tenant_id, unit_id, capability, now):
+            return PlanQuotaPolicy(
+                tenant_id=tenant_id, unit_id=unit_id,
+                plan_code="REVOKED", revision=1,
+                valid_until=now - timedelta(seconds=1),
+                input_bound=100, output_bound=30,
+                scopes=(("ai.requests", "tenant"),
+                        ("ai.total_tokens", "tenant")),
+                grants=(("ai.requests", "tenant", 100, 86400),
+                        ("ai.total_tokens", "tenant", 10000, 86400)),
+            )
+
+    runtime = CoreControlPlaneAIRuntime(
+        control_plane=store, credentials=resolver,
+        plan_usage=PlanUsageGuard(
+            quota=QuotaReservations(store._sessions),
+            authority=RevokedAuthority(),
+        ),
+    )
+    with pytest.raises(QuotaDenied, match="license_unavailable"):
+        _generate(runtime, "tenant-a")
+    assert resolver.calls == []
+    assert attempts == []
