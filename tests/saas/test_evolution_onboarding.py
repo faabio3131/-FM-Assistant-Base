@@ -7,7 +7,9 @@ import httpx
 import pytest
 
 from fm_assistant.channels.whatsapp_evolution import (
-    EvolutionClient, EvolutionSettings, EvolutionUnavailable,
+    EvolutionClient,
+    EvolutionSettings,
+    EvolutionUnavailable,
 )
 from fm_assistant.evolution_onboarding import EvolutionOnboarding
 
