@@ -69,6 +69,16 @@ class EvolutionRuntime:
             credential_id="channel:" + connection_id,
         )
         if payload.get("event") == "connection.update":
+            # Deduplicate the authenticated delivery before state changes.
+            # Include the signed time to distinguish independent lifecycle
+            # notifications sharing the same body.
+            receipt_digest = hashlib.sha256(
+                (timestamp or "").encode("ascii") + b"\\n" + raw
+            ).hexdigest()
+            if not self._integrations.claim_evolution_webhook(
+                connection_id=connection_id, digest=receipt_digest,
+            ):
+                return EvolutionDeliveryResult()
             state = payload.get("data")
             state = state.get("state") if isinstance(state, dict) else None
             if state == "open" and connection.status is not IntegrationStatus.ACTIVE:
