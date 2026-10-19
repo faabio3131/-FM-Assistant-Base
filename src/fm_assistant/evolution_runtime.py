@@ -175,6 +175,14 @@ class EvolutionRuntime:
             reconcile_required=reconcile,
         )
 
+    def recover_stale(self, *, older_than_seconds: int = 300) -> int:
+        """Quarantine expired worker claims; never replay uncertain side effects."""
+        if self._queue is None:
+            raise RuntimeError("evolution_queue_not_configured")
+        return self._queue.quarantine_stale(
+            older_than_seconds=older_than_seconds,
+        )
+
     def process_pending(self, *, limit: int = 10) -> EvolutionDeliveryResult:
         """Internal worker batch. No HTTP route or automatic background side effects."""
         if self._queue is None:
