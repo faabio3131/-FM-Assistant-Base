@@ -296,7 +296,7 @@ def test_signed_plan_output_cap_is_applied_to_provider_after_admission(monkeypat
 
 
 def test_revoked_license_never_contacts_model_or_resolves_credentials(monkeypatch):
-    from datetime import UTC, datetime, timedelta
+    from datetime import timedelta
 
     from core.ai_plan_usage_guard import PlanQuotaPolicy, PlanUsageGuard
     from core.ai_quota_store import QuotaDenied, QuotaReservations
