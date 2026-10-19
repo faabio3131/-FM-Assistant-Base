@@ -222,3 +222,36 @@ def test_qr_current_is_scoped_and_never_returns_secrets(
     assert client.get(
         "/v1/channels/whatsapp/qr/current", headers=_headers(api_key),
     ).status_code == 503
+
+
+def test_instance_outbound_uses_individual_token_not_fm_master_key():
+    requests = []
+
+    def send(request):
+        requests.append(request)
+        assert request.headers["apikey"] == "synthetic-instance-token-value"
+        assert request.headers["apikey"] != "synthetic-fm-admin-key-" + "x" * 32
+        assert request.url.path == "/message/sendText/fm_" + "f" * 32
+        assert request.content == b'{"number":"5511999999999","text":"Resposta segura"}'
+        return httpx.Response(200, json={"key": {"id": "WA-OUT-1"}})
+
+    sender = _transport(send)
+    assert sender.send_text(
+        "fm_" + "f" * 32, instance_token="synthetic-instance-token-value",
+        recipient="5511999999999", message="Resposta segura",
+    ) == "WA-OUT-1"
+    assert len(requests) == 1
+
+
+def test_outbound_network_ambiguity_is_never_a_success():
+    sender = _transport(lambda _: httpx.Response(503))
+    with pytest.raises(EvolutionUnavailable, match="gateway_unavailable"):
+        sender.send_text(
+            "fm_" + "f" * 32, instance_token="synthetic-instance-token-value",
+            recipient="5511999999999", message="Resposta segura",
+        )
+    with pytest.raises(ValueError, match="outbound_invalid"):
+        sender.send_text(
+            "fm_" + "f" * 32, instance_token="synthetic-instance-token-value",
+            recipient="123", message="Resposta segura",
+        )
