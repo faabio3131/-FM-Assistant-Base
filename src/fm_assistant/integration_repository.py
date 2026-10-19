@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from .db import (
     IntegrationCapabilityORM,
@@ -115,6 +115,21 @@ class IntegrationRepository:
         now = datetime.now(UTC)
         identifier = connection_id or str(uuid4())
         with self._session_factory() as session:
+            if provider.provider_key == "whatsapp_evolution":
+                # Serialize first provision even when two workers race before
+                # the initial connection exists. Do not affect other providers.
+                if session.bind is not None and session.bind.dialect.name == "postgresql":
+                    session.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtext(:tenant), hashtext(:unit))"),
+                        {"tenant": context.tenant_id, "unit": context.unit_id},
+                    )
+                existing = session.scalar(select(IntegrationConnectionORM.connection_id).where(
+                    IntegrationConnectionORM.tenant_id == context.tenant_id,
+                    IntegrationConnectionORM.unit_id == context.unit_id,
+                    IntegrationConnectionORM.provider_key == "whatsapp_evolution",
+                ).limit(1))
+                if existing is not None:
+                    raise RuntimeError("evolution_existing_connection_requires_review")
             row = IntegrationConnectionORM(
                 connection_id=identifier,
                 tenant_id=context.tenant_id,
