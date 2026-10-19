@@ -8,7 +8,28 @@ from sqlalchemy.orm import Session
 
 from fm_assistant.db import PlanLimitORM, PlanVersionORM, TenantLicenseORM
 from fm_assistant.plan_consumption_view import MeterReading, PlanConsumptionView
-from tests.saas.test_identity_rbac import _bootstrap, _login
+def _bootstrap(client, *, tenant_id="tenant-a", email="owner-a@example.com"):
+    res = client.post(
+        "/v1/bootstrap/tenant-owner",
+        headers={"X-Admin-Key": "admin-test-key"},
+        json={
+            "tenant_id": tenant_id, "tenant_name": tenant_id,
+            "unit_id": "unit-a", "unit_name": "Unidade A",
+            "owner_email": email, "owner_name": "Owner",
+            "password": "OwnerPassword!123",
+            "plan_code": "trial", "trial_days": 14,
+        },
+    )
+    assert res.status_code == 200, res.text
+
+
+def _login(client, *, tenant_id="tenant-a", email="owner-a@example.com"):
+    res = client.post("/v1/auth/login", json={
+        "tenant_id": tenant_id, "email": email,
+        "password": "OwnerPassword!123",
+    })
+    assert res.status_code == 200, res.text
+
 
 NOW = datetime.now(UTC)
 
