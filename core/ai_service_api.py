@@ -251,6 +251,7 @@ def create_app(
             "scope": scope,
             "policy_revision": snapshot.policy_revision,
             "limit_units": snapshot.limit_units,
+            "window_seconds": snapshot.window_seconds,
             "consumed_units": snapshot.consumed_units,
             "reserved_units": snapshot.reserved_units,
             "remaining_units": snapshot.remaining_units,
