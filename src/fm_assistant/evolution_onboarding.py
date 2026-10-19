@@ -92,6 +92,37 @@ class EvolutionOnboarding:
         )
         return updated
 
+    def resume(self, context: TenantContext, connection_id: str) -> IntegrationConnection:
+        """Restore a locally paused session only after fresh remote verification."""
+        connection = self._repository.get(context, connection_id)
+        if connection is None or connection.provider_key != self.PROVIDER:
+            raise LookupError("evolution_connection_not_found")
+        if connection.status is IntegrationStatus.REVOKED:
+            raise RuntimeError("evolution_connection_revoked")
+        if connection.status is IntegrationStatus.ACTIVE:
+            return connection
+        if connection.status is not IntegrationStatus.DISABLED:
+            raise RuntimeError("evolution_resume_requires_review")
+        cipher = self._repository.active_secret_ciphertexts(connection_id).get(
+            "instance_token"
+        )
+        if cipher is None:
+            raise RuntimeError("evolution_resume_secret_missing")
+        state = self._transport.connection_state(
+            str(connection.config["instance_name"]),
+            instance_token=self._vault.decrypt(cipher),
+        )
+        if state != "open":
+            raise RuntimeError("evolution_resume_requires_relink")
+        updated = self._repository.update_connection(
+            context, connection_id, status=IntegrationStatus.ACTIVE,
+            bump_revision=True,
+        )
+        self._repository.record_event(
+            context, connection_id, event_type="evolution.resume_remote_verified",
+        )
+        return updated
+
     def logout(self, context: TenantContext, connection_id: str) -> IntegrationConnection:
         """Governed remote WhatsApp logout, guarded against ambiguous success.
 
