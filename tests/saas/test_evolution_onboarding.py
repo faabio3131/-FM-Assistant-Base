@@ -315,3 +315,90 @@ def test_pause_rejects_wrong_provider_even_with_valid_scope(client, provision_cr
         "/v1/channels/whatsapp/qr/not-a-connection/pause",
         headers=_headers(key),
     ).status_code == 404
+
+
+def test_remote_logout_revokes_secret_after_provider_confirmation(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key = provision_credential(client, "remote-logout-a", "unit-logout-a")
+    attacker = provision_credential(client, "remote-logout-b", "unit-logout-b")
+    calls = []
+
+    def remote(request):
+        calls.append((request.method, request.url.path, request.headers["apikey"]))
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {
+                "token": "synthetic-instance-logout-token",
+            }})
+        if request.url.path.startswith("/instance/logout/"):
+            assert request.headers["apikey"] == "synthetic-instance-logout-token"
+            return httpx.Response(200, json={"message": "success"})
+        return httpx.Response(503)
+
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    endpoint = f"/v1/channels/whatsapp/qr/{cid}/logout"
+    assert client.post(endpoint).status_code == 401
+    assert client.post(endpoint, headers=_headers(attacker)).status_code == 404
+    response = client.post(endpoint, headers=_headers(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "revoked"
+    assert repository.active_secret_ciphertexts(cid) == {}
+    assert client.get(
+        f"/v1/channels/whatsapp/qr/{cid}", headers=_headers(key),
+    ).status_code == 409
+    again = client.post(endpoint, headers=_headers(key))
+    assert again.status_code == 200
+    assert len([p for _, p, _ in calls if p.startswith("/instance/logout/")]) == 1
+
+
+def test_remote_logout_failure_never_revokes_unverified_remote_session(
+    client, provision_credential,
+):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key = provision_credential(client, "logout-ambiguous", "unit-ambiguous")
+    calls = []
+
+    def remote(request):
+        calls.append(request.url.path)
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {
+                "token": "synthetic-remote-logout-secret",
+            }})
+        return httpx.Response(503)
+
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    response = client.post(
+        f"/v1/channels/whatsapp/qr/{cid}/logout", headers=_headers(key),
+    )
+    assert response.status_code == 409
+    from fm_assistant.domain import TenantContext
+
+    scoped = TenantContext(
+        tenant_id="logout-ambiguous", unit_id="unit-ambiguous", credential_id=key,
+    )
+    assert repository.get(scoped, cid).status.value == "disabled"
+    assert "instance_token" in repository.active_secret_ciphertexts(cid)
+    assert calls == ["/instance/create", "/instance/logout/" + created.json()["config"]["instance_name"]]
