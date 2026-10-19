@@ -155,3 +155,28 @@ def test_overspend_is_never_silently_reconciled(guarded):
         tenant_id="a",unit_id="__tenant__",
         capability="ai.total_tokens",at=NOW,
     ).reserved_units == 180
+
+
+def test_negative_attempt_usage_cannot_cancel_real_consumption(guarded):
+    guard, store = guarded
+    req = request()
+    policy = guard.admit(request=req, at=NOW)
+    assert not guard.reconcile(request=req, policy=policy, events=(
+        event(req, inp=70, out=20, cached=5),
+        event(req, inp=-50, out=0, cached=0, fallback=True),
+    ))
+    snapshot = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens", at=NOW,
+    )
+    assert snapshot.reserved_units == 180
+    assert snapshot.consumed_units == 0
+
+
+def test_boolean_plan_revision_is_not_valid_policy():
+    with pytest.raises(QuotaDenied, match="policy_invalid"):
+        PlanQuotaPolicy(
+            tenant_id="a", unit_id="u1", plan_code="all", revision=True,
+            valid_until=NOW + timedelta(days=1), input_bound=100,
+            output_bound=80,
+            scopes=(("ai.requests", "tenant"), ("ai.total_tokens", "tenant")),
+        )
