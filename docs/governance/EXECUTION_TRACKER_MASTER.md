@@ -844,3 +844,9 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 - FM Assistant PR #1 remains at previous certified `69689c1570ffc64e53e2ccf56ea6c1f74ab907eb` (3/3 gates green); the existing signed license grant route is not replaced or duplicated. No deploy or production secrets.
 - NEXT: signed complete allowance/limit projection + revision/atomic reservations in Core PostgreSQL, provider hard token caps and reliable reconciliation, tests for suspension/rotation/no-policy/over-quota; finish internal integration before any external homologation.
 - STATUS: F3 `BUILD_IN_PROGRESS`, PRs DRAFT; no merge/deploy; do not touch Kordena or `fm-command-v2`.
+
+
+2026-10-19 — F3/F9 SIGNED FULL QUOTA PROJECTION AND PROVIDER CAP (INTERNAL SUBGATE)
+- Assistant functional SHA `63a1be2e99a32d40503e38b009533a3964663b3e`: signed tenant/unit license grant now carries every allowed metric's exact limit and window, with regression proof. SaaS/Foundation, bridge HMAC contract and PostgreSQL security CI completed 3/3 SUCCESS.
+- Core functional SHA `4bacb3fbac84997de6dbe02744d2c2e805f1c7a7`: strict grant decoding, monotonic atomic quota projection to PostgreSQL/SQLAlchemy, pre-provider quota reservations, per-request provider output-token cap, and simulated usage reconciliation. AI Service CI `39194025504` SUCCESS, F3 Quota PG `39194025523` SUCCESS.
+- Internal coverage is synthetic and CI-focused; not an approved production load/finops certification. NEXT: remaining input cap + fallback-attempt metering hardening, policy window/revision rotation under outstanding work, financially safe reconciliation & provider cost ledger, per-capability FM-controlled bounds, complete Core/Assistant PostgreSQL E2E including revocations. F3 BUILD_IN_PROGRESS. PRs DRAFT; no deploy/merge/secrets; external homologation deferred. Kordena and `fm-command-v2` remain untouched.
