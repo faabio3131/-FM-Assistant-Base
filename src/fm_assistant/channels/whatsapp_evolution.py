@@ -93,6 +93,7 @@ class EvolutionClient:
         return token
 
     API_FAMILY = "evolution_v2_whatsapp_baileys"
+    CONTRACT_BASELINE = "v2.3.7"
     WEBHOOK_EVENTS = ("MESSAGES_UPSERT", "CONNECTION_UPDATE")
 
     def set_native_webhook(
@@ -105,6 +106,8 @@ class EvolutionClient:
             endpoint.scheme != "https" or not endpoint.hostname
             or endpoint.username or endpoint.password or endpoint.fragment
             or endpoint.query or endpoint.port not in (None, 443)
+            or endpoint.hostname in {"localhost", "127.0.0.1", "::1"}
+            or (endpoint.hostname or "").endswith(".local")
             or not endpoint.path.startswith("/webhooks/evolution-native/")
             or not isinstance(auth_token, str) or len(auth_token) < 32
         ):
@@ -120,6 +123,8 @@ class EvolutionClient:
             }},
         )
         webhook = data.get("webhook")
+        if isinstance(webhook, dict) and "webhook" in webhook:
+            webhook = webhook["webhook"]
         if not isinstance(webhook, dict) or webhook.get("enabled") is not True:
             raise EvolutionUnavailable("evolution_native_hook_unconfirmed")
         if webhook.get("url") != url:
