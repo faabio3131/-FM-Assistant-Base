@@ -32,6 +32,11 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
 <button id="pause" type="button" class="hide">Pausar atendimento</button>
 <button id="logout" type="button" class="hide">Desvincular WhatsApp</button>
 <button id="resume" type="button" class="hide">Retomar atendimento</button></div>
+<section id="ops-panel" aria-label="Reconciliação operacional"><h2>Monitor de mensagens</h2>
+<p>Exibe apenas estados e identificadores de mensagens, sem números ou conteúdos.</p>
+<button id="ops-refresh" type="button">Atualizar monitor</button>
+<div id="ops-summary" role="status" aria-live="polite">Sem dados disponíveis.</div>
+<ul id="ops-list"></ul></section>
 <ol class="steps"><li>Abra o WhatsApp no celular.</li><li>Vá até <strong>Aparelhos conectados</strong> e escolha <strong>Conectar aparelho</strong>.</li><li>Leia o código exibido acima.</li></ol>
 <small>O QR Code é temporário e fica visível apenas nesta sessão autorizada. Se a conexão estiver indisponível, tente atualizar ou procure suporte.</small>
 </main>
@@ -39,6 +44,9 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
 "use strict";
 (() => {
  const base="/v1/channels/whatsapp/qr";
+ const opsButton=document.getElementById("ops-refresh");
+ const opsSummary=document.getElementById("ops-summary");
+ const opsList=document.getElementById("ops-list");
  const status=document.getElementById("status"), dot=document.getElementById("dot");
  const connect=document.getElementById("connect"), refresh=document.getElementById("refresh");
  const pause=document.getElementById("pause");
@@ -109,6 +117,37 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
    } catch {show("Não foi possível consultar a conexão. Atualize ou contate o suporte.","error");visible(refresh,true);}
    finally {waiting=false;}
  }
+ async function loadOperations(){
+   if(!connection){opsSummary.textContent="Aguardando uma conexão.";return;}
+   opsButton.disabled=true;
+   try{
+     const data=await request(base+"/"+encodeURIComponent(connection)+"/operations");
+     const counts=data.counts||{};
+     opsSummary.textContent="Pendentes: "+(counts.pending||0)+" · Em andamento: "+
+       (counts.processing||0)+" · Reconciliação: "+(counts.reconcile_required||0)+
+       " · Limite da fila: "+data.capacity;
+     opsList.replaceChildren();
+     for(const item of data.reconciliation||[]){
+       const row=document.createElement("li");
+       const desc=document.createElement("span");
+       desc.textContent="Mensagem "+item.message_id+" — "+(item.error_code||"revisão necessária")+" ";
+       const button=document.createElement("button");
+       button.type="button";button.textContent="Confirmar revisão";
+       button.addEventListener("click",async()=>{
+         if(!window.confirm("Marcar como revisado? Isso NÃO reenviará a mensagem."))return;
+         button.disabled=true;
+         try{
+           await request(base+"/"+encodeURIComponent(connection)+
+             "/operations/"+encodeURIComponent(item.message_id)+"/review",{method:"POST"});
+           await loadOperations();
+         }catch{button.disabled=false;opsSummary.textContent="Revisão não confirmada.";}
+       });
+       row.append(desc,button);opsList.append(row);
+     }
+   }catch{opsSummary.textContent="Não foi possível consultar o monitor.";}
+   finally{opsButton.disabled=false;}
+ }
+ opsButton.addEventListener("click",loadOperations);
  connect.addEventListener("click",async()=>{
    connect.disabled=true;
    try{
