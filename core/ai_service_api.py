@@ -8,6 +8,8 @@ import hmac
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
+import httpx
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
@@ -18,6 +20,7 @@ from core.ai_assistant_credential_gateway import AssistantSignedCredentialGatewa
 from core.ai_control_plane import ControlPlaneError
 from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_quota_store import QuotaDenied, QuotaReservations
+from core.ai_signed_plan_authority import AssistantPlanHTTPSFetch, SignedAssistantPlanAuthority
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
 from core.ai_service_contracts import CoreAIResult, TextMessage
 from core.ai_service_runtime import CoreAIRuntime
@@ -79,6 +82,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.settings = cfg
         db_engine = None
+        policy_client = None
         if cfg.persistent_control_plane:
             tenant_gateway = (
                 AssistantSignedCredentialGateway(
@@ -89,9 +93,25 @@ def create_app(
                 if cfg.assistant_bridge_url
                 else None
             )
+            plan_authority = None
+            if cfg.assistant_plan_url and cfg.assistant_plan_signing_key:
+                policy_client = httpx.Client(trust_env=False)
+                secret = cfg.assistant_plan_signing_key.encode()
+                plan_authority = SignedAssistantPlanAuthority(
+                    secret=secret,
+                    fetch=AssistantPlanHTTPSFetch(
+                        origin=cfg.assistant_plan_url, secret=secret,
+                        bounds=lambda capability: (
+                            (8192, 2048) if capability == "atendimento_transcricao"
+                            else (4096, 2048)
+                        ),
+                        client=policy_client,
+                    ),
+                )
             ai_runtime, db_engine = build_persistent_core(
                 cfg.control_plane_database_url or "",
                 tenant_gateway=tenant_gateway,
+                plan_authority=plan_authority,
             )
         else:
             ai_runtime = runtime or CoreAIRuntime.from_settings(cfg)
@@ -102,6 +122,8 @@ def create_app(
         finally:
             if db_engine is not None:
                 db_engine.dispose()
+            if policy_client is not None:
+                policy_client.close()
 
     app = FastAPI(
         title="FM Core Base AI Service",
@@ -164,7 +186,8 @@ def create_app(
                 ),
             )
         except (
-            ControlPlaneError, SegredoAusente, ReferenciaSegredoInvalida, SQLAlchemyError
+            ControlPlaneError, QuotaDenied, SegredoAusente, ReferenciaSegredoInvalida,
+            SQLAlchemyError,
         ) as exc:
             raise HTTPException(
                 status_code=503, detail="core_control_plane_dependency_unavailable"
