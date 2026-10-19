@@ -151,6 +151,7 @@ class EvolutionInboundQueue:
                         EvolutionInboundJobORM.state == "processing",
                         EvolutionInboundJobORM.claimed_at < cutoff,
                     )
+                    .execution_options(synchronize_session=False)
                     .values(state="reconcile_required", ciphertext="",
                             error_code="stale_processing", updated_at=now)
                 )
