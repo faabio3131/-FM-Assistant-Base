@@ -259,7 +259,7 @@ def test_authenticated_core_policy_request_and_live_revocation(catalog):
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         signature = hmac.new(
             key.encode(),
-            b"POST\\n/internal/v1/assistant/core-plan-grant\n" + raw,
+            b"POST\n/internal/v1/assistant/core-plan-grant\n" + raw,
             hashlib.sha256,
         ).hexdigest()
         return authenticated_core_plan_grant(
