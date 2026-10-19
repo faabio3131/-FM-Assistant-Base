@@ -602,3 +602,9 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - A visualização premium exibe franquia e saldo comprovado quando disponível; se não há telemetria confiável, mostra claramente saldo não verificado, jamais barra zero fictícia.
 - Contratos de assinatura/billing e upgrade continuam pendentes de código. Sincronização de policy/quotas para Core e ativação do PlanUsageGuard no composition root também pendentes. Sem bypass por falta de ambiente real: continuar com mocks, testes e PG descartável.
 - Referência e evidências: `docs/governance/F3_F9_PLAN_BINDING_AND_USAGE_INTERNAL_CERTIFICATION.md`. F3/F9 BUILD_IN_PROGRESS, homologação externa deferida; F4 ainda não iniciada.
+
+## F3/F9 — CUSTOMER USAGE ALERTS + LICENSE QUOTA MANIFEST (18/10/2026)
+- Plano: todas as funções disponíveis em todos os tiers, diferenciados só por franquia e preço FM. O `PlanConsumptionView` agora informa usado, reservado, comprometido, restante e faixa de alerta (70/90/100%). Nunca presumir telemetria ausente como 0.
+- `LicensedQuotaManifestService` prepara política de quotas a partir de tenant/unidade e licença canônica com plan_code+revision fixados. Negar assinatura suspensa, expirada, mudança de revisão ou recursos essenciais ausentes. Manifesto não é permissão de cliente para editar limite, nem deve ser encaminhado sem canal interno assinado/revogável ao Core.
+- Alertas são cálculos de leitura e não substituem `QuotaReservations` transacional do Core. Cobrar do cliente só assinatura/serviços aprovados; custo de IA FM-managed é da FM.
+- Trilha externa permanece diferida até build completo. Não promover F3 global antes da sincronização autorizada em runtime, FinOps e demais gates internos. Sem deploy nem alteração de Kordena.
