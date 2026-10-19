@@ -185,6 +185,7 @@ def test_core_grant_derived_from_license_and_signed(catalog):
     body, signature = issue_core_plan_grant(
         manifest=manifest, capability="atendimento_interpretacao",
         input_bound=100, output_bound=50, secret=secret, now=NOW,
+        challenge="test-challenge-0123456789abcdef",
     )
     assert hmac.compare_digest(
         signature,
@@ -194,6 +195,7 @@ def test_core_grant_derived_from_license_and_signed(catalog):
         ).hexdigest(),
     )
     decoded = json.loads(body)
+    assert decoded["challenge"] == "test-challenge-0123456789abcdef"
     assert decoded["revision"] == 1
     assert decoded["tenant_id"] == "tenant-a"
     assert decoded["expires_at"] - int(NOW.timestamp()) == 30
@@ -201,9 +203,31 @@ def test_core_grant_derived_from_license_and_signed(catalog):
         issue_core_plan_grant(
             manifest=manifest, capability="atendimento_interpretacao",
             input_bound=900, output_bound=200, secret=secret, now=NOW,
+            challenge="test-challenge-0123456789abcdef",
         )
     with sessions.begin() as db:
         license_row = db.get(TenantLicenseORM, "tenant-a")
         license_row.status = "suspended"
     with pytest.raises(PlanLimitDenied):
         source.resolve(tenant_id="tenant-a", unit_id="unit-1", now=NOW)
+
+
+def test_signed_core_grant_requires_fresh_valid_challenge(catalog):
+    _, sessions = catalog
+    with sessions.begin() as db:
+        db.add(PlanLimitORM(
+            plan_code="business", revision=1,
+            resource="ai.requests", scope="tenant",
+            limit_units=100, window_seconds=86400,
+        ))
+    manifest = LicensedQuotaManifestService(sessions).resolve(
+        tenant_id="tenant-a", unit_id="unit-1", now=NOW,
+    )
+    for challenge in ("", "short", "spaces not allowed", "../traversal"):
+        with pytest.raises(PlanLimitDenied, match="grant_denied"):
+            issue_core_plan_grant(
+                manifest=manifest, capability="atendimento_interpretacao",
+                input_bound=100, output_bound=50,
+                secret=b"assistant-to-core-test-secret-key-32-bytes-12345",
+                now=NOW, challenge=challenge,
+            )
