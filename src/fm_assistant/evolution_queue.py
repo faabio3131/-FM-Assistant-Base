@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text as sql_text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from .credential_vault import CredentialVault
@@ -52,7 +52,7 @@ class EvolutionInboundQueue:
             # API replicas. The unique PK independently enforces deduplication.
             if session.bind is not None and session.bind.dialect.name == "postgresql":
                 session.execute(
-                    text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+                    sql_text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
                     {"scope": "fm_evolution_queue:" + connection_id},
                 )
             prior = session.get(EvolutionInboundJobORM, (connection_id, message_id))
