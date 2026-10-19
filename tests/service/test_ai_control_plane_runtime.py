@@ -334,3 +334,64 @@ def test_revoked_license_never_contacts_model_or_resolves_credentials(monkeypatc
         _generate(runtime, "tenant-a")
     assert resolver.calls == []
     assert attempts == []
+
+
+def test_ambiguous_fallback_keeps_entire_attempt_budget_reserved(monkeypatch):
+    from dataclasses import replace
+    from datetime import UTC, datetime, timedelta
+
+    from core.ai_plan_usage_guard import PlanQuotaPolicy, PlanUsageGuard
+    from core.ai_quota_store import QuotaReservations
+
+    store = _plane()
+    store.add_route(_policy(identifier="primary-budget", scope="platform"))
+    store.add_route(replace(
+        _policy(identifier="fallback-budget", scope="platform"),
+        priority=90,
+    ))
+    ledger = QuotaReservations(store._sessions)
+
+    class Authority:
+        def resolve(self, *, tenant_id, unit_id, capability, now):
+            return PlanQuotaPolicy(
+                tenant_id=tenant_id, unit_id=unit_id,
+                plan_code="ALL_FEATURES", revision=2,
+                valid_until=now + timedelta(seconds=30),
+                input_bound=64, output_bound=17,
+                scopes=(("ai.requests", "tenant"),
+                        ("ai.total_tokens", "tenant")),
+                grants=(("ai.requests", "tenant", 2, 86400),
+                        ("ai.total_tokens", "tenant", 200, 86400)),
+            )
+
+    seen = []
+
+    def provider(url, **kwargs):
+        seen.append(kwargs["json"]["max_tokens"])
+        if len(seen) == 1:
+            return httpx.Response(503, request=httpx.Request("POST", url))
+        return httpx.Response(
+            200, json={
+                "choices": [{"message": {"content": "recovered"}}],
+                "usage": {
+                    "prompt_tokens": 10, "completion_tokens": 5,
+                    "prompt_tokens_details": {"cached_tokens": 0},
+                },
+            }, request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr("core.ai_providers.httpx.post", provider)
+    runtime = CoreControlPlaneAIRuntime(
+        control_plane=store, credentials=Resolver(),
+        plan_usage=PlanUsageGuard(quota=ledger, authority=Authority()),
+    )
+    assert _generate(runtime, "tenant-a").content == "recovered"
+    assert seen == [17, 17]
+    now = datetime.now(UTC)
+    usage = ledger.usage_snapshot(
+        tenant_id="tenant-a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=now,
+    )
+    assert (usage.reserved_units, usage.consumed_units) == (162, 0)
+    # Provider's first attempt may have been billed despite 503.
+    # Do not falsely settle it as zero or refund it automatically.
