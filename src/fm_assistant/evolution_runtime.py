@@ -205,10 +205,15 @@ class EvolutionRuntime:
                     reconciled=False,
                 )
             except Exception:  # noqa: BLE001 - quarantine uncertain AI/provider side effects
-                self._queue.finish(
+                # A concurrent sweeper may already have quarantined this job.
+                # Never reopen it or replay a provider send.
+                if self._queue.state(
                     connection_id=item.connection_id, message_id=item.message_id,
-                    reconciled=True, code="evolution_worker_uncertain",
-                )
+                ) == "processing":
+                    self._queue.finish(
+                        connection_id=item.connection_id, message_id=item.message_id,
+                        reconciled=True, code="evolution_worker_uncertain",
+                    )
                 reconcile += 1
         return EvolutionDeliveryResult(
             processed=processed, duplicates=duplicates, reconcile_required=reconcile,
@@ -266,6 +271,12 @@ class EvolutionRuntime:
                     or latest.revision != connection.revision
                 ):
                     raise PermissionError("evolution_connection_changed_during_processing")
+                # A long model request may outlive the claim timeout.
+                # Refuse provider send if another worker quarantined the job.
+                if self._queue is not None:
+                    self._queue.assert_claim_current(
+                        connection_id=item.connection_id, message_id=item.message_id,
+                    )
                 outbound_id = self._transport.send_text(
                     instance, instance_token=self._vault.decrypt(token),
                     recipient=item.sender, message=reply.content,
