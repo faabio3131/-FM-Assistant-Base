@@ -369,3 +369,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Negative per-attempt token counts, cached-token inconsistencies and boolean plan revision are rejected; unknown usage is not silently converted into zero.
 - AI Service CI run `39189526526`: SUCCESS; F3 Quota PostgreSQL Security Gate run `39189526538`: SUCCESS on the functional SHA, including Ruff and disposable PostgreSQL concurrency/migration gate.
 - Scope: **internal security subgate only**. Authenticated Assistant→Core policy projection, immediate revocation, mandatory runtime composition, full provider accounting and cross-service E2E remain BUILD_IN_PROGRESS. EXTERNAL_HOMOLOGATION_DEFERRED. No merge, production migration, provider credentials or deploy.
+
+
+## F3/F9 — CORE↔ASSISTANT SIGNED PLAN GRANT TRANSPORT (2026-10-18)
+
+- A signed, short-lived, challenge-bound grant now has a dedicated Core verifier `core/ai_signed_plan_authority.py`. Fresh challenge on each request, path-separated HMAC, strict tenant/unit/capability/revision/TTL/metrics verification; failed/unknown requests do not create unlimited quotas or retry provider work.
+- `AssistantPlanHTTPSFetch` implements an explicitly injected HTTPS-only transport. It signs requests with the separately configured plan key, rejects redirects and error responses, and passes the exact signed bytes to the verifier; synthetic `httpx.MockTransport` tests cover valid, redirect, outage, replay and invalid token bounds.
+- Functional SHA `cf1fd77fd7271b7eae8aa589f58a79bc78f61882`. AI Service CI `39190989920` SUCCESS; F3 Quota PostgreSQL Security Gate `39190990006` SUCCESS.
+- **Not yet composed as mandatory commercial guard:** `build_persistent_core` still requires trusted `plan_authority` injection. Authenticated outbound transport is built/tested, but automatic bootstrap, live entitlement-to-policy projection/revocation state, provider input caps and comprehensive attempt/cost accounting are pending. F3 `BUILD_IN_PROGRESS`, external homologation deferred. No merge/deploy/production secrets.
