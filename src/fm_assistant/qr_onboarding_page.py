@@ -28,7 +28,8 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
 <div class="status" role="status" aria-live="polite"><span class="dot" id="dot"></span><span id="status">Verificando conexão…</span></div>
 <div id="qrbox" class="qr hide"><img id="qrcode" alt="QR Code temporário para vincular seu WhatsApp"></div>
 <div><button id="connect" type="button" class="hide">Gerar minha conexão</button>
-<button id="refresh" type="button" class="hide">Atualizar QR Code</button></div>
+<button id="refresh" type="button" class="hide">Atualizar QR Code</button>
+<button id="pause" type="button" class="hide">Pausar atendimento</button></div>
 <ol class="steps"><li>Abra o WhatsApp no celular.</li><li>Vá até <strong>Aparelhos conectados</strong> e escolha <strong>Conectar aparelho</strong>.</li><li>Leia o código exibido acima.</li></ol>
 <small>O QR Code é temporário e fica visível apenas nesta sessão autorizada. Se a conexão estiver indisponível, tente atualizar ou procure suporte.</small>
 </main>
@@ -38,8 +39,9 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
  const base="/v1/channels/whatsapp/qr";
  const status=document.getElementById("status"), dot=document.getElementById("dot");
  const connect=document.getElementById("connect"), refresh=document.getElementById("refresh");
+ const pause=document.getElementById("pause");
  const qrbox=document.getElementById("qrbox"), qr=document.getElementById("qrcode");
- let connection=null, waiting=false;
+ let connection=null, waiting=false, paused=false;
  // FM corporate default. Signed Command policy projection is a separate gate.
  const QR_DISPLAY_CAP_MS=45000;
  let shownQr=null, shownAt=0, expiryTimer=null;
@@ -62,6 +64,16 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
        connection=latest.connection_id;
      }
      visible(connect,false);
+     const current=await request(base+"/current");
+     if(current.connection_id===connection && current.status==="disabled") {
+       paused=true;shownQr=null;shownAt=0;
+       if(expiryTimer!==null){clearTimeout(expiryTimer);expiryTimer=null;}
+       qr.removeAttribute("src");visible(qrbox,false);
+       visible(refresh,false);visible(pause,false);
+       show("Atendimento pausado. A vinculação do aparelho não foi removida; procure suporte para reativar.","pending");
+       return;
+     }
+     visible(pause,true);
      const data=await request(base+"/"+encodeURIComponent(connection));
      qr.removeAttribute("src");visible(qrbox,false);
      if(data.status==="connected") {
@@ -101,9 +113,18 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
    }catch {show("Provisionamento não confirmado. Não repita; procure o suporte.","error");visible(connect,false);}
    finally{connect.disabled=false;}
  });
+ pause.addEventListener("click",async()=>{
+   if(!connection||waiting||paused)return;
+   pause.disabled=true;
+   try {
+     const response=await request(base+"/"+encodeURIComponent(connection)+"/pause",{method:"POST"});
+     if(response.status==="disabled"){paused=true;await sync();}
+   } catch {show("Não foi possível pausar. Verifique suas permissões.","error");}
+   finally{pause.disabled=false;}
+ });
  refresh.addEventListener("click",sync);
  sync();
- setInterval(() => { if (!document.hidden && connection) sync(); }, 8000);
+ setInterval(() => { if (!document.hidden && connection && !paused) sync(); }, 8000);
 })();
 </script></body></html>"""
 
