@@ -155,3 +155,40 @@ def test_verified_logout_allows_new_instance_without_reusing_old_secret(client, 
                            "data": {"state": "open"}}).encode(),
         headers={"X-FM-Evolution-Token": first_token},
     ).status_code == 401
+
+
+def test_native_hook_ambiguous_setup_is_not_replayed(client, provision_credential):
+    owner = provision_credential(client, "hook-uncertain", "unit-uncertain")
+    attempts = []
+
+    def provider(req):
+        attempts.append(req.url.path)
+        if req.url.path == "/instance/create":
+            return httpx.Response(201, json={
+                "hash": {"token": "synthetic-instance-token-" + "q" * 36},
+            })
+        return httpx.Response(503)
+
+    repo = client.app.state.integration_repository
+    vault = FernetCredentialVault(client.app.state.settings.channel_encryption_key)
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repo, vault=vault, native_webhook_base_url=SOURCE_BASE,
+        transport=EvolutionClient(EvolutionSettings(
+            origin="https://evolution.example.test", global_key="g" * 40,
+        ), client=httpx.Client(transport=httpx.MockTransport(provider))),
+    )
+    headers = {"Authorization": "Bearer " + owner}
+    failed = client.post("/v1/channels/whatsapp/qr/provision", headers=headers)
+    assert failed.status_code == 409, failed.text
+    again = client.post("/v1/channels/whatsapp/qr/provision", headers=headers)
+    assert again.status_code == 409
+    assert len(attempts) == 2
+    assert attempts[0] == "/instance/create"
+    assert attempts[1].startswith("/webhook/set/")
+    scoped = TenantContext(
+        tenant_id="hook-uncertain", unit_id="unit-uncertain", credential_id=owner,
+    )
+    connection = repo.latest_for_provider(scoped, "whatsapp_evolution")
+    assert connection is not None
+    assert connection.status is IntegrationStatus.DRAFT
+    assert "native_webhook_token" in repo.active_secret_ciphertexts(connection.connection_id)
