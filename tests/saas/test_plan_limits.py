@@ -14,7 +14,10 @@ from fm_assistant.db import (
     UnitORM,
 )
 from fm_assistant.plan_limits import PlanLimitDenied, PlanLimitResolver
-from fm_assistant.plan_policy_manifest import (\n    LicensedQuotaManifestService,\n    issue_core_plan_grant,\n)
+from fm_assistant.plan_policy_manifest import (
+    LicensedQuotaManifestService,
+    issue_core_plan_grant,
+)
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
 
