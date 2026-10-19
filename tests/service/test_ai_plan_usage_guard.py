@@ -11,7 +11,10 @@ from core.ai_control_plane import ControlPlaneBase
 from core.ai_plan_usage_guard import PlanQuotaPolicy, PlanUsageGuard
 from core.ai_quota_store import AIQuotaPolicyRecord, QuotaDenied, QuotaReservations
 from core.ai_router import (
-    AIUsageEvent, CapabilityIA, OutcomeIA, SolicitacaoIA,
+    AIUsageEvent,
+    CapabilityIA,
+    OutcomeIA,
+    SolicitacaoIA,
 )
 
 NOW = datetime(2026, 10, 18, 20, tzinfo=UTC)
