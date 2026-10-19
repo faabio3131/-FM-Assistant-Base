@@ -16,6 +16,7 @@ from fm_assistant.db import (
 from fm_assistant.plan_limits import PlanLimitDenied, PlanLimitResolver
 from fm_assistant.plan_policy_manifest import (
     LicensedQuotaManifestService,
+    authenticated_core_plan_grant,
     issue_core_plan_grant,
 )
 
@@ -231,3 +232,52 @@ def test_signed_core_grant_requires_fresh_valid_challenge(catalog):
                 secret=b"assistant-to-core-test-secret-key-32-bytes-12345",
                 now=NOW, challenge=challenge,
             )
+
+
+def test_authenticated_core_policy_request_and_live_revocation(catalog):
+    import hashlib
+    import hmac
+    import json
+
+    _, sessions = catalog
+    with sessions.begin() as db:
+        db.add(PlanLimitORM(
+            plan_code="business", revision=1,
+            resource="ai.requests", scope="tenant",
+            limit_units=100, window_seconds=86400,
+        ))
+    key = "synthetic-plan-only-service-key-32-bytes-long"
+    request = {
+        "tenant_id": "tenant-a", "unit_id": "unit-1",
+        "capability": "atendimento_interpretacao",
+        "challenge": "fresh-challenge-0123456789abcdef",
+        "input_bound": 100, "output_bound": 50,
+        "requested_at": int(NOW.timestamp()),
+    }
+
+    def invoke(payload, *, tamper=False):
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        signature = hmac.new(
+            key.encode(),
+            b"POST\\n/internal/v1/assistant/core-plan-grant\n" + raw,
+            hashlib.sha256,
+        ).hexdigest()
+        return authenticated_core_plan_grant(
+            raw_body=raw + (b" " if tamper else b""),
+            request_signature=signature, secret=key, sessions=sessions, now=NOW,
+        )
+
+    signed, signature = invoke(request)
+    assert hmac.compare_digest(signature, hmac.new(
+        key.encode(), b"/internal/v1/assistant/core-plan-grant\n" + signed,
+        hashlib.sha256,
+    ).hexdigest())
+    assert json.loads(signed)["challenge"] == request["challenge"]
+    with pytest.raises(PlanLimitDenied, match="grant_denied"):
+        invoke(request, tamper=True)
+    with pytest.raises(PlanLimitDenied, match="grant_denied"):
+        invoke({**request, "requested_at": int(NOW.timestamp()) - 31})
+    with sessions.begin() as db:
+        db.get(TenantLicenseORM, "tenant-a").status = "suspended"
+    with pytest.raises(PlanLimitDenied):
+        invoke(request)
