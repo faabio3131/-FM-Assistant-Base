@@ -1,7 +1,7 @@
 """FM-controlled WhatsApp QR onboarding over the existing Integration Fabric."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionUnavailable
@@ -18,7 +18,7 @@ from .integration_repository import IntegrationRepository
 class QRConnection:
     connection_id: str
     status: str
-    qr_data_url: str | None
+    qr_data_url: str | None = field(repr=False)
 
 
 class EvolutionOnboarding:
