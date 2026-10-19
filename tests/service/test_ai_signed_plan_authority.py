@@ -241,3 +241,14 @@ def test_fm_token_bound_configuration_is_strict_and_capability_scoped(monkeypatc
                 routes=(), control_plane_database_url="sqlite:///synthetic.db",
                 assistant_plan_bounds=_load_assistant_plan_bounds(),
             ).validate()
+
+
+def test_audio_upload_limit_is_fm_configurable(monkeypatch):
+    from core.ai_service_settings import _load_audio_upload_ceiling
+
+    monkeypatch.setenv("FM_CORE_ASSISTANT_MAX_AUDIO_BYTES", "4096")
+    assert _load_audio_upload_ceiling() == 4096
+    for value in ("0", "-10", "67108865", "true", "100.5"):
+        monkeypatch.setenv("FM_CORE_ASSISTANT_MAX_AUDIO_BYTES", value)
+        with pytest.raises(RuntimeError, match="audio_upload_ceiling_invalid"):
+            _load_audio_upload_ceiling()
