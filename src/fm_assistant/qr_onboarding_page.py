@@ -42,7 +42,7 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
  let connection=null, waiting=false;
  // FM corporate default. Signed Command policy projection is a separate gate.
  const QR_DISPLAY_CAP_MS=45000;
- let shownQr=null, shownAt=0;
+ let shownQr=null, shownAt=0, expiryTimer=null;
  function show(message,mode) {
    status.textContent=message;
    dot.style.background=mode==="ok"?"#36c6b3":mode==="error"?"#f58c7d":"#e4b55c";
@@ -66,12 +66,21 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
      qr.removeAttribute("src");visible(qrbox,false);
      if(data.status==="connected") {
        shownQr=null;shownAt=0;
+       if(expiryTimer!==null){clearTimeout(expiryTimer);expiryTimer=null;}
        show("WhatsApp conectado","ok");visible(refresh,false);
      }
      else if(data.qr_data_url && data.qr_data_url.startsWith("data:image/png;base64,")) {
        const now=Date.now();
        if(shownQr!==data.qr_data_url) {
          shownQr=data.qr_data_url;shownAt=now;
+         if(expiryTimer!==null)clearTimeout(expiryTimer);
+         const currentQr=shownQr;
+         expiryTimer=setTimeout(()=>{
+           if(shownQr===currentQr){
+             qr.removeAttribute("src");visible(qrbox,false);
+             show("QR Code expirado na tela. Aguardando código novo do provedor…","pending");
+           }
+         },QR_DISPLAY_CAP_MS);
        }
        if(now-shownAt>=QR_DISPLAY_CAP_MS) {
          show("QR Code expirado na tela. Aguardando código novo do provedor…","pending");
