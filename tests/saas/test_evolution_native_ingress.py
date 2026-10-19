@@ -232,3 +232,34 @@ def test_native_webhook_backpressure_returns_retryable_429(client, provision_cre
     assert client.app.state.evolution_runtime._queue.state(
         connection_id=cid, message_id="FULL-2",
     ) is None
+
+
+def test_worker_provider_failure_quarantined_without_second_send(client, provision_credential):
+    owner, _other, hooks, names, repo, queue = _prepare(client, provision_credential)
+    headers = {"Authorization": "Bearer " + owner}
+    created = client.post("/v1/channels/whatsapp/qr/provision", headers=headers)
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    edge = "/webhooks/evolution-native/" + cid
+    source = {"X-FM-Evolution-Token": hooks[0]["headers"]["X-FM-Evolution-Token"]}
+    opened = {"event": "connection.update", "instance": names[0],
+              "data": {"state": "open"}}
+    assert client.post(edge, content=json.dumps(opened).encode(), headers=source).status_code == 204
+    assert client.put(
+        "/v1/persona", headers=headers,
+        json={"public_name": "Atendente", "language": "pt-BR", "tone": "consultivo"},
+    ).status_code == 200
+    event = {"event": "messages.upsert", "instance": names[0], "data": [{
+        "key": {"id": "PROVIDER-FAIL", "fromMe": False,
+                "remoteJid": "5511999999999@s.whatsapp.net"},
+        "message": {"conversation": "Olá, preciso de ajuda"},
+    }]}
+    raw = json.dumps(event).encode()
+    assert client.post(edge, content=raw, headers=source).status_code == 204
+    result = client.app.state.evolution_runtime.process_pending(limit=1)
+    assert result.reconcile_required == 1
+    assert queue.state(connection_id=cid, message_id="PROVIDER-FAIL") == "reconcile_required"
+    repeat = client.app.state.evolution_runtime.process_pending(limit=1)
+    assert repeat.processed == repeat.reconcile_required == 0
+    assert client.post(edge, content=raw, headers=source).status_code == 204
+    assert queue.state(connection_id=cid, message_id="PROVIDER-FAIL") == "reconcile_required"
