@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
