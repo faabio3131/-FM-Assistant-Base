@@ -648,3 +648,9 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - New tests `tests/saas/test_evolution_recovery.py` cover tenant isolation, quarantine once, replay avoidance and invalid recovery windows.
 - Functionally certified SHA `2f7700bdb2bc7cdfb835d02baa2fd172c4dac86b`: SaaS Foundation CI run `39297829882` SUCCESS; F3 PostgreSQL Core Bridge Security Gate `39297829871` SUCCESS; Core Assistant Authenticated Bridge Contract `39297829914` SUCCESS.
 - Command architecture review is pending by user. Do not expand/edit Command universal SaaS configuration ingestion until reviewed; keep VendeAtendeIA integration adapter separate. Still pending: authenticated native webhook broker, durable queued inbox/outbox and worker, managed reconnection/revoke, pinned provider API release, stronger lifecycle/order guard and independent security audit. No merge/deploy or external homologation.
+
+
+## QR WhatsApp Local Pause (2026-10-19)
+- Implemented tenant/unit-scoped `EvolutionOnboarding.pause` and authenticated `POST /v1/channels/whatsapp/qr/{connection_id}/pause` with `integration.manage`, no exposure of secrets, revision bump and audit; repeated pause idempotent. UI now shows explicit "Pausar atendimento", detects disabled status, hides QR and stops polling. Pause is **local**, not logout or remote session deletion: never claim provider device was unpaired.
+- Existing runtime fail-closes disabled and revoked channel before parsing signed events; added signed-open replay regression test to forbid reactivation after pause. Tests include foreign tenant 404, unauthenticated 401, no provider disconnect request, repeated pause and post-pause QR 409.
+- Separate provider contract certification and remote disconnect/revoke/reconnect remain not implemented. In-flight races/async durable queue still require independent review. No Command universal architecture changes, merge, deploy, or live credentials.
