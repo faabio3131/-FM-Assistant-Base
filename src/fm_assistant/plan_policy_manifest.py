@@ -152,6 +152,10 @@ def issue_core_plan_grant(
         "licensed_until": int(manifest.licensed_until.timestamp()),
         "input_bound": input_bound, "output_bound": output_bound,
         "scopes": scopes,
+        "grants": sorted([
+            [g.resource, g.scope, g.limit_units, g.window_seconds]
+            for g in manifest.grants if g.resource in allowed
+        ]),
     }, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
     return body, hmac.new(
         secret, b"/internal/v1/assistant/core-plan-grant\n" + body,
