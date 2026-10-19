@@ -75,7 +75,7 @@ class SignedAssistantPlanAuthority:
             if not isinstance(obj, dict) or set(obj) != {
                 "tenant_id", "unit_id", "capability", "challenge", "plan_code", "revision",
                 "expires_at", "licensed_until", "input_bound",
-                "output_bound", "scopes",
+                "output_bound", "scopes", "grants",
             }:
                 raise QuotaDenied("core_plan.grant_invalid")
             if (
@@ -85,6 +85,12 @@ class SignedAssistantPlanAuthority:
                 or not isinstance(obj["expires_at"], int)
                 or type(obj["expires_at"]) is not int
                 or type(obj["licensed_until"]) is not int
+                or not isinstance(obj["grants"], list)
+                or not 2 <= len(obj["grants"]) <= 5
+                or any(not isinstance(v, list) or len(v) != 4
+                       or not all(isinstance(z, str) for z in v[:2])
+                       or type(v[2]) is not int or type(v[3]) is not int
+                       for v in obj["grants"])
                 or not isinstance(obj["scopes"], list)
                 or not 2 <= len(obj["scopes"]) <= 5
                 or any(
@@ -109,6 +115,7 @@ class SignedAssistantPlanAuthority:
                 input_bound=obj["input_bound"],
                 output_bound=obj["output_bound"],
                 scopes=tuple((v[0], v[1]) for v in obj["scopes"]),
+                grants=tuple((v[0], v[1], v[2], v[3]) for v in obj["grants"]),
             )
         except QuotaDenied:
             raise
