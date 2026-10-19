@@ -174,6 +174,8 @@ class IntegrationService:
         config: dict[str, Any],
     ) -> IntegrationConnection:
         connection = self._require_connection(context, connection_id)
+        if connection.provider_key == "whatsapp_evolution":
+            raise RuntimeError("evolution_fm_lifecycle_only")
         definition = self._definition(connection.provider_key)
         normalized = self._normalize_config(definition, config)
         updated = self._repository.update_connection(
@@ -199,6 +201,8 @@ class IntegrationService:
         source: CredentialSource = CredentialSource.TENANT_MANAGED,
     ) -> IntegrationConnection:
         connection = self._require_connection(context, connection_id)
+        if connection.provider_key == "whatsapp_evolution":
+            raise RuntimeError("evolution_fm_lifecycle_only")
         if connection.status is IntegrationStatus.REVOKED:
             raise RuntimeError("integration_revoked")
         definition = self._definition(connection.provider_key)
@@ -235,6 +239,8 @@ class IntegrationService:
         connection_id: str,
     ) -> ValidationResult:
         connection = self._require_connection(context, connection_id)
+        if connection.provider_key == "whatsapp_evolution":
+            raise RuntimeError("evolution_fm_lifecycle_only")
         if connection.status is IntegrationStatus.REVOKED:
             raise RuntimeError("integration_revoked")
         validating = self._repository.update_connection(
@@ -292,6 +298,8 @@ class IntegrationService:
         connection_id: str,
     ) -> IntegrationConnection:
         connection = self._require_connection(context, connection_id)
+        if connection.provider_key == "whatsapp_evolution":
+            raise RuntimeError("evolution_fm_lifecycle_only")
         latest = self._repository.latest_validation(connection_id)
         if (
             latest is None
@@ -316,7 +324,9 @@ class IntegrationService:
         context: TenantContext,
         connection_id: str,
     ) -> IntegrationConnection:
-        self._require_connection(context, connection_id)
+        connection = self._require_connection(context, connection_id)
+        if connection.provider_key == "whatsapp_evolution":
+            raise RuntimeError("evolution_fm_lifecycle_only")
         disabled = self._repository.update_connection(
             context,
             connection_id,
@@ -334,7 +344,9 @@ class IntegrationService:
         context: TenantContext,
         connection_id: str,
     ) -> IntegrationConnection:
-        self._require_connection(context, connection_id)
+        connection = self._require_connection(context, connection_id)
+        if connection.provider_key == "whatsapp_evolution":
+            raise RuntimeError("evolution_fm_lifecycle_only")
         self._repository.revoke_secrets(context, connection_id)
         revoked = self._repository.update_connection(
             context,
