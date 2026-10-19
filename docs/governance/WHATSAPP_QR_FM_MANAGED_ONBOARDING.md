@@ -27,3 +27,9 @@ Status: **INTERNAL IMPLEMENTATION / CI PENDING**. This is the new SaaS horizonta
 
 ## Security and support notes
 Evolution/Baileys-style connectivity may rely on nonofficial automation. This entails account/platform restriction and stability risk. Do not promise access is guaranteed; keep the official Meta Cloud API alternative. FM pays infrastructure and AI/provider costs, plans limit usage/franchises rather than feature availability.
+
+
+## FM Corporate QR display policy — 2026-10-19
+- Approved default **45 seconds**, set by FM Command corporate admin, no customer override. This is a **visual cap**, not an assertion of actual WhatsApp/Evolution token validity. Effective cap must be the minimum of FM display seconds and remaining provider seconds where reliable metadata exists.
+- Current Assistant onboarding UI enforces 45s from first receipt of a QR image; polls every 8s, hides an unchanged code after 45s and does not display the same expired image as newly valid. A changed QR image starts a fresh display window.
+- Command owns versioned persisted policy; synchronized signed Command→Assistant publication of modified future values remains PENDING. The Assistant currently uses a fixed 45-second fallback; it does **not yet** read a modified Command value. No provider expiration contract has been pinned; external real homologation follows software construction.
