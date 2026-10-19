@@ -593,3 +593,12 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - Reusar seletivamente Kordena: `main` traz pricing/cost idênticos ao Core, metering/agregados/dashboard; **PR #230 Draft** também traz `AIFranchiseBudgetGuard` + ledger transacional Decimal, provisionamento por ciclo e customer view, ainda sem certificação integral. Não usar read-model diário para autorizar operações, nem tratar custo/token desconhecido como zero. Adaptar ao Core atual sem criar ledgers duplicados.
 - Fonte canônica aprovada: `docs/governance/ADR-009-ALL-FEATURES-PLAN-CONSUMPTION-AND-KORDENA-FINOPS.md`. Devem ser corrigidos os anteriores conceitos que associavam feature gating/recursos habilitados ao plano. Todos os tiers têm mesmo conjunto de funções.
 - Construção pendente: painel FM e publisher de preços/franquias, projeção assinada Command→Assistant→Core, hard stop pré-provider, dashboards e alertas. Homologações externas só depois da conclusão integral do software.
+
+## F3/F9 — PUBLICAÇÃO, VÍNCULO DE LICENÇA E PAINEL DE CONSUMO (2026-10-18)
+
+- `GovernedPlanLicenseBinding` vincula uma licença existente a uma revisão do plano **já publicada pela FM**, por HMAC domain-separated/nonce/corporate organization, com trilha de auditoria (migration `0011`). Não cria assinaturas, não estende trial nem period_ends_at e recusa upgrade implícito sem workflow governado.
+- `PlanConsumptionView` e endpoints `/v1/plan/consumption` e `/dashboard` exigem sessão humana e `billing.read`, tenant/unidade provenientes da sessão. Uma querystring nunca determina escopo. Esconder orçamento interno de provider/FM do cliente.
+- `CoreQuotaUsageHTTPReader` consulta o Core somente via HTTPS autenticado; exige assinatura implícita pela chave de serviço, tenant, unidade, métrica, revisão de política, franquia, janela e medição recente. Qualquer divergência resulta em `metering_unavailable`, **não zero**.
+- A visualização premium exibe franquia e saldo comprovado quando disponível; se não há telemetria confiável, mostra claramente saldo não verificado, jamais barra zero fictícia.
+- Contratos de assinatura/billing e upgrade continuam pendentes de código. Sincronização de policy/quotas para Core e ativação do PlanUsageGuard no composition root também pendentes. Sem bypass por falta de ambiente real: continuar com mocks, testes e PG descartável.
+- Referência e evidências: `docs/governance/F3_F9_PLAN_BINDING_AND_USAGE_INTERNAL_CERTIFICATION.md`. F3/F9 BUILD_IN_PROGRESS, homologação externa deferida; F4 ainda não iniciada.
