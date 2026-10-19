@@ -279,3 +279,28 @@ def test_oversized_utf8_prompt_denied_before_any_quota_reservation(guarded):
         tenant_id="a", unit_id="__tenant__",
         capability="ai.total_tokens", at=NOW,
     ).reserved_units == 0
+
+
+def test_audio_upload_ceiling_denies_before_any_quota_reservation(guarded):
+    from core.ai_router import ConteudoAudioIA
+
+    _, store = guarded
+    guard = PlanUsageGuard(
+        quota=store, authority=Authority(), max_audio_bytes=6,
+    )
+    req = SolicitacaoIA(
+        tenant_id="a", unidade_id="u1", request_id="big-audio",
+        correlation_id="big-audio",
+        capability=CapabilityIA.ATENDIMENTO_TRANSCRICAO,
+        conteudo=ConteudoAudioIA(
+            audio=b"0123456", mime_type="audio/wav", instrucao="transcreva",
+        ),
+    )
+    with pytest.raises(QuotaDenied, match="audio_upload_exceeded"):
+        guard.admit(request=req, at=NOW)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 0
+    with pytest.raises(ValueError, match="audio_upload_ceiling_invalid"):
+        PlanUsageGuard(quota=store, authority=Authority(), max_audio_bytes=True)
