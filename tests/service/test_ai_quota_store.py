@@ -314,3 +314,66 @@ def test_bundle_revision_fence_rejects_stale_policy_atomically(quota):
                 units=1, policy_revision=True,
             ),), request_id="bad-revision", at=NOW,
         )
+
+
+def test_signed_grants_project_atomically_and_preserve_usage(quota):
+    store, sessions = quota
+    grants = (
+        ("ai.requests", "tenant", 5, 86400),
+        ("ai.total_tokens", "tenant", 1000, 86400),
+    )
+    store.project_signed_grants(tenant_id="a", unit_id="u1", revision=3, grants=grants)
+    store.project_signed_grants(tenant_id="a", unit_id="u1", revision=3, grants=grants)
+    snapshot = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens", at=NOW,
+    )
+    assert snapshot.limit_units == 1000
+    assert snapshot.policy_revision == 3
+    store.reserve_bundle(
+        needs=(QuotaRequirement(
+            tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens",
+            units=400, policy_revision=3,
+        ),), request_id="prior-use", at=NOW,
+    )
+    with pytest.raises(QuotaDenied, match="projection_conflict"):
+        store.project_signed_grants(
+            tenant_id="a", unit_id="u1", revision=3,
+            grants=(("ai.requests", "tenant", 5, 86400),
+                    ("ai.total_tokens", "tenant", 2000, 86400)),
+        )
+    with pytest.raises(QuotaDenied, match="projection_stale"):
+        store.project_signed_grants(
+            tenant_id="a", unit_id="u1", revision=2, grants=grants,
+        )
+    store.project_signed_grants(
+        tenant_id="a", unit_id="u1", revision=4,
+        grants=(("ai.requests", "tenant", 5, 86400),
+                ("ai.total_tokens", "tenant", 500, 86400)),
+    )
+    updated = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens", at=NOW,
+    )
+    assert (updated.limit_units, updated.reserved_units, updated.remaining_units) == (
+        500, 400, 100,
+    )
+    with sessions() as db:
+        assert len(db.scalars(select(AIQuotaReservationRecord).where(
+            AIQuotaReservationRecord.request_id == "prior-use",
+        )).all()) == 1
+
+
+def test_projector_denies_malformed_or_partial_grants(quota):
+    store, _ = quota
+    cases = [
+        (("ai.requests", "tenant", True, 60),
+         ("ai.total_tokens", "tenant", 100, 60)),
+        (("ai.requests", "tenant", 1, 60),
+         ("ai.requests", "tenant", 2, 60)),
+        (("ai.requests", "customer", 1, 60),
+         ("ai.total_tokens", "tenant", 100, 60)),
+    ]
+    for grants in cases:
+        with pytest.raises(QuotaDenied, match="projection_invalid"):
+            store.project_signed_grants(
+                tenant_id="a", unit_id="u1", revision=3, grants=grants,
+            )
