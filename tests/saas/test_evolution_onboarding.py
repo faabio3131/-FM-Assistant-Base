@@ -255,3 +255,63 @@ def test_outbound_network_ambiguity_is_never_a_success():
             "fm_" + "f" * 32, instance_token="synthetic-instance-token-value",
             recipient="123", message="Resposta segura",
         )
+
+
+def test_owner_scoped_pause_blocks_qr_and_is_idempotent(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key_a = provision_credential(client, "tenant-pause-a", "unit-pause-a")
+    key_b = provision_credential(client, "tenant-pause-b", "unit-pause-b")
+    calls = []
+
+    def remote(request):
+        calls.append(request.url.path)
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {"token": "test-instance-token"}})
+        return httpx.Response(503)
+
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=client.app.state.integration_repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key_a),
+    )
+    assert created.status_code == 200, created.text
+    cid = created.json()["connection_id"]
+    endpoint = f"/v1/channels/whatsapp/qr/{cid}/pause"
+    assert client.post(endpoint).status_code == 401
+    assert client.post(endpoint, headers=_headers(key_b)).status_code == 404
+    paused = client.post(endpoint, headers=_headers(key_a))
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "disabled"
+    assert paused.json()["revision"] == 2
+    again = client.post(endpoint, headers=_headers(key_a))
+    assert again.status_code == 200
+    assert again.json()["revision"] == 2
+    assert client.get(
+        f"/v1/channels/whatsapp/qr/{cid}", headers=_headers(key_a),
+    ).status_code == 409
+    assert client.get(
+        "/v1/channels/whatsapp/qr/current", headers=_headers(key_a),
+    ).json()["status"] == "disabled"
+    # Local pause never claims the phone was remotely logged out.
+    assert calls == ["/instance/create"]
+
+
+def test_pause_rejects_wrong_provider_even_with_valid_scope(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key = provision_credential(client, "tenant-pause-other", "unit-pause-other")
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=client.app.state.integration_repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(lambda _: httpx.Response(503)),
+    )
+    assert client.post(
+        "/v1/channels/whatsapp/qr/not-a-connection/pause",
+        headers=_headers(key),
+    ).status_code == 404
