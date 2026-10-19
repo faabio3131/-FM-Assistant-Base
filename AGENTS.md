@@ -360,3 +360,12 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Com `plan_authority` ausente, a compatibilidade anterior permanece, mas **isto não constitui lançamento comercial**. Antes de disponibilizar o VendeAtendeIA ao público, a composição deve exigir de modo irremovível policy assinada/atualizada, revogação, reserva atômica pré-provider, parâmetros de tokens e testes E2E.
 - Consulta de consumo do Assistant já deriva avisos de uso (confirmado + reservado) e manifesto de licença ativo; não usar snapshot de dashboard como fonte de verdade de autorização.
 - Estado: etapa interna incremental, F3 GLOBAL BUILD_IN_PROGRESS, homologação externa adiada. Gates no SHA final continuam necessários; sem merge/deploy/credenciais reais.
+
+
+## F3/F9 — POLICY REVISION FENCING / INTERNAL GREEN (2026-10-18)
+
+- Functional Core SHA `ca378e54226bb2925cd57e5f367f7bb27585d149`: `QuotaRequirement.policy_revision` opt-in validates the licensed plan revision against locked PostgreSQL quota policy rows during atomic reserve and settle.
+- `PlanUsageGuard` always binds its requirements to the authorized policy revision, rejecting stale grants before provider execution and retaining reservations on mismatched settlement; legacy non-plan quota calls remain compatible with `policy_revision=None`.
+- Negative per-attempt token counts, cached-token inconsistencies and boolean plan revision are rejected; unknown usage is not silently converted into zero.
+- AI Service CI run `39189526526`: SUCCESS; F3 Quota PostgreSQL Security Gate run `39189526538`: SUCCESS on the functional SHA, including Ruff and disposable PostgreSQL concurrency/migration gate.
+- Scope: **internal security subgate only**. Authenticated Assistant→Core policy projection, immediate revocation, mandatory runtime composition, full provider accounting and cross-service E2E remain BUILD_IN_PROGRESS. EXTERNAL_HOMOLOGATION_DEFERRED. No merge, production migration, provider credentials or deploy.
