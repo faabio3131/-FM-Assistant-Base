@@ -232,3 +232,75 @@ def test_uncertain_outbound_is_quarantined_without_resend(client, provision_cred
     assert inbox.status(channel_id=cid, message_id="WA-UNCERTAIN") == "reconcile_required"
     assert client.post(endpoint, content=body, headers=headers).status_code == 204
     assert len(attempts) == 1
+
+
+def test_signed_webhook_queues_without_sending_until_worker(client, provision_credential):
+    """Verify HTTP acknowledgment cannot trigger AI/provider on its own."""
+    from fm_assistant.evolution_queue import EvolutionInboundQueue
+
+    key = provision_credential(client, "tenant-asynchronous", "unit-asynchronous")
+    sent = []
+
+    def provider(request):
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {"token": INSTANCE_TOKEN}})
+        if request.url.path.startswith("/message/sendText/"):
+            sent.append(request.url.path)
+            return httpx.Response(200, json={"key": {"id": "ASYNC-OUT-1"}})
+        return httpx.Response(503)
+
+    transport = EvolutionClient(
+        EvolutionSettings(origin="https://evolution.example.test", global_key="f" * 40),
+        client=httpx.Client(transport=httpx.MockTransport(provider)),
+    )
+    vault = FernetCredentialVault(client.app.state.settings.channel_encryption_key)
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository, vault=vault, transport=transport,
+    )
+    queue = EvolutionInboundQueue(repository._session_factory, vault)
+    runtime = EvolutionRuntime(
+        integrations=repository,
+        inbox=WhatsAppInboundRepository(repository._session_factory),
+        assistant=client.app.state.assistant_service,
+        vault=vault, transport=transport,
+        verifier=EvolutionEventVerifier(signing_key=SIGNER),
+        sender_pepper=client.app.state.settings.credential_pepper,
+        queue=queue,
+    )
+    client.app.state.evolution_runtime = runtime
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_auth(key),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    instance = created.json()["config"]["instance_name"]
+    body, headers = _signed(
+        cid, {"event": "connection.update", "instance": instance,
+              "data": {"state": "open"}},
+    )
+    endpoint = f"/webhooks/fm-evolution/{cid}"
+    assert client.post(endpoint, content=body, headers=headers).status_code == 204
+    assert client.put(
+        "/v1/persona", headers=_auth(key),
+        json={"public_name": "Atendente", "language": "pt-BR", "tone": "consultivo"},
+    ).status_code == 200
+    body, headers = _signed(
+        cid, {"event": "messages.upsert", "instance": instance,
+              "data": [{"key": {
+                  "id": "ASYNC-001", "fromMe": False,
+                  "remoteJid": "5511999999999@s.whatsapp.net",
+              }, "message": {"conversation": "Quero orçamento"}}]},
+    )
+    assert client.post(endpoint, content=body, headers=headers).status_code == 204
+    assert client.post(endpoint, content=body, headers=headers).status_code == 204
+    assert queue.state(connection_id=cid, message_id="ASYNC-001") == "pending"
+    assert sent == []
+    result = runtime.process_pending(limit=5)
+    assert result.processed == 1
+    assert result.reconcile_required == 0
+    assert sent == ["/message/sendText/" + instance]
+    assert queue.state(connection_id=cid, message_id="ASYNC-001") == "complete"
+    assert runtime.process_pending(limit=5).processed == 0
+    assert len(sent) == 1
+
