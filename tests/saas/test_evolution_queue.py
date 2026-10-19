@@ -403,7 +403,7 @@ def test_concurrent_outbound_intent_has_single_winner(client, provision_credenti
                 connection_id=cid, message_id=item.message_id,
                 claim_generation=item.claim_generation,
             )
-        except (RuntimeError, Exception) as exc:
+        except Exception as exc:  # noqa: BLE001 - concurrency probe records DB lock failures
             return type(exc).__name__
 
     with ThreadPoolExecutor(max_workers=2) as pool:
