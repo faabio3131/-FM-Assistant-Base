@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import (
@@ -43,6 +44,8 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .plan_consumption_view import PlanConsumptionView
+from .plan_limits import PlanLimitDenied
 from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
 from .repositories import (
     ConversationSQLAlchemyRepository,
@@ -454,6 +457,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         signing_key=cfg.command_control_signing_key,
         trusted_organization=cfg.trusted_command_organization_id,
     )
+    consumption_view = PlanConsumptionView(session_factory)
     whatsapp_channels = WhatsAppChannelRepository(integration_service)
     whatsapp_inbound = WhatsAppInboundRepository(session_factory)
     whatsapp_runtime = WhatsAppRuntime(
@@ -809,6 +813,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             for capability, enabled, limit_value in rows
         ]
+
+    @app.get("/v1/plan/consumption")
+    def customer_plan_consumption(
+        principal: SessionPrincipal = Depends(human_permission(Permission.BILLING_READ)),
+    ) -> JSONResponse:
+        """Only the authenticated tenant/unit; NEVER accept scope from query."""
+        try:
+            view = consumption_view.get(
+                tenant_id=principal.tenant_id, unit_id=principal.unit_id,
+                now=datetime.now(UTC),
+            )
+        except PlanLimitDenied as exc:
+            raise HTTPException(status_code=403, detail="plan_unavailable") from exc
+        return JSONResponse(view, headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/api-credentials", response_model=ProvisionCredentialResponse)
     def create_api_credential(
