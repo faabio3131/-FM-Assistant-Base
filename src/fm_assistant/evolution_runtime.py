@@ -203,6 +203,7 @@ class EvolutionRuntime:
                 self._queue.finish(
                     connection_id=item.connection_id, message_id=item.message_id,
                     reconciled=False,
+                    claim_generation=item.claim_generation,
                 )
             except Exception:  # noqa: BLE001 - quarantine uncertain AI/provider side effects
                 # A concurrent sweeper may already have quarantined this job.
@@ -210,10 +211,15 @@ class EvolutionRuntime:
                 if self._queue.state(
                     connection_id=item.connection_id, message_id=item.message_id,
                 ) == "processing":
-                    self._queue.finish(
-                        connection_id=item.connection_id, message_id=item.message_id,
-                        reconciled=True, code="evolution_worker_uncertain",
-                    )
+                    try:
+                        self._queue.finish(
+                            connection_id=item.connection_id, message_id=item.message_id,
+                            reconciled=True, code="evolution_worker_uncertain",
+                            claim_generation=item.claim_generation,
+                        )
+                    except RuntimeError:
+                        # A competing sweeper or generation change won the race.
+                        pass
                 reconcile += 1
         return EvolutionDeliveryResult(
             processed=processed, duplicates=duplicates, reconcile_required=reconcile,
@@ -276,6 +282,7 @@ class EvolutionRuntime:
                 if self._queue is not None:
                     self._queue.assert_claim_current(
                         connection_id=item.connection_id, message_id=item.message_id,
+                        claim_generation=item.claim_generation,
                     )
                 outbound_id = self._transport.send_text(
                     instance, instance_token=self._vault.decrypt(token),
