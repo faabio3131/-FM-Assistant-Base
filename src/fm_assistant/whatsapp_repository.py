@@ -183,6 +183,52 @@ class WhatsAppInboundRepository:
             error_code=error_code[:160],
         )
 
+    def quarantine_stale_processing(
+        self, *, channel_id: str, older_than: datetime, limit: int = 100,
+    ) -> int:
+        """Quarantine stranded delivery attempts; NEVER retry provider or Core.
+
+        A bounded transactional sweep; conditional status/time update keeps
+        concurrent state changes from being overwritten.
+        """
+        if older_than.tzinfo is None or not 1 <= limit <= 500:
+            raise ValueError("inbound_recovery_invalid")
+        cutoff = older_than.astimezone(UTC)
+        now = datetime.now(UTC)
+        with self._session_factory() as session:
+            stmt = (
+                select(IntegrationInboundORM.message_id)
+                .where(
+                    IntegrationInboundORM.channel_id == channel_id,
+                    IntegrationInboundORM.status == self.PROCESSING,
+                    IntegrationInboundORM.updated_at < cutoff,
+                )
+                .order_by(IntegrationInboundORM.updated_at, IntegrationInboundORM.message_id)
+                .limit(limit)
+            )
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                stmt = stmt.with_for_update(skip_locked=True)
+            keys = session.scalars(stmt).all()
+            changed = 0
+            for message_id in keys:
+                result = session.execute(
+                    update(IntegrationInboundORM)
+                    .where(
+                        IntegrationInboundORM.channel_id == channel_id,
+                        IntegrationInboundORM.message_id == message_id,
+                        IntegrationInboundORM.status == self.PROCESSING,
+                        IntegrationInboundORM.updated_at < cutoff,
+                    )
+                    .values(
+                        status=self.RECONCILE_REQUIRED,
+                        error_code="stale_processing_requires_reconciliation",
+                        updated_at=now,
+                    )
+                )
+                changed += result.rowcount
+            session.commit()
+            return changed
+
     def status(self, *, channel_id: str, message_id: str) -> str | None:
         with self._session_factory() as session:
             row = session.get(IntegrationInboundORM, (channel_id, message_id))
