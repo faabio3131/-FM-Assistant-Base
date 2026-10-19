@@ -87,7 +87,7 @@ class EvolutionInboundQueue:
                 data = json.loads(self._vault.decrypt(job.ciphertext))
                 sender, message = data["sender"], data["text"]
                 if not isinstance(sender, str) or not isinstance(message, str):
-                    raise ValueError("evolution_queued_payload_invalid")
+                    raise TypeError("evolution_queued_payload_invalid")
             except (ValueError, KeyError, TypeError):
                 self.finish(
                     connection_id=job.connection_id, message_id=job.message_id,
