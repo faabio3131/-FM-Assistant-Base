@@ -82,6 +82,33 @@ def test_signed_webhook_connects_and_replies_once(client, provision_credential):
         f"/webhooks/fm-evolution/{cid}", content=body, headers=headers,
     ).status_code == 204
 
+    # The exact same signed connection update cannot be applied twice.
+    assert client.post(
+        f"/webhooks/fm-evolution/{cid}", content=body, headers=headers,
+    ).status_code == 204
+    from fm_assistant.domain import TenantContext
+    from fm_assistant.integration import IntegrationStatus
+
+    scoped = TenantContext(
+        tenant_id="tenant-evolution", unit_id="unit-evolution", credential_id=key,
+    )
+    repo.update_connection(scoped, cid, status=IntegrationStatus.DEGRADED)
+    assert client.post(
+        f"/webhooks/fm-evolution/{cid}", content=body, headers=headers,
+    ).status_code == 204
+    assert repo.get(scoped, cid).status is IntegrationStatus.DEGRADED
+
+    # A distinct valid notification (new authenticated event body)
+    # can return the provider from degraded to active.
+    changed = {"event": "connection.update", "instance": instance,
+               "data": {"state": "open", "reason": "fresh_notification"}}
+    changed_body, changed_headers = _signed(cid, changed)
+    assert client.post(
+        f"/webhooks/fm-evolution/{cid}",
+        content=changed_body, headers=changed_headers,
+    ).status_code == 204
+    assert repo.get(scoped, cid).status is IntegrationStatus.ACTIVE
+
     persona = client.put(
         "/v1/persona", headers=_auth(key),
         json={"public_name": "Atendente", "language": "pt-BR", "tone": "consultivo"},
