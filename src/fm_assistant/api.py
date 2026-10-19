@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
+from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerifier
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings
 from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
@@ -32,6 +33,7 @@ from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_onboarding import EvolutionOnboarding
+from .evolution_runtime import EvolutionRuntime
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .identity import (
     MACHINE_PERMISSIONS,
@@ -474,6 +476,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if cfg.evolution_origin and cfg.evolution_global_key else None
     )
+    evolution_runtime = (
+        EvolutionRuntime(
+            integrations=integration_repository,
+            inbox=WhatsAppInboundRepository(session_factory),
+            assistant=service,
+            vault=vault,
+            transport=evolution_onboarding._transport,
+            verifier=EvolutionEventVerifier(
+                signing_key=cfg.evolution_webhook_signing_key,
+            ),
+            sender_pepper=cfg.credential_pepper,
+        )
+        if evolution_onboarding is not None and cfg.evolution_webhook_signing_key
+        else None
+    )
     core_bridge = CoreBridgeService(
         sessions=session_factory,
         vault=vault,
@@ -534,6 +551,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.integration_repository = integration_repository
         app.state.integration_service = integration_service
         app.state.evolution_onboarding = evolution_onboarding
+        app.state.evolution_runtime = evolution_runtime
         app.state.whatsapp_channels = whatsapp_channels
         app.state.whatsapp_runtime = whatsapp_runtime
         yield
@@ -1603,6 +1621,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ).model_dump(),
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
+
+    @app.post("/webhooks/fm-evolution/{connection_id}", status_code=204)
+    async def receive_fm_evolution(
+        connection_id: str, request: Request,
+        x_fm_evolution_signature: str | None = Header(default=None),
+        x_fm_evolution_timestamp: str | None = Header(default=None),
+    ) -> Response:
+        runtime = request.app.state.evolution_runtime
+        if runtime is None:
+            raise HTTPException(status_code=503, detail="evolution_webhook_unavailable")
+        if request.headers.get("content-length", "").isdigit() and (
+            int(request.headers["content-length"]) > 65536
+        ):
+            raise HTTPException(status_code=413, detail="evolution_webhook_too_large")
+        raw = await request.body()
+        if len(raw) > 65536:
+            raise HTTPException(status_code=413, detail="evolution_webhook_too_large")
+        try:
+            runtime.receive(
+                connection_id=connection_id, raw=raw,
+                signature=x_fm_evolution_signature,
+                timestamp=x_fm_evolution_timestamp,
+            )
+        except (EvolutionEventDenied, PermissionError, LookupError) as exc:
+            raise HTTPException(status_code=401, detail="evolution_webhook_denied") from exc
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     @app.put("/v1/channels/whatsapp", response_model=WhatsAppChannelResponse)
     def configure_whatsapp(
