@@ -26,6 +26,7 @@ from .command_bridge_control_service import CommandBridgeControlService, Command
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
 from .core_client import CoreAIClient, CoreAudioTranscriber
+from .core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
@@ -457,7 +458,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         signing_key=cfg.command_control_signing_key,
         trusted_organization=cfg.trusted_command_organization_id,
     )
-    consumption_view = PlanConsumptionView(session_factory)
+    consumption_view = PlanConsumptionView(
+        session_factory,
+        reader=(
+            CoreQuotaUsageHTTPReader(
+                core_origin=cfg.core_base_url,
+                service_key=cfg.core_service_key,
+            )
+            if backend == "core" and cfg.core_base_url and cfg.core_service_key
+            else None
+        ),
+    )
     whatsapp_channels = WhatsAppChannelRepository(integration_service)
     whatsapp_inbound = WhatsAppInboundRepository(session_factory)
     whatsapp_runtime = WhatsAppRuntime(
