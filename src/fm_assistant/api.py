@@ -32,6 +32,7 @@ from .core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
+from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDenied
 from .evolution_onboarding import EvolutionOnboarding
 from .evolution_queue import EvolutionInboundQueue
 from .evolution_runtime import EvolutionRuntime
@@ -474,6 +475,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 origin=cfg.evolution_origin,
                 global_key=cfg.evolution_global_key,
             )),
+            native_webhook_base_url=cfg.evolution_native_webhook_base_url,
         )
         if cfg.evolution_origin and cfg.evolution_global_key else None
     )
@@ -491,6 +493,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             queue=EvolutionInboundQueue(session_factory, vault),
         )
         if evolution_onboarding is not None and cfg.evolution_webhook_signing_key
+        else None
+    )
+    evolution_native_ingress = (
+        EvolutionNativeIngress(
+            repository=integration_repository, vault=vault,
+            runtime=evolution_runtime,
+            internal_signer=cfg.evolution_webhook_signing_key,
+        )
+        if evolution_runtime is not None and cfg.evolution_native_webhook_base_url
         else None
     )
     core_bridge = CoreBridgeService(
@@ -554,6 +565,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.integration_service = integration_service
         app.state.evolution_onboarding = evolution_onboarding
         app.state.evolution_runtime = evolution_runtime
+        app.state.evolution_native_ingress = evolution_native_ingress
         app.state.whatsapp_channels = whatsapp_channels
         app.state.whatsapp_runtime = whatsapp_runtime
         yield
@@ -1710,6 +1722,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ).model_dump(),
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
+
+    @app.post("/webhooks/evolution-native/{connection_id}", status_code=204)
+    async def receive_native_evolution(
+        connection_id: str, request: Request,
+        x_fm_evolution_token: str | None = Header(default=None),
+    ) -> Response:
+        ingress = request.app.state.evolution_native_ingress
+        if ingress is None:
+            raise HTTPException(status_code=503, detail="evolution_native_unavailable")
+        if request.headers.get("content-length", "").isdigit() and (
+            int(request.headers["content-length"]) > 65536
+        ):
+            raise HTTPException(status_code=413, detail="evolution_webhook_too_large")
+        raw = await request.body()
+        if len(raw) > 65536:
+            raise HTTPException(status_code=413, detail="evolution_webhook_too_large")
+        try:
+            ingress.receive(
+                connection_id=connection_id, raw=raw,
+                token=x_fm_evolution_token,
+            )
+        except (NativeEvolutionDenied, EvolutionEventDenied, PermissionError, LookupError) as exc:
+            raise HTTPException(status_code=401, detail="evolution_native_denied") from exc
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     @app.post("/webhooks/fm-evolution/{connection_id}", status_code=204)
     async def receive_fm_evolution(
