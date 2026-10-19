@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from fm_assistant.credential_vault import FernetCredentialVault
-from fm_assistant.db import EvolutionInboundJobORM
 from fm_assistant.domain import TenantContext
 from fm_assistant.evolution_queue import EvolutionInboundQueue
 from fm_assistant.integration import WHATSAPP_EVOLUTION_PROVIDER, IntegrationStatus
