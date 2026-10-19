@@ -206,3 +206,51 @@ def test_policy_revision_change_blocks_unsafe_settlement(guarded):
     assert store.usage_snapshot(
         tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens", at=NOW,
     ).reserved_units == 180
+
+
+def test_fallback_budget_reserves_each_potential_provider_attempt(guarded):
+    guard, store = guarded
+    req = request("multi-attempt")
+    # The existing total-token quota is only 300, while two possible model
+    # attempts require 2 * (100 + 80) = 360. No provider may run.
+    with pytest.raises(QuotaDenied, match="limit_exceeded"):
+        guard.admit(request=req, at=NOW, attempt_budget=2)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 0
+
+
+def test_fallback_budget_reconciles_aggregate_usage(guarded):
+    guard, store = guarded
+    with store._sessions.begin() as db:
+        row = db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.total_tokens"))
+        row.limit_units = 600
+        input_row = db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.input_tokens"))
+        input_row.limit_units = 400
+        output_row = db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.output_tokens"))
+        output_row.limit_units = 400
+    req = request("double-provider")
+    policy = guard.admit(request=req, at=NOW, attempt_budget=2)
+    assert policy.attempt_budget == 2
+    before = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert before.reserved_units == 360
+    assert guard.reconcile(request=req, policy=policy, events=(
+        event(req, inp=80, out=40, cached=0),
+        event(req, inp=90, out=50, cached=0, fallback=True),
+    ))
+    after = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert (after.consumed_units, after.reserved_units) == (260, 0)
+    with pytest.raises(QuotaDenied, match="policy_invalid"):
+        PlanQuotaPolicy(
+            tenant_id="a", unit_id="u1", plan_code="all", revision=1,
+            valid_until=NOW + timedelta(days=1), input_bound=100,
+            output_bound=80, attempt_budget=9,
+            scopes=(("ai.requests", "tenant"), ("ai.total_tokens", "tenant")),
+        )
