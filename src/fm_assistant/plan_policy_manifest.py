@@ -5,8 +5,11 @@ authenticated service channel with revocation/freshness checks before use.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -99,11 +102,6 @@ def issue_core_plan_grant(
     *, manifest: LicensedQuotaManifest, capability: str,
     input_bound: int, output_bound: int, secret: bytes, now: datetime,
 ) -> tuple[bytes, str]:
-    import hashlib
-    import hmac
-    import json
-    from datetime import UTC, timedelta
-
     if (
         not isinstance(secret, bytes) or len(secret) < 32
         or now.tzinfo is None or now.utcoffset() is None
