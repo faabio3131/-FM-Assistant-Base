@@ -32,7 +32,7 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.CheckConstraint(
-            "state in ('pending','processing','complete','reconcile_required')",
+            "state in ('pending','processing','complete','reconcile_required','reviewed')",
             name="ck_assistant_evolution_job_state",
         ),
         sa.CheckConstraint("attempt_count >= 0", name="ck_assistant_evolution_job_attempts"),
