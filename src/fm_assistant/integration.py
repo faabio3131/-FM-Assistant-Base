@@ -54,8 +54,20 @@ WHATSAPP_META_PROVIDER = IntegrationProviderDefinition(
     default_config=(("graph_api_version", "v23.0"),),
 )
 
+WHATSAPP_EVOLUTION_PROVIDER = IntegrationProviderDefinition(
+    provider_key="whatsapp_evolution",
+    integration_type="whatsapp",
+    display_name="WhatsApp QR (FM managed)",
+    definition_version=1,
+    config_fields=("instance_name",),
+    required_config_fields=("instance_name",),
+    secret_fields=("instance_token",),
+    capabilities=("whatsapp.messaging", "whatsapp.webhook", "whatsapp.qr"),
+)
+
 PROVIDER_CATALOG: dict[str, IntegrationProviderDefinition] = {
     WHATSAPP_META_PROVIDER.provider_key: WHATSAPP_META_PROVIDER,
+    WHATSAPP_EVOLUTION_PROVIDER.provider_key: WHATSAPP_EVOLUTION_PROVIDER,
 }
 
 
