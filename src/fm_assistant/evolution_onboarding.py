@@ -81,6 +81,9 @@ class EvolutionOnboarding:
         qr_data_url = self._transport.connect(str(connection.config["instance_name"]))
         return QRConnection(
             connection_id=connection_id,
-            status="connecting" if qr_data_url else "connected",
+            status=(
+                "connected" if not qr_data_url and connection.status is IntegrationStatus.ACTIVE
+                else "connecting" if qr_data_url else "awaiting_confirmation"
+            ),
             qr_data_url=qr_data_url,
         )
