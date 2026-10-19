@@ -9,7 +9,8 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, text as sql_text, update
+from sqlalchemy import func, select, update
+from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from .credential_vault import CredentialVault
