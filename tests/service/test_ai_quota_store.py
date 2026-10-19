@@ -377,3 +377,45 @@ def test_projector_denies_malformed_or_partial_grants(quota):
             store.project_signed_grants(
                 tenant_id="a", unit_id="u1", revision=3, grants=grants,
             )
+
+
+def test_signed_revision_cannot_change_period_window_after_usage(quota):
+    store, sessions = quota
+    previous = (
+        ("ai.requests", "tenant", 5, 60),
+        ("ai.total_tokens", "tenant", 500, 60),
+    )
+    store.project_signed_grants(
+        tenant_id="a", unit_id="u1", revision=3, grants=previous,
+    )
+    store.reserve_bundle(
+        needs=(QuotaRequirement(
+            tenant_id="a", unit_id="__tenant__",
+            capability="ai.total_tokens", units=200, policy_revision=3,
+        ),), request_id="unfinished", at=NOW,
+    )
+    with pytest.raises(QuotaDenied, match="projection_window_change_blocked"):
+        store.project_signed_grants(
+            tenant_id="a", unit_id="u1", revision=4,
+            grants=(("ai.requests", "tenant", 5, 60),
+                    ("ai.total_tokens", "tenant", 800, 3600)),
+        )
+    with sessions() as db:
+        request_policy = db.get(
+            AIQuotaPolicyRecord, ("a", "__tenant__", "ai.requests"),
+        )
+        token_policy = db.get(
+            AIQuotaPolicyRecord, ("a", "__tenant__", "ai.total_tokens"),
+        )
+        assert request_policy.revision == 3  # entire projection rolled back
+        assert (token_policy.revision, token_policy.window_seconds) == (3, 60)
+    with pytest.raises(QuotaDenied, match="projection_window_change_blocked"):
+        store.project_signed_grants(
+            tenant_id="a", unit_id="u1", revision=4,
+            grants=(("ai.requests", "tenant", 5, 60),
+                    ("ai.total_tokens", "tenant", 800, 3600)),
+        )
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 200
