@@ -6,15 +6,18 @@ import base64
 import binascii
 import hmac
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
 from core.ai_admin_read_api import register_admin_read_routes
 from core.ai_assistant_credential_gateway import AssistantSignedCredentialGateway
 from core.ai_control_plane import ControlPlaneError
 from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
+from core.ai_quota_store import QuotaDenied, QuotaReservations
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
 from core.ai_service_contracts import CoreAIResult, TextMessage
 from core.ai_service_runtime import CoreAIRuntime
@@ -215,6 +218,45 @@ def create_app(
         except FalhaRotaDefinitiva as exc:
             raise HTTPException(status_code=502, detail=exc.codigo) from exc
         return _response(result)
+
+    @app.get(
+        "/v1/plan/usage", dependencies=[Depends(require_service_key)],
+    )
+    def read_plan_usage(
+        request: Request,
+        tenant_id: str = Query(min_length=1, max_length=128),
+        unit_id: str = Query(min_length=1, max_length=128),
+        resource: str = Query(min_length=1, max_length=80),
+        scope: str = Query(pattern="^(tenant|unit)$"),
+    ) -> dict[str, object]:
+        """Exact-scoped read of committed quota ledger; no default zero."""
+        engine = request.app.state.control_plane_engine
+        if engine is None:
+            raise HTTPException(status_code=503, detail="plan_usage_unavailable")
+        try:
+            ledger = QuotaReservations(sessionmaker(engine, expire_on_commit=False))
+            scoped_unit = "__tenant__" if scope == "tenant" else unit_id
+            snapshot = ledger.usage_snapshot(
+                tenant_id=tenant_id, unit_id=scoped_unit,
+                capability=resource, at=datetime.now(UTC),
+            )
+        except (QuotaDenied, SQLAlchemyError) as exc:
+            raise HTTPException(
+                status_code=503, detail="plan_usage_unavailable",
+            ) from exc
+        return {
+            "tenant_id": tenant_id,
+            "unit_id": unit_id,
+            "resource": resource,
+            "scope": scope,
+            "policy_revision": snapshot.policy_revision,
+            "limit_units": snapshot.limit_units,
+            "consumed_units": snapshot.consumed_units,
+            "reserved_units": snapshot.reserved_units,
+            "remaining_units": snapshot.remaining_units,
+            "period_ends_at": snapshot.period_ends_at.isoformat(),
+            "observed_at": datetime.now(UTC).isoformat(),
+        }
 
     register_admin_read_routes(app)
     return app
