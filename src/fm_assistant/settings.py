@@ -44,6 +44,7 @@ class Settings:
     command_control_key_id: str | None = None
     command_control_signing_key: str | None = field(default=None, repr=False)
     trusted_command_organization_id: str | None = None
+    core_plan_signing_key: str | None = field(default=None, repr=False)
 
     @property
     def production_like(self) -> bool:
@@ -99,6 +100,13 @@ class Settings:
                 self.core_service_key, self.channel_encryption_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_COMMAND_CONTROL_KEY_REUSED")
+        if self.core_plan_signing_key is not None:
+            if len(self.core_plan_signing_key) < 32 or self.core_plan_signing_key in {
+                self.admin_key, self.credential_pepper, self.session_pepper,
+                self.channel_encryption_key, self.core_service_key,
+                self.core_bridge_signing_key, self.command_control_signing_key,
+            }:
+                raise RuntimeError("FM_ASSISTANT_CORE_PLAN_SIGNING_KEY_INVALID")
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible", "core"}:
             raise RuntimeError("FM_ASSISTANT_MODEL_BACKEND inválido")
@@ -181,6 +189,7 @@ def load_settings() -> Settings:
         model_name=os.getenv("FM_ASSISTANT_MODEL_NAME"),
         core_base_url=os.getenv("FM_ASSISTANT_CORE_BASE_URL"),
         core_service_key=os.getenv("FM_ASSISTANT_CORE_SERVICE_KEY"),
+        core_plan_signing_key=os.getenv("FM_ASSISTANT_CORE_PLAN_SIGNING_KEY") or None,
         core_bridge_key_id=os.getenv("FM_ASSISTANT_CORE_BRIDGE_KEY_ID") or None,
         core_bridge_signing_key=os.getenv("FM_ASSISTANT_CORE_BRIDGE_SIGNING_KEY") or None,
         command_control_key_id=os.getenv("FM_ASSISTANT_COMMAND_CONTROL_KEY_ID") or None,
