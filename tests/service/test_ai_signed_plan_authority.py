@@ -223,7 +223,7 @@ def test_fm_token_bound_configuration_is_strict_and_capability_scoped(monkeypatc
         routes=(), control_plane_database_url="sqlite:///synthetic.db",
         assistant_plan_bounds=bounds,
     ).validate()
-    assert dict((k, (i, o)) for k, i, o in settings.assistant_plan_bounds) == {
+    assert {k: (i, o) for k, i, o in settings.assistant_plan_bounds} == {
         "atendimento_interpretacao": (3000, 600),
         "atendimento_transcricao": (5000, 700),
     }
