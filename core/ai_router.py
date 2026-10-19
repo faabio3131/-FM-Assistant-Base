@@ -197,9 +197,15 @@ class AIModelRouter:
         rotas: tuple[RotaIA, ...],
         executor: ExecutorModeloIA,
         metering: MedidorUsoIA,
+        max_attempts: int | None = None,
         monotonic: Callable[[], float] = perf_counter,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
+        if max_attempts is not None and (
+            type(max_attempts) is not int or not 1 <= max_attempts <= 8
+        ):
+            raise ValueError("ai_router.attempt_budget_invalid")
+        self._max_attempts = max_attempts
         self._rotas = tuple(rotas)
         self._executor = executor
         self._metering = metering
@@ -284,6 +290,8 @@ class AIModelRouter:
         candidatas = self._candidatas(solicitacao.capability)
         fallback_reason: str | None = None
 
+        if self._max_attempts is not None:
+            candidatas = candidatas[:self._max_attempts]
         for indice, rota in enumerate(candidatas):
             fallback_used = indice > 0
             route_reason = (
