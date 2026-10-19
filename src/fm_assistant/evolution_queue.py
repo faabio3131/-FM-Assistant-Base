@@ -27,6 +27,7 @@ class QueuedInbound:
     message_id: str
     sender: str
     text: str
+    claim_generation: int = 1
 
 
 class EvolutionInboundQueue:
@@ -133,11 +134,12 @@ class EvolutionInboundQueue:
             return QueuedInbound(
                 connection_id=job.connection_id, message_id=job.message_id,
                 sender=sender, text=message,
+                claim_generation=job.attempt_count + 1,
             )
 
     def assert_claim_current(
         self, *, connection_id: str, message_id: str,
-        max_age_seconds: int = 300,
+        max_age_seconds: int = 300, claim_generation: int | None = None,
     ) -> None:
         """Fail closed before external send if worker claim aged out or changed.
 
@@ -146,23 +148,38 @@ class EvolutionInboundQueue:
         """
         if type(max_age_seconds) is not int or not 60 <= max_age_seconds <= 86400:
             raise ValueError("evolution_claim_max_age_invalid")
+        if claim_generation is not None and (type(claim_generation) is not int or claim_generation < 1):
+            raise ValueError("evolution_claim_generation_invalid")
         cutoff = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
         with self._sessions() as session:
+            conditions = [
+                EvolutionInboundJobORM.connection_id == connection_id,
+                EvolutionInboundJobORM.message_id == message_id,
+                EvolutionInboundJobORM.state == "processing",
+                EvolutionInboundJobORM.claimed_at >= cutoff,
+            ]
+            if claim_generation is not None:
+                conditions.append(EvolutionInboundJobORM.attempt_count == claim_generation)
             valid = session.scalar(
-                select(func.count()).select_from(EvolutionInboundJobORM).where(
-                    EvolutionInboundJobORM.connection_id == connection_id,
-                    EvolutionInboundJobORM.message_id == message_id,
-                    EvolutionInboundJobORM.state == "processing",
-                    EvolutionInboundJobORM.claimed_at >= cutoff,
-                )
+                select(func.count()).select_from(EvolutionInboundJobORM).where(*conditions)
             )
             if not valid:
                 raise RuntimeError("evolution_claim_expired_or_revoked")
 
-    def finish(
+    def renew_claim(
         self, *, connection_id: str, message_id: str,
-        reconciled: bool, code: str | None = None,
+        claim_generation: int, max_age_seconds: int = 300,
     ) -> None:
+        """Renew only the current, non-expired claim generation via atomic CAS.
+
+        A crashed/expired or superseded worker cannot resurrect a lease.
+        Renewal does not imply delivery authorization or provider-side fencing.
+        """
+        if type(claim_generation) is not int or claim_generation < 1:
+            raise ValueError("evolution_claim_generation_invalid")
+        if type(max_age_seconds) is not int or not 60 <= max_age_seconds <= 86400:
+            raise ValueError("evolution_claim_max_age_invalid")
+        now = datetime.now(UTC)
         with self._sessions() as session:
             result = session.execute(
                 update(EvolutionInboundJobORM)
@@ -170,7 +187,34 @@ class EvolutionInboundQueue:
                     EvolutionInboundJobORM.connection_id == connection_id,
                     EvolutionInboundJobORM.message_id == message_id,
                     EvolutionInboundJobORM.state == "processing",
+                    EvolutionInboundJobORM.attempt_count == claim_generation,
+                    EvolutionInboundJobORM.claimed_at >= now - timedelta(seconds=max_age_seconds),
                 )
+                .values(claimed_at=now, updated_at=now)
+            )
+            if result.rowcount != 1:
+                session.rollback()
+                raise RuntimeError("evolution_claim_expired_or_revoked")
+            session.commit()
+
+    def finish(
+        self, *, connection_id: str, message_id: str,
+        reconciled: bool, code: str | None = None,
+        claim_generation: int | None = None,
+    ) -> None:
+        if claim_generation is not None and (type(claim_generation) is not int or claim_generation < 1):
+            raise ValueError("evolution_claim_generation_invalid")
+        with self._sessions() as session:
+            conditions = [
+                EvolutionInboundJobORM.connection_id == connection_id,
+                EvolutionInboundJobORM.message_id == message_id,
+                EvolutionInboundJobORM.state == "processing",
+            ]
+            if claim_generation is not None:
+                conditions.append(EvolutionInboundJobORM.attempt_count == claim_generation)
+            result = session.execute(
+                update(EvolutionInboundJobORM)
+                .where(*conditions)
                 .values(
                     state="reconcile_required" if reconciled else "complete",
                     ciphertext="", error_code=(code or "")[:160] if reconciled else None,
