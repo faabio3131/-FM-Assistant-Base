@@ -237,3 +237,59 @@ def test_mixed_byok_fm_fallback_fails_closed_before_provider(monkeypatch):
         _generate(runtime, "tenant-a")
     assert requests == []
     assert resolver.calls == []
+
+
+def test_signed_plan_output_cap_is_applied_to_provider_after_admission(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from core.ai_plan_usage_guard import PlanQuotaPolicy, PlanUsageGuard
+    from core.ai_quota_store import QuotaReservations
+
+    store = _plane()
+    store.add_route(_policy(identifier="plan-bounded", scope="platform"))
+    ledger = QuotaReservations(store._sessions)
+
+    class SignedAuthority:
+        def resolve(self, *, tenant_id, unit_id, capability, now):
+            return PlanQuotaPolicy(
+                tenant_id=tenant_id, unit_id=unit_id,
+                plan_code="ALL_FEATURES", revision=7,
+                valid_until=now + timedelta(seconds=30),
+                input_bound=64, output_bound=17,
+                scopes=(("ai.requests", "tenant"),
+                        ("ai.total_tokens", "tenant")),
+                grants=(("ai.requests", "tenant", 2, 86400),
+                        ("ai.total_tokens", "tenant", 100, 86400)),
+            )
+
+    seen = []
+
+    def provider(url, **kwargs):
+        seen.append(kwargs["json"]["max_tokens"])
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {
+                    "prompt_tokens": 10, "completion_tokens": 5,
+                    "prompt_tokens_details": {"cached_tokens": 0},
+                },
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr("core.ai_providers.httpx.post", provider)
+    runtime = CoreControlPlaneAIRuntime(
+        control_plane=store, credentials=Resolver(),
+        plan_usage=PlanUsageGuard(quota=ledger, authority=SignedAuthority()),
+    )
+    result = _generate(runtime, "tenant-a")
+    assert result.content == "ok"
+    assert seen == [17]
+    current = ledger.usage_snapshot(
+        tenant_id="tenant-a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=datetime.now(UTC),
+    )
+    assert current.policy_revision == 7
+    assert current.consumed_units == 15
+    assert current.reserved_units == 0
