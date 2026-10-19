@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.whatsapp_meta import WhatsAppProviderError
-from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
+from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
