@@ -821,3 +821,11 @@ QUALITY: Ruff/test/API/SQL/contract workflow evidence tied to current HEADs; fix
 
 2026-10-18 — F3/F9 CUSTOMER USAGE ALERT + LICENSE MANIFEST SUBGATE
 SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py, plan_policy_manifest.py; tests/saas/test_plan_consumption_view.py, test_plan_limits.py. Customer consumption now includes committed=consumed+reserved, percentage and 70/90/100 percent warning bands; unavailable Core metering remains unknown/null, no fake remaining budget. LicensedQuotaManifestService resolves only revisioned quotas from active canonical tenant license, rejects suspension/expired or essential missing metrics. This is read-only domain construction; no provider activation or untrusted self-upgrade. Pending internal: signed Assistant→Core quota deployment and revocation, transactional policy sync, actual plan-driven provider caps, full lifecycle E2E. External homologation remains deferred until 100% build. CI HEAD verification required.
+
+
+2026-10-18 — F3/F9 CORE LICENSE REVISION FENCE, INTERNAL SECURITY SUBGATE
+- Repo `faabio3131/FM-Core-Base-`, PR #1 Draft; functional SHA `ca378e54226bb2925cd57e5f367f7bb27585d149`.
+- `PlanUsageGuard` now supplies `policy_revision` in atomic quota reserve/settle; DB policy row revision must match the licensed revision. Stale license/policy, invalid boolean revision, negative usage attempts and incoherent cached-token readings fail closed rather than miscrediting quota.
+- Core AI Service CI `39189526526` SUCCESS; Core F3 Quota PostgreSQL Security Gate `39189526538` SUCCESS on functional SHA. No external provider, production migration or real credentials involved.
+- This is a functional safety subgate, **NOT** automatic Assistant→Core policy synchronization or production quota enforcement. Pending: signed/version-monotonic policy transport, revocation/expiry, composition-root enforcement, per-attempt token/cost settlement, multi-service E2E and remaining F3 internal gates.
+- FM Command V2 untouched. Corporate FM-CONTROL-CENTER remains sole commercial management authority; Kordena read-only. F3 BUILD_IN_PROGRESS, F4 NOT_STARTED; EXTERNAL_HOMOLOGATION_DEFERRED. No merge/deploy.
