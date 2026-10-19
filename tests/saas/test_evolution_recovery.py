@@ -40,7 +40,7 @@ def test_stale_processing_quarantined_once_with_tenant_scope(client, provision_c
             sender_hash="c" * 64, message_type="text",
         )
     engine = create_engine(client.app.state.settings.database_url)
-    old = (datetime.now(UTC) - timedelta(minutes=12)).isoformat()
+    old = (datetime.now(UTC) - timedelta(minutes=12)).strftime("%Y-%m-%d %H:%M:%S.%f")
     with engine.begin() as db:
         db.execute(text(
             "UPDATE assistant_integration_inbound SET updated_at=:cutoff "
