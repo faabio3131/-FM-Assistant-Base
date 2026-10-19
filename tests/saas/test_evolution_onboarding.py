@@ -453,3 +453,45 @@ def test_resume_requires_remote_open_and_rejects_foreign_scope(client, provision
     assert len([path for path, _ in calls if path.startswith(
         "/instance/connectionState/"
     )]) == 2
+
+
+def test_v237_webhook_nested_confirmation_and_config_validation():
+    from fm_assistant.channels.whatsapp_evolution import EvolutionClient
+
+    instance = "fm_" + "c" * 32
+    url = "https://hooks.example.test/webhooks/evolution-native/" + "a" * 36
+    token = "test-fm-source-secret-" + "z" * 40
+    assert EvolutionClient.CONTRACT_BASELINE == "v2.3.7"
+
+    def reply(request):
+        assert request.method == "POST"
+        assert request.url.path == "/webhook/set/" + instance
+        body = request.content.decode()
+        assert token in body
+        return httpx.Response(201, json={"webhook": {
+            "instanceName": instance,
+            "webhook": {"enabled": True, "url": url},
+        }})
+
+    adapter = _transport(reply)
+    adapter.set_native_webhook(
+        instance, instance_token="synthetic-instance-token-value",
+        url=url, auth_token=token,
+    )
+    with pytest.raises(ValueError, match="evolution_native_hook_invalid"):
+        adapter.set_native_webhook(
+            instance, instance_token="synthetic-instance-token-value",
+            url="https://localhost/webhooks/evolution-native/test",
+            auth_token=token,
+        )
+
+    def tampered(_request):
+        return httpx.Response(201, json={"webhook": {
+            "enabled": True, "url": "https://attacker.example/",
+        }})
+
+    with pytest.raises(EvolutionUnavailable, match="evolution_native_hook_unconfirmed"):
+        _transport(tampered).set_native_webhook(
+            instance, instance_token="synthetic-instance-token-value",
+            url=url, auth_token=token,
+        )
