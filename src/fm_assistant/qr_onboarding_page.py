@@ -125,7 +125,8 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
      const counts=data.counts||{};
      opsSummary.textContent="Pendentes: "+(counts.pending||0)+" · Em andamento: "+
        (counts.processing||0)+" · Reconciliação: "+(counts.reconcile_required||0)+
-       " · Limite da fila: "+data.capacity;
+       " · Limite da fila: "+data.capacity+
+       " · Espera mais antiga: "+((data.oldest_age_seconds||{}).pending||0)+"s";
      opsList.replaceChildren();
      for(const item of data.reconciliation||[]){
        const row=document.createElement("li");
