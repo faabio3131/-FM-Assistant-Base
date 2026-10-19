@@ -42,7 +42,15 @@ class EvolutionClient:
         self._settings = settings
         self._client = client
 
-    def _request(\n        self, method: str, path: str, *, payload: dict | None = None,\n        instance_token: str | None = None,\n    ) -> dict:\n        if instance_token is not None and (\n            not isinstance(instance_token, str) or not 16 <= len(instance_token) <= 4096\n        ):\n            raise EvolutionUnavailable(\"evolution_instance_token_invalid\")\n        headers = {\"apikey\": instance_token or self._settings.global_key}
+    def _request(
+        self, method: str, path: str, *, payload: dict | None = None,
+        instance_token: str | None = None,
+    ) -> dict:
+        if instance_token is not None and (
+            not isinstance(instance_token, str) or not 16 <= len(instance_token) <= 4096
+        ):
+            raise EvolutionUnavailable("evolution_instance_token_invalid")
+        headers = {"apikey": instance_token or self._settings.global_key}
         try:
             if self._client is None:
                 with httpx.Client(trust_env=False, follow_redirects=False) as client:
