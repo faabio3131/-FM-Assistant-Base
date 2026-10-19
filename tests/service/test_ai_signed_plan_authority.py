@@ -163,11 +163,11 @@ def test_http_adapter_requires_https_and_trusted_bounds():
 def test_commercial_core_requires_signed_plan_authority():
     from core.ai_service_settings import CoreEnvironment, CoreSettings
 
-    kwargs = dict(
-        environment=CoreEnvironment.STAGING, service_key="s" * 40,
-        admin_key="a" * 40, routes=(),
-        control_plane_database_url="postgresql://synthetic:synthetic@db.test/core",
-    )
+    kwargs = {
+        "environment": CoreEnvironment.STAGING, "service_key": "s" * 40,
+        "admin_key": "a" * 40, "routes": (),
+        "control_plane_database_url": "postgresql://synthetic:synthetic@db.test/core",
+    }
     with pytest.raises(RuntimeError, match="plan_authority_required"):
         CoreSettings(**kwargs).validate()
 
