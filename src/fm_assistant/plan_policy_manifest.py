@@ -157,3 +157,58 @@ def issue_core_plan_grant(
         secret, b"/internal/v1/assistant/core-plan-grant\n" + body,
         hashlib.sha256,
     ).hexdigest()
+
+
+def authenticated_core_plan_grant(
+    *, raw_body: bytes, request_signature: str | None,
+    secret: str | None, sessions: sessionmaker[Session], now: datetime,
+) -> tuple[bytes, str]:
+    """Internal service-only request; always resolves live canonical license.
+
+    The caller must enforce HTTPS and private service networking. No tenant
+    session, browser cookie or client-supplied plan revision is an authority.
+    """
+    if (
+        not secret or len(secret) < 32
+        or not isinstance(raw_body, bytes) or len(raw_body) > 2048
+        or not isinstance(request_signature, str)
+        or re.fullmatch(r"[0-9a-f]{64}", request_signature) is None
+        or now.tzinfo is None or now.utcoffset() is None
+    ):
+        raise PlanLimitDenied("plan.grant_denied")
+    signing_key = secret.encode("utf-8")
+    expected = hmac.new(
+        signing_key,
+        b"POST\\n/internal/v1/assistant/core-plan-grant\\n" + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, request_signature):
+        raise PlanLimitDenied("plan.grant_denied")
+    try:
+        body = json.loads(raw_body)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise PlanLimitDenied("plan.grant_denied") from exc
+    if not isinstance(body, dict) or set(body) != {
+        "tenant_id", "unit_id", "capability", "challenge",
+        "input_bound", "output_bound", "requested_at",
+    }:
+        raise PlanLimitDenied("plan.grant_denied")
+    requested_at = body["requested_at"]
+    if (
+        type(requested_at) is not int
+        or abs(int(now.timestamp()) - requested_at) > 30
+        or not all(
+            isinstance(body[key], str) and
+            re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", body[key]) is not None
+            for key in ("tenant_id", "unit_id", "capability")
+        )
+    ):
+        raise PlanLimitDenied("plan.grant_denied")
+    manifest = LicensedQuotaManifestService(sessions).resolve(
+        tenant_id=body["tenant_id"], unit_id=body["unit_id"], now=now,
+    )
+    return issue_core_plan_grant(
+        manifest=manifest, capability=body["capability"],
+        input_bound=body["input_bound"], output_bound=body["output_bound"],
+        secret=signing_key, now=now, challenge=body["challenge"],
+    )
