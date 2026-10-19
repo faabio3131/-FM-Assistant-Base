@@ -73,6 +73,7 @@ class CoreSettings:
     assistant_bridge_signing_key: str | None = field(default=None, repr=False)
     assistant_plan_url: str | None = None
     assistant_plan_signing_key: str | None = field(default=None, repr=False)
+    assistant_max_audio_bytes: int = 10 * 1024 * 1024
     assistant_plan_bounds: tuple[tuple[str, int, int], ...] = (
         ("atendimento_interpretacao", 4096, 2048),
         ("atendimento_transcricao", 8192, 2048),
@@ -110,6 +111,11 @@ class CoreSettings:
                 raise RuntimeError("core_assistant_bridge_config_invalid") from exc
             if self.assistant_bridge_signing_key in (self.service_key, self.admin_key):
                 raise RuntimeError("core_assistant_bridge_key_reused")
+        if (
+            type(self.assistant_max_audio_bytes) is not int
+            or not 1 <= self.assistant_max_audio_bytes <= 64 * 1024 * 1024
+        ):
+            raise RuntimeError("core_plan_audio_upload_ceiling_invalid")
         plan_fields = (self.assistant_plan_url, self.assistant_plan_signing_key)
         caps = self.assistant_plan_bounds
         if (
@@ -242,6 +248,18 @@ def _load_assistant_plan_bounds() -> tuple[tuple[str, int, int], ...]:
         raise RuntimeError("core_plan_authority_bounds_invalid") from exc
 
 
+def _load_audio_upload_ceiling() -> int:
+    raw = os.getenv("FM_CORE_ASSISTANT_MAX_AUDIO_BYTES", "").strip()
+    if not raw:
+        return 10 * 1024 * 1024
+    if not raw.isascii() or not raw.isdecimal():
+        raise RuntimeError("core_plan_audio_upload_ceiling_invalid")
+    value = int(raw)
+    if not 1 <= value <= 64 * 1024 * 1024:
+        raise RuntimeError("core_plan_audio_upload_ceiling_invalid")
+    return value
+
+
 def load_settings() -> CoreSettings:
     load_dotenv(override=False)
     raw_env = os.getenv("FM_CORE_ENV", "development").strip().casefold()
@@ -276,4 +294,5 @@ def load_settings() -> CoreSettings:
         assistant_plan_url=os.getenv("FM_CORE_ASSISTANT_PLAN_URL") or None,
         assistant_plan_signing_key=os.getenv("FM_CORE_ASSISTANT_PLAN_SIGNING_KEY") or None,
         assistant_plan_bounds=_load_assistant_plan_bounds(),
+        assistant_max_audio_bytes=_load_audio_upload_ceiling(),
     ).validate()
