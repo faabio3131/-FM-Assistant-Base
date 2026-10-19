@@ -294,3 +294,23 @@ def test_plan_usage_snapshot_reports_remaining_and_pending_reservations(quota):
         store.usage_snapshot(
             tenant_id="missing", unit_id="u1", capability="text", at=NOW,
         )
+
+
+def test_bundle_revision_fence_rejects_stale_policy_atomically(quota):
+    store, sessions = quota
+    with pytest.raises(QuotaDenied, match="policy_revision_mismatch"):
+        store.reserve_bundle(
+            needs=(QuotaRequirement(
+                tenant_id="a", unit_id="u1", capability="text",
+                units=1, policy_revision=2,
+            ),), request_id="stale-revision", at=NOW,
+        )
+    with sessions() as db:
+        assert db.get(AIQuotaReservationRecord, ("a", "u1", "text", "stale-revision")) is None
+    with pytest.raises(QuotaDenied, match="bundle_invalid"):
+        store.reserve_bundle(
+            needs=(QuotaRequirement(
+                tenant_id="a", unit_id="u1", capability="text",
+                units=1, policy_revision=True,
+            ),), request_id="bad-revision", at=NOW,
+        )
