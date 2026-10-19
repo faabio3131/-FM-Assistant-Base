@@ -33,8 +33,8 @@ from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_onboarding import EvolutionOnboarding
-from .evolution_runtime import EvolutionRuntime
 from .evolution_queue import EvolutionInboundQueue
+from .evolution_runtime import EvolutionRuntime
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .identity import (
     MACHINE_PERMISSIONS,
