@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from .channels.whatsapp_meta import WhatsAppMetaConfig
