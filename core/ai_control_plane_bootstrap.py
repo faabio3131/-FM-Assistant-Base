@@ -58,6 +58,7 @@ def build_persistent_core(
     credential_resolver: CoreCredentialResolver | None = None,
     tenant_gateway: TenantCredentialGateway | None = None,
     plan_authority: PlanPolicyAuthority | None = None,
+    max_audio_bytes: int = 10 * 1024 * 1024,
 ) -> tuple[CoreControlPlaneAIRuntime, Engine]:
     # O gateway de tenant deve ser injetado explicitamente por integrador confiável.
     # O runtime comercial não constrói gateway nem aceita BYOK por padrão.
@@ -87,6 +88,7 @@ def build_persistent_core(
             plan_usage=(
                 PlanUsageGuard(
                     quota=QuotaReservations(sessions), authority=plan_authority,
+                    max_audio_bytes=max_audio_bytes,
                 ) if plan_authority is not None else None
             ),
         )
