@@ -14,6 +14,8 @@ import core.ai_admin_audit as admin_audit
 import core.ai_circuit_state_store
 import core.ai_quota_store  # noqa: F401 - registers quota reservation tables
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
+from core.ai_plan_usage_guard import PlanPolicyAuthority, PlanUsageGuard
+from core.ai_quota_store import QuotaReservations
 from core.ai_control_plane_runtime import (
     CoreControlPlaneAIRuntime,
     CoreCredentialResolver,
@@ -55,6 +57,7 @@ def build_persistent_core(
     *,
     credential_resolver: CoreCredentialResolver | None = None,
     tenant_gateway: TenantCredentialGateway | None = None,
+    plan_authority: PlanPolicyAuthority | None = None,
 ) -> tuple[CoreControlPlaneAIRuntime, Engine]:
     # O gateway de tenant deve ser injetado explicitamente por integrador confiável.
     # O runtime comercial não constrói gateway nem aceita BYOK por padrão.
@@ -81,6 +84,11 @@ def build_persistent_core(
             control_plane=AIControlPlaneStore(sessions),
             credentials=credentials,
             metering=PersistentAIFinOps(sessions),
+            plan_usage=(
+                PlanUsageGuard(
+                    quota=QuotaReservations(sessions), authority=plan_authority,
+                ) if plan_authority is not None else None
+            ),
         )
         return runtime, engine
     except BaseException:
