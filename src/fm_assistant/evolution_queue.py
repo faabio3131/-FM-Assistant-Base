@@ -135,6 +135,30 @@ class EvolutionInboundQueue:
                 sender=sender, text=message,
             )
 
+    def assert_claim_current(
+        self, *, connection_id: str, message_id: str,
+        max_age_seconds: int = 300,
+    ) -> None:
+        """Fail closed before external send if worker claim aged out or changed.
+
+        This is an internal guard, NOT a replacement for network-level
+        transaction fencing or a continuously renewed worker lease.
+        """
+        if type(max_age_seconds) is not int or not 60 <= max_age_seconds <= 86400:
+            raise ValueError("evolution_claim_max_age_invalid")
+        cutoff = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
+        with self._sessions() as session:
+            valid = session.scalar(
+                select(func.count()).select_from(EvolutionInboundJobORM).where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.message_id == message_id,
+                    EvolutionInboundJobORM.state == "processing",
+                    EvolutionInboundJobORM.claimed_at >= cutoff,
+                )
+            )
+            if not valid:
+                raise RuntimeError("evolution_claim_expired_or_revoked")
+
     def finish(
         self, *, connection_id: str, message_id: str,
         reconciled: bool, code: str | None = None,
@@ -221,8 +245,27 @@ class EvolutionInboundQueue:
                 .order_by(EvolutionInboundJobORM.updated_at.desc())
                 .limit(limit)
             ).all()
+            oldest = session.execute(
+                select(
+                    EvolutionInboundJobORM.state,
+                    func.min(EvolutionInboundJobORM.created_at),
+                )
+                .where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.state.in_(("pending", "processing")),
+                )
+                .group_by(EvolutionInboundJobORM.state)
+            ).all()
+            now = datetime.now(UTC)
+            ages = {}
+            for state, timestamp in oldest:
+                if timestamp is not None:
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=UTC)
+                    ages[state] = max(0, int((now - timestamp).total_seconds()))
             return {
                 "counts": {state: total for state, total in counts},
+                "oldest_age_seconds": ages,
                 "capacity": self._max_pending,
                 "reconciliation": [
                     {
