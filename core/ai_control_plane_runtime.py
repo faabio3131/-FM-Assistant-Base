@@ -6,8 +6,9 @@ referencias atuais no momento da execucao. Nenhum segredo e persistido aqui.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Callable, Protocol
+from typing import Protocol
 
 from core.ai_circuit_breaker import CircuitDenied, CircuitOutcome
 from core.ai_circuit_state_store import PersistentCircuit
