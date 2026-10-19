@@ -42,13 +42,13 @@ class EvolutionClient:
         self._settings = settings
         self._client = client
 
-    def _request(self, method: str, path: str, *, payload: dict | None = None) -> dict:
+    def _request(\n        self, method: str, path: str, *, payload: dict | None = None,\n        instance_token: str | None = None,\n    ) -> dict:\n        if instance_token is not None and (\n            not isinstance(instance_token, str) or not 16 <= len(instance_token) <= 4096\n        ):\n            raise EvolutionUnavailable(\"evolution_instance_token_invalid\")\n        headers = {\"apikey\": instance_token or self._settings.global_key}
         try:
             if self._client is None:
                 with httpx.Client(trust_env=False, follow_redirects=False) as client:
                     response = client.request(
                         method, self._settings.origin.rstrip("/") + path,
-                        json=payload, headers={"apikey": self._settings.global_key},
+                        json=payload, headers=headers,
                         timeout=self._settings.timeout_seconds,
                     )
             else:
@@ -83,6 +83,29 @@ class EvolutionClient:
         if not isinstance(token, str) or not token.strip() or len(token) > 4096:
             raise EvolutionUnavailable("evolution_token_missing")
         return token
+
+    def send_text(
+        self, instance: str, *, instance_token: str, recipient: str,
+        message: str,
+    ) -> str:
+        """One outbound attempt only; ambiguous outcomes are never retried."""
+        name = self._instance(instance)
+        if (
+            not isinstance(recipient, str)
+            or re.fullmatch(r"[0-9]{8,20}", recipient) is None
+            or not isinstance(message, str) or not 1 <= len(message.strip()) <= 20000
+        ):
+            raise ValueError("evolution_outbound_invalid")
+        data = self._request(
+            "POST", "/message/sendText/" + name,
+            payload={"number": recipient, "text": message.strip()},
+            instance_token=instance_token,
+        )
+        key = data.get("key")
+        reference = key.get("id") if isinstance(key, dict) else data.get("id")
+        if not isinstance(reference, str) or not 1 <= len(reference) <= 128:
+            raise EvolutionUnavailable("evolution_delivery_uncertain")
+        return reference
 
     def connect(self, instance: str) -> str | None:
         data = self._request("GET", "/instance/connect/" + self._instance(instance))
