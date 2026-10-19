@@ -1560,7 +1560,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             snapshot = onboarding.qr(context, connection_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (RuntimeError, EvolutionUnavailable) as exc:
+        except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return JSONResponse(
             QRConnectionResponse(
