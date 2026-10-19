@@ -233,3 +233,71 @@ def test_queue_operational_snapshot_includes_age_without_private_data(
     assert overview["oldest_age_seconds"]["pending"] >= 0
     assert "5511988888888" not in str(overview)
     assert "Private payload sentinel" not in str(overview)
+
+
+def test_claim_generation_rejects_foreign_renewal_and_completion(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    assert queue.enqueue(
+        connection_id=cid, message_id="generation-1",
+        sender="5511999999999", text="Privado",
+    )
+    item = queue.claim()
+    assert item is not None
+    assert item.claim_generation >= 1
+    with pytest.raises(RuntimeError, match="evolution_claim_expired_or_revoked"):
+        queue.renew_claim(
+            connection_id=cid, message_id=item.message_id,
+            claim_generation=item.claim_generation + 1,
+        )
+    with pytest.raises(RuntimeError, match="evolution_job_state_conflict"):
+        queue.finish(
+            connection_id=cid, message_id=item.message_id, reconciled=False,
+            claim_generation=item.claim_generation + 1,
+        )
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "processing"
+    queue.renew_claim(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    queue.assert_claim_current(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    queue.finish(
+        connection_id=cid, message_id=item.message_id, reconciled=False,
+        claim_generation=item.claim_generation,
+    )
+    with pytest.raises(RuntimeError, match="evolution_claim_expired_or_revoked"):
+        queue.renew_claim(
+            connection_id=cid, message_id=item.message_id,
+            claim_generation=item.claim_generation,
+        )
+
+
+def test_expired_generation_cannot_be_renewed(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="generation-expired",
+        sender="5511999999999", text="Confidencial",
+    )
+    item = queue.claim()
+    assert item is not None
+    engine = create_engine(client.app.state.settings.database_url)
+    with engine.begin() as db:
+        db.execute(text(
+            "UPDATE assistant_evolution_inbound_jobs SET claimed_at=:old "
+            "WHERE connection_id=:cid AND message_id=:mid"
+        ), {
+            "old": (datetime.now(UTC) - timedelta(minutes=10)).strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            ),
+            "cid": cid, "mid": item.message_id,
+        })
+    engine.dispose()
+    with pytest.raises(RuntimeError, match="evolution_claim_expired_or_revoked"):
+        queue.renew_claim(
+            connection_id=cid, message_id=item.message_id,
+            claim_generation=item.claim_generation,
+        )
+    assert queue.quarantine_stale() == 1
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "reconcile_required"
