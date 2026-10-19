@@ -323,6 +323,17 @@ class EvolutionRuntime:
                     connection_id=item.connection_id, message_id=item.message_id,
                     claim_generation=item.claim_generation,
                 ) if self._queue is not None else None
+                # A concurrent pause/revocation may commit while the
+                # outbound intent is persisted. Recheck right before HTTP;
+                # a failed recheck retains the intent for manual reconciliation.
+                latest_before_send = self._integrations.get_unscoped(item.connection_id)
+                if (
+                    latest_before_send is None
+                    or latest_before_send.status is not IntegrationStatus.ACTIVE
+                    or latest_before_send.revision != connection.revision
+                    or (lease_lost is not None and lease_lost.is_set())
+                ):
+                    raise PermissionError("evolution_connection_changed_before_send")
                 outbound_id = self._transport.send_text(
                     instance, instance_token=self._vault.decrypt(token),
                     recipient=item.sender, message=reply.content,
