@@ -124,6 +124,7 @@ class Settings:
                 self.admin_key, self.credential_pepper, self.session_pepper,
                 self.channel_encryption_key, self.core_service_key,
                 self.command_control_signing_key, self.core_bridge_signing_key,
+                self.core_plan_signing_key, self.model_api_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_EVOLUTION_KEY_REUSED")
         backend = self.model_backend.strip().casefold()
