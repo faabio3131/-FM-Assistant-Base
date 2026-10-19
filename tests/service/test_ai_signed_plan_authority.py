@@ -109,7 +109,7 @@ def test_real_http_adapter_contract_with_signed_response():
         data = json.loads(request.content)
         expected = hmac.new(
             SECRET,
-            b"POST\\n/internal/v1/assistant/core-plan-grant\n" + request.content,
+            b"POST\n/internal/v1/assistant/core-plan-grant\n" + request.content,
             hashlib.sha256,
         ).hexdigest()
         assert request.headers["X-FM-Core-Plan-Signature"] == expected
