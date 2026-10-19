@@ -179,7 +179,7 @@ def authenticated_core_plan_grant(
     signing_key = secret.encode("utf-8")
     expected = hmac.new(
         signing_key,
-        b"POST\\n/internal/v1/assistant/core-plan-grant\\n" + raw_body,
+        b"POST\n/internal/v1/assistant/core-plan-grant\n" + raw_body,
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, request_signature):
