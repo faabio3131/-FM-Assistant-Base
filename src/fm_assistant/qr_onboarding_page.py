@@ -40,6 +40,9 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
  const connect=document.getElementById("connect"), refresh=document.getElementById("refresh");
  const qrbox=document.getElementById("qrbox"), qr=document.getElementById("qrcode");
  let connection=null, waiting=false;
+ // FM corporate default. Signed Command policy projection is a separate gate.
+ const QR_DISPLAY_CAP_MS=45000;
+ let shownQr=null, shownAt=0;
  function show(message,mode) {
    status.textContent=message;
    dot.style.background=mode==="ok"?"#36c6b3":mode==="error"?"#f58c7d":"#e4b55c";
@@ -61,10 +64,22 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
      visible(connect,false);
      const data=await request(base+"/"+encodeURIComponent(connection));
      qr.removeAttribute("src");visible(qrbox,false);
-     if(data.status==="connected") {show("WhatsApp conectado","ok");visible(refresh,false);}
+     if(data.status==="connected") {
+       shownQr=null;shownAt=0;
+       show("WhatsApp conectado","ok");visible(refresh,false);
+     }
      else if(data.qr_data_url && data.qr_data_url.startsWith("data:image/png;base64,")) {
-       qr.src=data.qr_data_url;visible(qrbox,true);
-       show("Aguardando leitura do QR Code","pending");visible(refresh,true);
+       const now=Date.now();
+       if(shownQr!==data.qr_data_url) {
+         shownQr=data.qr_data_url;shownAt=now;
+       }
+       if(now-shownAt>=QR_DISPLAY_CAP_MS) {
+         show("QR Code expirado na tela. Aguardando código novo do provedor…","pending");
+         visible(refresh,true);
+       } else {
+         qr.src=data.qr_data_url;visible(qrbox,true);
+         show("Aguardando leitura do QR Code","pending");visible(refresh,true);
+       }
      } else {show("Conexão em preparação","pending");visible(refresh,true);}
    } catch {show("Não foi possível consultar a conexão. Atualize ou contate o suporte.","error");visible(refresh,true);}
    finally {waiting=false;}
