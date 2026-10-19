@@ -48,6 +48,8 @@ class Settings:
     evolution_origin: str | None = None
     evolution_global_key: str | None = field(default=None, repr=False)
     evolution_webhook_signing_key: str | None = field(default=None, repr=False)
+    evolution_native_webhook_base_url: str | None = None
+    evolution_provider_family: str = "evolution_v2_whatsapp_baileys"
 
     @property
     def production_like(self) -> bool:
@@ -141,6 +143,21 @@ class Settings:
                 self.core_plan_signing_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNER_REUSED")
+        if self.evolution_provider_family != "evolution_v2_whatsapp_baileys":
+            raise RuntimeError("FM_ASSISTANT_EVOLUTION_PROVIDER_FAMILY_UNSUPPORTED")
+        if self.evolution_native_webhook_base_url:
+            from urllib.parse import urlsplit
+
+            url = urlsplit(self.evolution_native_webhook_base_url)
+            if (
+                url.scheme != "https" or not url.hostname
+                or url.hostname in {"localhost", "127.0.0.1", "::1"}
+                or url.hostname.endswith(".local") or url.port not in (None, 443)
+                or url.query or url.fragment or url.username or url.password
+                or url.path.rstrip("/") != "/webhooks/evolution-native"
+                or not self.evolution_webhook_signing_key
+            ):
+                raise RuntimeError("FM_ASSISTANT_EVOLUTION_NATIVE_WEBHOOK_INVALID")
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible", "core"}:
             raise RuntimeError("FM_ASSISTANT_MODEL_BACKEND inválido")
@@ -225,6 +242,12 @@ def load_settings() -> Settings:
         core_service_key=os.getenv("FM_ASSISTANT_CORE_SERVICE_KEY"),
         core_plan_signing_key=os.getenv("FM_ASSISTANT_CORE_PLAN_SIGNING_KEY") or None,
         evolution_origin=os.getenv("FM_ASSISTANT_EVOLUTION_ORIGIN") or None,
+        evolution_native_webhook_base_url=(
+            os.getenv("FM_ASSISTANT_EVOLUTION_NATIVE_WEBHOOK_BASE_URL") or None
+        ),
+        evolution_provider_family=os.getenv(
+            "FM_ASSISTANT_EVOLUTION_PROVIDER_FAMILY", "evolution_v2_whatsapp_baileys"
+        ),
         evolution_global_key=os.getenv("FM_ASSISTANT_EVOLUTION_GLOBAL_KEY") or None,
         evolution_webhook_signing_key=(
             os.getenv("FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNING_KEY") or None
