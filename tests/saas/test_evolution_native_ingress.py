@@ -16,7 +16,6 @@ from fm_assistant.evolution_runtime import EvolutionRuntime
 from fm_assistant.integration import IntegrationStatus
 from fm_assistant.whatsapp_repository import WhatsAppInboundRepository
 
-
 SOURCE_BASE = "https://hooks.example.test/webhooks/evolution-native"
 SIGNING_KEY = "private-fm-broker-key-" + "x" * 40
 
