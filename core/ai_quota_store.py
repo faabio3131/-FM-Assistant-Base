@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     func,
+    text,
     select,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
@@ -239,6 +240,61 @@ class QuotaReservations:
                 ).limit(limit)
             ).all()
             return tuple(records)
+
+    def project_signed_grants(
+        self, *, tenant_id: str, unit_id: str, revision: int,
+        grants: tuple[tuple[str, str, int, int], ...],
+    ) -> None:
+        """Version-fenced full projection from a verified Assistant license."""
+        if (
+            not _valid_id(tenant_id) or not _valid_id(unit_id)
+            or type(revision) is not int or revision < 1
+            or not 2 <= len(grants) <= 5
+        ):
+            raise QuotaDenied("core_quota.projection_invalid")
+        items = sorted(grants)
+        if (
+            len({m for m, _, _, _ in items}) != len(items)
+            or not {"ai.requests", "ai.total_tokens"}.issubset(
+                {m for m, _, _, _ in items}
+            )
+            or any(
+                m not in {"ai.requests", "ai.total_tokens",
+                          "ai.input_tokens", "ai.output_tokens", "ai.cached_tokens"}
+                or scope not in {"tenant", "unit"}
+                or type(limit) is not int or not 0 < limit <= 2_000_000_000
+                or type(window) is not int or not 0 < window <= 31_536_000
+                for m, scope, limit, window in items
+            )
+        ):
+            raise QuotaDenied("core_quota.projection_invalid")
+        with self._sessions.begin() as db:
+            if db.bind is not None and db.bind.dialect.name == "postgresql":
+                db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:tenant), hashtext(:unit))"),
+                    {"tenant": tenant_id, "unit": unit_id},
+                )
+            for metric, scope, limit, window in items:
+                scoped_unit = "__tenant__" if scope == "tenant" else unit_id
+                key = (tenant_id, scoped_unit, metric)
+                record = db.get(AIQuotaPolicyRecord, key, with_for_update=True)
+                if record is None:
+                    db.add(AIQuotaPolicyRecord(
+                        tenant_id=tenant_id, unit_id=scoped_unit,
+                        capability=metric, limit_units=limit,
+                        window_seconds=window, revision=revision,
+                    ))
+                    continue
+                if record.revision > revision:
+                    raise QuotaDenied("core_quota.projection_stale")
+                if record.revision == revision:
+                    if record.limit_units != limit or record.window_seconds != window:
+                        raise QuotaDenied("core_quota.projection_conflict")
+                    continue
+                record.revision = revision
+                record.limit_units = limit
+                record.window_seconds = window
+            db.flush()
 
     def reserve_bundle(
         self, *, needs: tuple[QuotaRequirement, ...],
