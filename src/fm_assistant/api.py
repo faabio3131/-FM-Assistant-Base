@@ -53,6 +53,7 @@ from .plan_license_binding import GovernedPlanLicenseBinding, PlanLicenseBinding
 from .plan_limits import PlanLimitDenied
 from .plan_policy_manifest import authenticated_core_plan_grant
 from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
+from .qr_onboarding_page import render_qr_page
 from .repositories import (
     ConversationSQLAlchemyRepository,
     CredentialRepository,
@@ -1541,6 +1542,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             outcome="success",
         )
         return _integration_response(connection)
+
+    @app.get("/v1/channels/whatsapp/qr/panel", response_class=HTMLResponse)
+    def whatsapp_qr_panel(
+        _principal: SessionPrincipal = Depends(
+            human_permission(Permission.INTEGRATION_READ)
+        ),
+    ) -> HTMLResponse:
+        markup, csp = render_qr_page()
+        return HTMLResponse(
+            markup, headers={
+                "Content-Security-Policy": csp,
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+
+    @app.get("/v1/channels/whatsapp/qr/current")
+    def current_whatsapp_qr(
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_READ)
+        ),
+    ) -> Response:
+        onboarding = request.app.state.evolution_onboarding
+        if onboarding is None:
+            raise HTTPException(status_code=503, detail="evolution_gateway_unavailable")
+        connection = onboarding.current(context)
+        return JSONResponse(
+            {"connection_id": connection.connection_id if connection else None,
+             "status": connection.status.value if connection else "disconnected"},
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get(
         "/v1/channels/whatsapp/qr/{connection_id}",
