@@ -6,6 +6,8 @@ row-level locking in deployment. SQLite is used for sequential unit tests.
 """
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -23,6 +25,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
+from core.ai_admin_audit import stage_admin_mutation_audit
+from core.ai_command_authority import VerifiedCommandAdmin
 from core.ai_control_plane import ControlPlaneBase
 
 
@@ -425,6 +429,95 @@ class QuotaReservations:
                 else:
                     to_settle.append((row, item.units))
             for row, consumed in to_settle:
+                row.state = ReservationState.SETTLED
+                row.consumed_units = consumed
+            db.flush()
+
+    def reconcile_ambiguous_bundle(
+        self, *, usage: tuple[QuotaRequirement, ...], request_id: str,
+        principal: VerifiedCommandAdmin, evidence_digest: str,
+        evidence_kind: str, at: datetime,
+    ) -> None:
+        """Governed resolution backed by provider evidence and atomic human audit.
+
+        Never invokes the provider. A no-charge attestation and a provider usage
+        statement are different evidence classes. Unresolved requests stay held.
+        """
+        if not isinstance(principal, VerifiedCommandAdmin) or (
+            "core.ai.admin.mutate" not in principal.permissions
+        ):
+            raise QuotaDenied("core_quota.recovery_authority_required")
+        now = _utc(at)
+        if (
+            type(principal.expires_at) is not int
+            or type(principal.step_up_at) is not int
+            or not principal.step_up_at <= int(now.timestamp()) < principal.expires_at
+            or int(now.timestamp()) - principal.step_up_at > 300
+        ):
+            raise QuotaDenied("core_quota.recovery_authority_expired")
+        if (
+            not _valid_id(request_id)
+            or not isinstance(evidence_digest, str)
+            or re.fullmatch(r"[a-f0-9]{64}", evidence_digest) is None
+            or evidence_kind not in {"provider_usage_confirmed", "provider_no_charge_confirmed"}
+            or not usage or len(usage) > 32
+        ):
+            raise QuotaDenied("core_quota.recovery_evidence_invalid")
+        keys = [(v.tenant_id, v.unit_id, v.capability) for v in usage]
+        if (
+            len(set(keys)) != len(keys) or len({v.tenant_id for v in usage}) != 1
+            or any(not all(_valid_id(x) for x in key) or len(key[2]) > 80
+                   or type(v.units) is not int or v.units < 0
+                   or type(v.policy_revision) is not int or v.policy_revision < 1
+                   for key, v in zip(keys, usage, strict=True))
+        ):
+            raise QuotaDenied("core_quota.recovery_scope_invalid")
+        if evidence_kind == "provider_no_charge_confirmed":
+            if any(v.units != 0 for v in usage):
+                raise QuotaDenied("core_quota.recovery_evidence_mismatch")
+        elif not any(v.units > 0 for v in usage):
+            raise QuotaDenied("core_quota.recovery_evidence_mismatch")
+        tenant_id = usage[0].tenant_id
+        canonical = json.dumps({
+            "request_id": request_id, "tenant_id": tenant_id,
+            "evidence_digest": evidence_digest, "evidence_kind": evidence_kind,
+            "metrics": sorted(
+                (v.unit_id, v.capability, v.units, v.policy_revision)
+                for v in usage
+            ),
+        }, sort_keys=True, separators=(",", ":")).encode()
+        with self._sessions.begin() as db:
+            ordered = sorted(usage, key=lambda v: (v.tenant_id, v.unit_id, v.capability))
+            rows = []
+            for item in ordered:
+                key = (item.tenant_id, item.unit_id, item.capability)
+                policy = self._policy(db, key)
+                row = db.get(AIQuotaReservationRecord, (*key, request_id))
+                if (
+                    policy.revision != item.policy_revision
+                    or row is None or row.policy_revision != item.policy_revision
+                    or row.state != ReservationState.RESERVED
+                    or row.reserved_units < item.units
+                ):
+                    raise QuotaDenied("core_quota.recovery_conflict")
+                rows.append((row, item.units))
+            # A partial recovery of a multi-metric reservation can distort
+            # usage totals. Require *every* reserved dimension for this request.
+            existing = db.scalars(
+                select(AIQuotaReservationRecord).where(
+                    AIQuotaReservationRecord.tenant_id == tenant_id,
+                    AIQuotaReservationRecord.request_id == request_id,
+                )
+            ).all()
+            if {(r.tenant_id, r.unit_id, r.capability) for r in existing} != set(keys):
+                raise QuotaDenied("core_quota.recovery_partial_bundle")
+            stage_admin_mutation_audit(
+                db, principal=principal,
+                action="core.ai.quota.reconcile",
+                resource_id=f"{tenant_id}:{request_id}",
+                canonical_request=canonical,
+            )
+            for row, consumed in rows:
                 row.state = ReservationState.SETTLED
                 row.consumed_units = consumed
             db.flush()
