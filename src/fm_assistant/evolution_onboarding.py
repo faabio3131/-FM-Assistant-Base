@@ -1,6 +1,7 @@
 """FM-controlled WhatsApp QR onboarding over the existing Integration Fabric."""
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -31,10 +32,12 @@ class EvolutionOnboarding:
     def __init__(
         self, *, repository: IntegrationRepository,
         vault: CredentialVault, transport: EvolutionClient,
+        native_webhook_base_url: str | None = None,
     ) -> None:
         self._repository = repository
         self._vault = vault
         self._transport = transport
+        self._native_webhook_base_url = native_webhook_base_url
 
     def provision(self, context: TenantContext) -> IntegrationConnection:
         current = self._repository.latest_for_provider(context, self.PROVIDER)
@@ -60,6 +63,32 @@ class EvolutionOnboarding:
             ciphertext=self._vault.encrypt(token),
             source=CredentialSource.FM_MANAGED,
         )
+        if self._native_webhook_base_url:
+            # Persist a distinct per-connection source credential, never the
+            # FM broker HMAC key. Never replay ambiguous remote configuration.
+            source_token = secrets.token_urlsafe(48)
+            self._repository.store_secret(
+                context, connection.connection_id,
+                secret_name="native_webhook_token",
+                ciphertext=self._vault.encrypt(source_token),
+                source=CredentialSource.FM_MANAGED,
+            )
+            try:
+                self._transport.set_native_webhook(
+                    instance, instance_token=token,
+                    url=self._native_webhook_base_url.rstrip("/") + "/" + connection.connection_id,
+                    auth_token=source_token,
+                )
+            except EvolutionUnavailable:
+                self._repository.record_event(
+                    context, connection.connection_id,
+                    event_type="evolution.native_webhook_ambiguous",
+                )
+                raise
+            self._repository.record_event(
+                context, connection.connection_id,
+                event_type="evolution.native_webhook_configured",
+            )
         self._repository.record_event(
             context, connection.connection_id,
             event_type="evolution.provisioned",
