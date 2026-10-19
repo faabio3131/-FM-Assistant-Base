@@ -15,9 +15,20 @@ def render_consumption_dashboard(data: dict) -> str:
         used = row["consumed_units"]
         limit = row["limit_units"]
         if verified and limit > 0:
-            percent = min(100, round(100 * (limit - remaining) / limit))
-            state = f"{safely(percent)}% da franquia comprometida"
-            value = f"{safely(used)} utilizados · {safely(remaining)} disponíveis"
+            percent = min(100, row["utilization_percent"])
+            alert = row["warning_level"]
+            explanation = {
+                "blocked": "Franquia esgotada. Consulte a FM para renovar ou ampliar o plano.",
+                "critical": "Atenção: franquia próxima do limite.",
+                "warning": "Alerta: franquia acima de 70%.",
+                "normal": "Consumo dentro da franquia.",
+            }[alert]
+            state = f"{safely(percent)}% da franquia comprometida · {safely(explanation)}"
+            value = (
+                f"{safely(used)} utilizados · "
+                f"{safely(row['reserved_units'])} reservados · "
+                f"{safely(remaining)} disponíveis"
+            )
             label = "Consumo confirmado pelo Core"
             progress = '<progress max="100" value="' + str(percent) + '"></progress>'
         else:
