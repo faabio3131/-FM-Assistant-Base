@@ -110,7 +110,25 @@ class PlanConsumptionView:
                 + reading.remaining_units != limit
             ):
                 reading = None
+            committed = (
+                reading.consumed_units + reading.reserved_units
+                if reading is not None else None
+            )
+            utilization = (
+                (100 * committed // limit)
+                if committed is not None and limit > 0 else None
+            )
+            warning_level = (
+                "blocked" if utilization is not None and utilization >= 100
+                else "critical" if utilization is not None and utilization >= 90
+                else "warning" if utilization is not None and utilization >= 70
+                else "normal" if utilization is not None
+                else "unknown"
+            )
             counters.append({
+                "utilization_percent": utilization,
+                "warning_level": warning_level,
+                "committed_units": committed,
                 "resource": resource,
                 "scope": scope,
                 "limit_units": limit,
