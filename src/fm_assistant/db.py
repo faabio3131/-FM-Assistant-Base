@@ -511,6 +511,10 @@ class EvolutionInboundJobORM(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_code: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    outbound_operation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    outbound_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    outbound_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    send_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
