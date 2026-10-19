@@ -129,6 +129,11 @@ class PlanUsageGuard:
     ) -> PlanQuotaPolicy:
         now = at.astimezone(UTC)
         policy = self._policy(request, now)
+        if policy.grants:
+            self._quota.project_signed_grants(
+                tenant_id=request.tenant_id, unit_id=request.unidade_id,
+                revision=policy.revision, grants=policy.grants,
+            )
         self._quota.reserve_bundle(
             needs=self._requirements(request, policy, usage=None),
             request_id=request.request_id, at=now,
