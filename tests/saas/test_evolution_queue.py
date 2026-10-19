@@ -411,3 +411,66 @@ def test_concurrent_outbound_intent_has_single_winner(client, provision_credenti
     winners = [result for result in results if isinstance(result, str) and len(result) == 32]
     assert len(winners) == 1
     assert queue.state(connection_id=cid, message_id=item.message_id) == "sending"
+
+
+def test_lifecycle_snapshot_is_scoped_and_never_claims_delivery(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="trace-001",
+        sender="5511977777777", text="Top secret",
+    )
+    before = queue.operational_snapshot(connection_id=cid)["lifecycle"][0]
+    assert before["state"] == "pending"
+    assert before["received_at"]
+    assert before["send_started_at"] is None
+    item = queue.claim()
+    assert item is not None
+    operation = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    in_flight = queue.operational_snapshot(connection_id=cid)["lifecycle"][0]
+    assert in_flight["state"] == "sending"
+    assert in_flight["outbound_operation_id"] == operation
+    assert in_flight["send_started_at"]
+    assert in_flight["provider_delivery_confirmed"] is False
+    with pytest.raises(RuntimeError, match="evolution_job_state_conflict"):
+        queue.finish(
+            connection_id=cid, message_id=item.message_id,
+            reconciled=False, claim_generation=item.claim_generation,
+        )
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "sending"
+    queue.finish(
+        connection_id=cid, message_id=item.message_id,
+        reconciled=True, claim_generation=item.claim_generation,
+    )
+    pending_review = queue.operational_snapshot(connection_id=cid)["lifecycle"][0]
+    assert pending_review["requires_review"] is True
+    assert "5511977777777" not in str(pending_review)
+    assert "Top secret" not in str(pending_review)
+    queue.acknowledge_reconciliation(
+        connection_id=cid, message_id=item.message_id,
+    )
+    final = queue.operational_snapshot(connection_id=cid)["lifecycle"][0]
+    assert final["state"] == "reviewed"
+    assert final["outbound_status"] == "uncertain"
+    assert final["provider_delivery_confirmed"] is False
+
+
+def test_lifecycle_isolated_by_connection(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    repo = client.app.state.integration_repository
+    other_ctx = TenantContext(
+        tenant_id="other-tenant", unit_id="other-unit", credential_id="test",
+    )
+    other = repo.create_connection(
+        other_ctx, provider=WHATSAPP_EVOLUTION_PROVIDER,
+        config={"instance_name": "fm_" + "b" * 32},
+        status=IntegrationStatus.ACTIVE,
+    )
+    queue.enqueue(
+        connection_id=cid, message_id="isolated-trace",
+        sender="5511999999999", text="Private",
+    )
+    assert queue.operational_snapshot(connection_id=other.connection_id)["lifecycle"] == []
+    assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["message_id"] == "isolated-trace"
