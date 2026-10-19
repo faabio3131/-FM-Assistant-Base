@@ -93,6 +93,7 @@ class QuotaRequirement:
     unit_id: str
     capability: str
     units: int
+    policy_revision: int | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -257,6 +258,9 @@ class QuotaReservations:
         if any(
             not all(_valid_id(x) for x in key) or len(key[2]) > 80
             or type(need.units) is not int or not 0 < need.units <= 2_000_000_000
+            or (need.policy_revision is not None and (
+                type(need.policy_revision) is not int or need.policy_revision < 1
+            ))
             for key, need in zip(keys, needs, strict=True)
         ):
             raise QuotaDenied("core_quota.bundle_invalid")
@@ -269,6 +273,9 @@ class QuotaReservations:
             for need in ordered:
                 scope = (need.tenant_id, need.unit_id, need.capability)
                 policy = self._policy(db, scope)
+                if (need.policy_revision is not None
+                        and policy.revision != need.policy_revision):
+                    raise QuotaDenied("core_quota.policy_revision_mismatch")
                 period = int(now.timestamp()) // policy.window_seconds
                 if db.get(AIQuotaReservationRecord, (*scope, request_id)) is not None:
                     raise QuotaDenied("core_quota.execution_replay_denied")
@@ -320,6 +327,9 @@ class QuotaReservations:
         if any(
             not all(_valid_id(z) for z in key) or len(key[2]) > 80
             or type(item.units) is not int or item.units < 0
+            or (item.policy_revision is not None and (
+                type(item.policy_revision) is not int or item.policy_revision < 1
+            ))
             for key, item in zip(keys, usage, strict=True)
         ):
             raise QuotaDenied("core_quota.bundle_invalid")
@@ -329,8 +339,14 @@ class QuotaReservations:
                 x.tenant_id, x.unit_id, x.capability,
             )):
                 key = (item.tenant_id, item.unit_id, item.capability)
-                self._policy(db, key)
+                policy = self._policy(db, key)
+                if (item.policy_revision is not None
+                        and policy.revision != item.policy_revision):
+                    raise QuotaDenied("core_quota.policy_revision_mismatch")
                 row = db.get(AIQuotaReservationRecord, (*key, request_id))
+                if (row is not None and item.policy_revision is not None
+                        and row.policy_revision != item.policy_revision):
+                    raise QuotaDenied("core_quota.policy_revision_mismatch")
                 if row is None or row.reserved_units < item.units:
                     raise QuotaDenied("core_quota.reservation_unavailable")
                 if row.state == ReservationState.SETTLED:
