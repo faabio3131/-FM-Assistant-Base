@@ -17,6 +17,7 @@ from .credential_vault import CredentialVault
 from .domain import Channel, ConversationStatus, TenantContext
 from .integration import IntegrationStatus
 from .integration_repository import IntegrationRepository
+from .evolution_queue import EvolutionInboundQueue, QueuedInbound
 from .service import AssistantService
 from .whatsapp_repository import WhatsAppInboundRepository
 
@@ -26,6 +27,7 @@ class EvolutionDeliveryResult:
     processed: int = 0
     duplicates: int = 0
     reconcile_required: int = 0
+    queued: int = 0
 
 
 class EvolutionRuntime:
@@ -34,6 +36,7 @@ class EvolutionRuntime:
         inbox: WhatsAppInboundRepository, assistant: AssistantService,
         vault: CredentialVault, transport: EvolutionClient,
         verifier: EvolutionEventVerifier, sender_pepper: str,
+        queue: EvolutionInboundQueue | None = None,
     ) -> None:
         if not sender_pepper:
             raise ValueError("evolution_sender_pepper_required")
@@ -44,6 +47,7 @@ class EvolutionRuntime:
         self._transport = transport
         self._verifier = verifier
         self._pepper = sender_pepper.encode()
+        self._queue = queue
 
     def receive(
         self, *, connection_id: str, raw: bytes,
@@ -107,6 +111,20 @@ class EvolutionRuntime:
         )
         if secret is None:
             raise PermissionError("evolution_connection_unprovisioned")
+        if self._queue is not None:
+            queued = duplicates = 0
+            for item in messages:
+                if self._queue.enqueue(
+                    connection_id=connection_id, message_id=item.message_id,
+                    sender=item.sender, text=item.text,
+                ):
+                    queued += 1
+                else:
+                    duplicates += 1
+            return EvolutionDeliveryResult(
+                processed=0, duplicates=duplicates,
+                reconcile_required=0, queued=queued,
+            )
         processed = duplicates = reconcile = 0
         for item in messages:
             sender_hash = hmac.new(
@@ -156,3 +174,94 @@ class EvolutionRuntime:
             processed=processed, duplicates=duplicates,
             reconcile_required=reconcile,
         )
+
+    def process_pending(self, *, limit: int = 10) -> EvolutionDeliveryResult:
+        """Internal worker batch. No HTTP route or automatic background side effects."""
+        if self._queue is None:
+            raise RuntimeError("evolution_queue_not_configured")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("evolution_worker_limit_invalid")
+        processed = duplicates = reconcile = 0
+        for _ in range(limit):
+            item = self._queue.claim()
+            if item is None:
+                break
+            try:
+                completed = self._process_queued(item)
+                if completed:
+                    processed += 1
+                else:
+                    duplicates += 1
+                self._queue.finish(
+                    connection_id=item.connection_id, message_id=item.message_id,
+                    reconciled=False,
+                )
+            except Exception:  # noqa: BLE001 - quarantine uncertain AI/provider side effects
+                self._queue.finish(
+                    connection_id=item.connection_id, message_id=item.message_id,
+                    reconciled=True, code="evolution_worker_uncertain",
+                )
+                reconcile += 1
+        return EvolutionDeliveryResult(
+            processed=processed, duplicates=duplicates, reconcile_required=reconcile,
+        )
+
+    def _process_queued(self, item: QueuedInbound) -> bool:
+        connection = self._integrations.get_unscoped(item.connection_id)
+        if (
+            connection is None or connection.provider_key != "whatsapp_evolution"
+            or connection.status is not IntegrationStatus.ACTIVE
+        ):
+            raise PermissionError("evolution_connection_inactive")
+        instance = connection.config.get("instance_name")
+        if not isinstance(instance, str):
+            raise PermissionError("evolution_instance_invalid")
+        token = self._integrations.active_secret_ciphertexts(
+            item.connection_id
+        ).get("instance_token")
+        if token is None:
+            raise PermissionError("evolution_instance_secret_unavailable")
+        sender_hash = hmac.new(
+            self._pepper, f"{item.connection_id}:{item.sender}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        if not self._inbox.claim(
+            channel_id=item.connection_id, message_id=item.message_id,
+            sender_hash=sender_hash, message_type="text",
+        ):
+            return False
+        context = TenantContext(
+            tenant_id=connection.tenant_id, unit_id=connection.unit_id,
+            credential_id="channel:" + item.connection_id,
+        )
+        try:
+            conversation = self._assistant.get_or_create_external_conversation(
+                context=context, channel=Channel.WHATSAPP,
+                external_ref=f"wae:{item.connection_id}:{sender_hash}",
+            )
+            if conversation.status is ConversationStatus.HUMAN_HANDOFF:
+                self._inbox.complete(
+                    channel_id=item.connection_id, message_id=item.message_id,
+                    outbound_id=None,
+                )
+            else:
+                reply = self._assistant.send_message(
+                    context=context,
+                    conversation_id=conversation.conversation_id,
+                    content=item.text,
+                )
+                outbound_id = self._transport.send_text(
+                    instance, instance_token=self._vault.decrypt(token),
+                    recipient=item.sender, message=reply.content,
+                )
+                self._inbox.complete(
+                    channel_id=item.connection_id, message_id=item.message_id,
+                    outbound_id=outbound_id,
+                )
+        except Exception:  # noqa: BLE001 - quarantine unknown committed side effects
+            self._inbox.mark_reconcile(
+                channel_id=item.connection_id, message_id=item.message_id,
+                error_code="evolution_worker_uncertain",
+            )
+            raise
+        return True
