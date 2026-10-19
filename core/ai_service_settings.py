@@ -118,8 +118,9 @@ class CoreSettings:
                 self.service_key, self.admin_key, self.assistant_bridge_signing_key,
             ):
                 raise RuntimeError("core_plan_authority_key_reused")
-            from core.ai_signed_plan_authority import AssistantPlanHTTPSFetch
             import httpx
+
+            from core.ai_signed_plan_authority import AssistantPlanHTTPSFetch
 
             with httpx.Client() as verify_client:
                 try:
