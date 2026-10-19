@@ -7,7 +7,7 @@ referencias atuais no momento da execucao. Nenhum segredo e persistido aqui.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Callable, Protocol
 
 from core.ai_circuit_breaker import CircuitDenied, CircuitOutcome
 from core.ai_circuit_state_store import PersistentCircuit
@@ -65,7 +65,9 @@ class ScopedCoreExecutor(ExecutorModeloIA):
     def __init__(
         self, *, routes: tuple[ResolvedCoreRoute, ...], credentials: CoreCredentialResolver,
         circuit: PersistentCircuit | None = None,
+        output_token_cap: int | None = None,
     ) -> None:
+        self._output_token_cap = output_token_cap
         self._routes = {route.route.configuracao_id: route for route in routes}
         self._credentials = credentials
         self._circuit = circuit
@@ -114,6 +116,7 @@ class ScopedCoreExecutor(ExecutorModeloIA):
             base_url=item.base_url,
             api_key=secret.reveal(),
             timeout_seconds=item.timeout_seconds,
+            max_output_tokens=self._output_token_cap,
         )
         if item.adapter not in {"gemini", "openai_compatible"}:
             raise FalhaRotaDefinitiva("core_ai_adapter_invalid")
@@ -198,6 +201,7 @@ class CoreControlPlaneAIRuntime:
     def _router(
         self, *, tenant_id: str, unit_id: str, capability: CapabilityIA,
         capture: list[AIUsageEvent] | None = None,
+        output_token_cap: int | None = None,
     ) -> AIModelRouter:
         resolved = self._control_plane.resolve(
             tenant_id=tenant_id, unit_id=unit_id, capability=capability
@@ -209,6 +213,7 @@ class CoreControlPlaneAIRuntime:
             rotas=tuple(item.route for item in resolved),
             executor=ScopedCoreExecutor(
                 routes=resolved, credentials=self._credentials, circuit=self._circuit,
+                output_token_cap=output_token_cap,
             ),
             metering=(
                 _ScopedMetering(self._metering, capture)
@@ -217,8 +222,8 @@ class CoreControlPlaneAIRuntime:
         )
 
     def _execute_guarded(
-        self, router: AIModelRouter, request: SolicitacaoIA,
-        capture: list[AIUsageEvent] | None = None,
+        self, router_factory: Callable[[int | None], AIModelRouter],
+        request: SolicitacaoIA, capture: list[AIUsageEvent] | None = None,
     ):
         """Opt-in per-request quota admission before ANY provider attempt.
 
@@ -240,6 +245,9 @@ class CoreControlPlaneAIRuntime:
                 at=datetime.now(UTC),
                 for_execution=True,
             )
+        # Construct per-request executor only after quota admission and inject
+        # the licensed provider-level output ceiling (OpenAI/Gemini).
+        router = router_factory(policy.output_bound if policy is not None else None)
         result = router.executar(request)
         if self._plan_usage is not None and policy is not None:
             self._plan_usage.reconcile(
@@ -267,15 +275,16 @@ class CoreControlPlaneAIRuntime:
         messages: tuple[TextMessage, ...],
     ) -> CoreAIResult:
         capture: list[AIUsageEvent] | None = [] if self._plan_usage is not None else None
-        router = self._router(
+        router_factory = lambda output_cap: self._router(
             tenant_id=tenant_id,
             unit_id=unit_id,
             capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
             capture=capture,
+            output_token_cap=output_cap,
         )
         return _result(
             self._execute_guarded(
-                router,
+                router_factory,
                 SolicitacaoIA(
                     tenant_id=tenant_id,
                     unidade_id=unit_id,
@@ -301,15 +310,16 @@ class CoreControlPlaneAIRuntime:
         instruction: str,
     ) -> CoreAIResult:
         capture: list[AIUsageEvent] | None = [] if self._plan_usage is not None else None
-        router = self._router(
+        router_factory = lambda output_cap: self._router(
             tenant_id=tenant_id,
             unit_id=unit_id,
             capability=CapabilityIA.ATENDIMENTO_TRANSCRICAO,
             capture=capture,
+            output_token_cap=output_cap,
         )
         return _result(
             self._execute_guarded(
-                router,
+                router_factory,
                 SolicitacaoIA(
                     tenant_id=tenant_id,
                     unidade_id=unit_id,
