@@ -21,8 +21,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
-from .channels.whatsapp_meta import WhatsAppProviderError
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings
+from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
@@ -31,6 +31,7 @@ from .core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from .credential_vault import FernetCredentialVault
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
+from .evolution_onboarding import EvolutionOnboarding
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .identity import (
     MACHINE_PERMISSIONS,
@@ -44,7 +45,6 @@ from .identity import (
 from .identity_repository import IdentityRepository, SessionPrincipal
 from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
-from .evolution_onboarding import EvolutionOnboarding
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
 from .plan_consumption_dashboard import render_consumption_dashboard
