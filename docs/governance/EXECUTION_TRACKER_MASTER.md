@@ -923,3 +923,9 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 
 
 2026-10-19 — QR resume after local pause: tenant-scoped POST /resume verifies remote Evolution instance state `open` with encrypted per-instance credential before local ACTIVE. If remote closed/unreachable, channel stays disabled; revoked cannot resume. UI and synthetic regression tests added. Version-specific provider contract and real edge-origin authentication remain pending separate gates.
+
+
+2026-10-19 — Evol v2 native source-authenticated ingress / post-logout relink / concurrent workers — internally GREEN
+- Version-family gate `evolution_v2_whatsapp_baileys`, HTTPS per-instance webhook with separate encrypted header secret, independent bearer-header validation at `/webhooks/evolution-native/{connection_id}`, normalized signed FM broker forwarding, native setup fail closed with no uncertain retries. Verified in tests with no real Evolution/WhatsApp accounts. Do not confuse per-instance shared-secret header possession with provider-native cryptographic signature. Exact release pin/homologation remains future.
+- Confirmed logout permits fresh provisioning while retaining revoked historical connection and invalidating previous secret; ambiguous logout/relink cannot auto-promote. Two-thread worker synthetic race asserts at most one claim of one queued message; SQLite database lock yields no claim and cannot initiate duplicate AI/send.
+- Tests certified at SHA `c39ade7ac607cdb120332001721710a4d4cf00f2`: SaaS `39330977685` SUCCESS; F3 PostgreSQL `39330977553` SUCCESS; Core/Assistant `39330977550` SUCCESS. No Command changes, merge, deploy, real credentials, or external homologation. Remaining risk: verify exact API contract/version and proxy TLS/network policy after software is complete; add PostgreSQL fault-injection/concurrency under stress and operational reconciliation.
