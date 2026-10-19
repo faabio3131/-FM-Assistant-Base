@@ -234,3 +234,57 @@ def test_pg_signed_projection_rejects_window_change_with_history(postgres_quota)
         capability="ai.total_tokens", at=NOW,
     )
     assert (usage.reserved_units, usage.remaining_units) == (300, 200)
+
+
+def test_pg_ambiguous_recovery_is_atomic_across_concurrent_workers(postgres_quota):
+    """One human-reviewed provider proof may settle only once, never double-refund."""
+    from core.ai_admin_audit import CommandAdminAuditRecord
+    from core.ai_command_authority import VerifiedCommandAdmin
+
+    store, sessions = postgres_quota
+    store.reserve(
+        tenant_id="tenant-a", unit_id="unit-a", capability="text",
+        request_id="recovery-contended", units=1, at=NOW,
+    )
+    barrier = Barrier(2)
+    evidence = (QuotaRequirement(
+        tenant_id="tenant-a", unit_id="unit-a", capability="text",
+        units=0, policy_revision=1,
+    ),)
+
+    def resolve(jti: str) -> str:
+        principal = VerifiedCommandAdmin(
+            user_id="platform-human", session_id="session",
+            token_id=jti, issued_at=int(NOW.timestamp()) - 1,
+            expires_at=int(NOW.timestamp()) + 90,
+            step_up_at=int(NOW.timestamp()) - 1,
+            permissions=frozenset({"core.ai.admin.mutate"}),
+        )
+        barrier.wait(timeout=8)
+        try:
+            store.reconcile_ambiguous_bundle(
+                usage=evidence, request_id="recovery-contended",
+                principal=principal, evidence_digest="b" * 64,
+                evidence_kind="provider_no_charge_confirmed", at=NOW,
+            )
+            return "resolved"
+        except QuotaDenied:
+            return "denied"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(resolve, "recovery-token-1")
+        b = pool.submit(resolve, "recovery-token-2")
+        assert sorted([a.result(timeout=20), b.result(timeout=20)]) == [
+            "denied", "resolved",
+        ]
+    with sessions() as db:
+        entry = db.get(
+            AIQuotaReservationRecord,
+            ("tenant-a", "unit-a", "text", "recovery-contended"),
+        )
+        assert entry.state == "settled"
+        assert entry.consumed_units == 0
+        audits = db.scalars(select(CommandAdminAuditRecord).where(
+            CommandAdminAuditRecord.resource_id == "tenant-a:recovery-contended",
+        )).all()
+        assert len(audits) == 1
