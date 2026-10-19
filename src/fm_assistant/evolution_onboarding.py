@@ -70,6 +70,28 @@ class EvolutionOnboarding:
         """Read-only tenant/unit scoped QR integration for customer onboarding."""
         return self._repository.latest_for_provider(context, self.PROVIDER)
 
+    def pause(self, context: TenantContext, connection_id: str) -> IntegrationConnection:
+        """Block local inbound/outbound without claiming remote WhatsApp logout.
+
+        Paused instances require a separate governed recovery procedure;
+        an incoming 'open' event must NEVER reactivate them.
+        """
+        connection = self._repository.get(context, connection_id)
+        if connection is None or connection.provider_key != self.PROVIDER:
+            raise LookupError("evolution_connection_not_found")
+        if connection.status is IntegrationStatus.REVOKED:
+            raise RuntimeError("evolution_connection_revoked")
+        if connection.status is IntegrationStatus.DISABLED:
+            return connection
+        updated = self._repository.update_connection(
+            context, connection_id, status=IntegrationStatus.DISABLED,
+            bump_revision=True,
+        )
+        self._repository.record_event(
+            context, connection_id, event_type="evolution.paused_local",
+        )
+        return updated
+
     def quarantine_stale(
         self, context: TenantContext, *, connection_id: str,
         inbox: WhatsAppInboundRepository, older_than_seconds: int = 300,
