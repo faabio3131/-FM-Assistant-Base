@@ -129,6 +129,7 @@ class IntegrationRepository:
                     IntegrationConnectionORM.tenant_id == context.tenant_id,
                     IntegrationConnectionORM.unit_id == context.unit_id,
                     IntegrationConnectionORM.provider_key == "whatsapp_evolution",
+                    IntegrationConnectionORM.status != IntegrationStatus.REVOKED.value,
                 ).limit(1))
                 if existing is not None:
                     raise RuntimeError("evolution_existing_connection_requires_review")
