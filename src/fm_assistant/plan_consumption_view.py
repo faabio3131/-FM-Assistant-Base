@@ -23,12 +23,17 @@ class MeterReading:
     reserved_units: int
     remaining_units: int
     observed_at: datetime
+    policy_revision: int
+    limit_units: int
+    window_seconds: int
 
     def __post_init__(self) -> None:
         if (
             any(type(v) is not int or v < 0 for v in (
                 self.consumed_units, self.reserved_units, self.remaining_units,
             ))
+            or self.policy_revision < 1 or self.limit_units < 1
+            or self.window_seconds < 1
             or self.observed_at.tzinfo is None
             or self.observed_at.utcoffset() is None
         ):
@@ -38,14 +43,16 @@ class MeterReading:
 class TrustedUsageReader(Protocol):
     def read(
         self, *, tenant_id: str, unit_id: str, metric: str,
-        scope: str, at: datetime,
+        scope: str, at: datetime, policy_revision: int,
+        limit_units: int, window_seconds: int,
     ) -> MeterReading | None: ...
 
 
 class UnavailableUsageReader:
     def read(
         self, *, tenant_id: str, unit_id: str, metric: str,
-        scope: str, at: datetime,
+        scope: str, at: datetime, policy_revision: int,
+        limit_units: int, window_seconds: int,
     ) -> None:
         return None
 
@@ -91,13 +98,18 @@ class PlanConsumptionView:
             reading = self._reader.read(
                 tenant_id=tenant_id, unit_id=unit_id,
                 metric=resource, scope=scope, at=now,
+                policy_revision=ref.revision,
+                limit_units=limit, window_seconds=period_seconds,
             )
-            # Missing observation is unknown, never free/replenished capacity.
+            # A mismatch is stale/unknown, never evidence of available credit.
             if reading is not None and (
-                reading.consumed_units + reading.reserved_units
-                + reading.remaining_units > limit
+                reading.policy_revision != ref.revision
+                or reading.limit_units != limit
+                or reading.window_seconds != period_seconds
+                or reading.consumed_units + reading.reserved_units
+                + reading.remaining_units != limit
             ):
-                raise ValueError("plan.usage_inconsistent")
+                reading = None
             counters.append({
                 "resource": resource,
                 "scope": scope,
