@@ -30,7 +30,8 @@ class PlanQuotaPolicy:
     def __post_init__(self) -> None:
         if (
             not self.tenant_id or not self.unit_id or not self.plan_code
-            or self.revision < 1 or self.valid_until.tzinfo is None
+            or type(self.revision) is not int or self.revision < 1
+            or self.valid_until.tzinfo is None
             or self.valid_until.utcoffset() is None
             or type(self.input_bound) is not int or self.input_bound <= 0
             or type(self.output_bound) is not int or self.output_bound <= 0
@@ -137,6 +138,11 @@ class PlanUsageGuard:
             or event.input_tokens is None
             or event.output_tokens is None
             or event.cached_tokens is None
+            or any(
+                type(v) is not int or v < 0
+                for v in (event.input_tokens, event.output_tokens, event.cached_tokens)
+            )
+            or event.cached_tokens > event.input_tokens
             for event in events
         ):
             return False
