@@ -92,3 +92,27 @@ não impedem a construção.
 **Classificação final:** F3/F9 `BUILD_IN_PROGRESS`; F4 ainda
 `NOT_STARTED` até conclusão de código F3. Não declarar funcionalidade
 comercial completa nem operação real.
+
+## Avanço interno adicional — alertas e projeção canônica de franquias
+
+- `PlanConsumptionView` calcula `committed_units` somando consumo
+  confirmado e reservas pendentes, com `utilization_percent` e níveis
+  `normal`, `warning` (>=70%), `critical` (>=90%) e `blocked` (>=100%).
+  Leitura indisponível gera `unknown`, sem fabricar saldo.
+- Painel do cliente apresenta consumo + reservas, alerta graduado e
+  mantém confidenciais preços de providers e custos internos da FM.
+  HTML trata dados como texto escapado, sem executar marcações do cliente.
+- `LicensedQuotaManifestService` fornece uma projeção **somente leitura**
+  de todos os recursos/regras de uma revisão de plano efetivamente fixada
+  à licença ativa, validando tenant/unidade, revisão, prazo e presença
+  obrigatória dos limites de requests e tokens. Mudança de status da
+  assinatura para suspensa interrompe a emissão de manifestos.
+- O manifesto **não deve ser consumido diretamente da entrada do
+  navegador**: seu transporte Assistant→Core ainda necessita assinatura,
+  autorização, TTL, versão monotônica e revogação que falhe fechada.
+- Testes sintéticos: tenant isolado, revisão imutável, assinatura
+  suspensa, mensagens de alerta e desconhecidos conservadores.
+
+**Status:** funcionalidades adicionais implementadas; gates obrigatórios
+precisam estar verdes no HEAD atualizado antes de declaração de
+certificação. Não ativou provedores, migração produtiva ou deploy.
