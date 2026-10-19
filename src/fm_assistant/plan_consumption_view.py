@@ -6,7 +6,7 @@ unknown usage is never represented as zero.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
