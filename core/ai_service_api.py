@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import httpx
-
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,11 +19,11 @@ from core.ai_assistant_credential_gateway import AssistantSignedCredentialGatewa
 from core.ai_control_plane import ControlPlaneError
 from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_quota_store import QuotaDenied, QuotaReservations
-from core.ai_signed_plan_authority import AssistantPlanHTTPSFetch, SignedAssistantPlanAuthority
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
 from core.ai_service_contracts import CoreAIResult, TextMessage
 from core.ai_service_runtime import CoreAIRuntime
 from core.ai_service_settings import CoreSettings, load_settings
+from core.ai_signed_plan_authority import AssistantPlanHTTPSFetch, SignedAssistantPlanAuthority
 from core.seguranca.erros import ReferenciaSegredoInvalida, SegredoAusente
 
 
