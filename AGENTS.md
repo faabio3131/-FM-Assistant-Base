@@ -640,3 +640,11 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 ## Corporate WhatsApp QR display cap (2026-10-19)
 - Approved by FM: default 45 seconds. Implemented customer UI fail-safe: hide unchanged QR after 45s from first display (not reset by 8s polling); show a changed QR as new. Verified against synthetic CI on functional commit `bd38b0f5ba8c7dd7a495273bd3327c1d0082fbb3` (Assistant gates all 3 SUCCESS).
 - Central policy authoring in actual FM Command `faabio3131/FM-CONTROL-CENTER` PR #90: protected setting, revision, audit, migration, UI. **Signed dynamic publication/consumption across Command→Assistant not implemented/certified yet; current Assistant default remains 45s.** Provider expiration must override if shorter. No merge/deploy/real VPS.
+
+
+## WhatsApp QR — stranded inbound recovery (2026-10-19)
+- Implemented internal-only `WhatsAppInboundRepository.quarantine_stale_processing`: bounded 1..500 batch, older_than timestamp required, PostgreSQL `SKIP LOCKED`, conditional processing-state update, one transaction. It changes stale `processing` to `reconcile_required` and never retries provider, AI, charge, or message delivery. Existing duplicate webhook remains denied by inbox ledger.
+- `EvolutionOnboarding.quarantine_stale` enforces exact tenant+unit+connection provider scoping and approved cutoff window (60..86400 seconds). No public recovery endpoint, no external secrets or DB migration.
+- New tests `tests/saas/test_evolution_recovery.py` cover tenant isolation, quarantine once, replay avoidance and invalid recovery windows.
+- Functionally certified SHA `2f7700bdb2bc7cdfb835d02baa2fd172c4dac86b`: SaaS Foundation CI run `39297829882` SUCCESS; F3 PostgreSQL Core Bridge Security Gate `39297829871` SUCCESS; Core Assistant Authenticated Bridge Contract `39297829914` SUCCESS.
+- Command architecture review is pending by user. Do not expand/edit Command universal SaaS configuration ingestion until reviewed; keep VendeAtendeIA integration adapter separate. Still pending: authenticated native webhook broker, durable queued inbox/outbox and worker, managed reconnection/revoke, pinned provider API release, stronger lifecycle/order guard and independent security audit. No merge/deploy or external homologation.
