@@ -158,3 +158,43 @@ def test_http_adapter_requires_https_and_trusted_bounds():
         )
         with pytest.raises(QuotaDenied, match="bounds_invalid"):
             resolve(fetch=port)
+
+
+def test_commercial_core_requires_signed_plan_authority():
+    from core.ai_service_settings import CoreEnvironment, CoreSettings
+
+    kwargs = dict(
+        environment=CoreEnvironment.STAGING, service_key="s" * 40,
+        admin_key="a" * 40, routes=(),
+        control_plane_database_url="postgresql://synthetic:synthetic@db.test/core",
+    )
+    with pytest.raises(RuntimeError, match="plan_authority_required"):
+        CoreSettings(**kwargs).validate()
+
+    valid = CoreSettings(
+        **kwargs, assistant_plan_url="https://assistant.example.test",
+        assistant_plan_signing_key="p" * 40,
+    ).validate()
+    assert valid.assistant_plan_url == "https://assistant.example.test"
+    for extra in (
+        {"assistant_plan_signing_key": "s" * 40},
+        {"assistant_plan_url": "http://assistant.example.test"},
+    ):
+        override = {
+            "assistant_plan_url": "https://assistant.example.test",
+            "assistant_plan_signing_key": "p" * 40,
+            **extra,
+        }
+        with pytest.raises(RuntimeError):
+            CoreSettings(**kwargs, **override).validate()
+
+
+def test_partial_core_plan_authority_configuration_is_rejected():
+    from core.ai_service_settings import CoreEnvironment, CoreSettings
+
+    with pytest.raises(RuntimeError, match="plan_authority_config_incomplete"):
+        CoreSettings(
+            environment=CoreEnvironment.TEST, service_key="test-key",
+            routes=(), control_plane_database_url="sqlite:///synthetic.db",
+            assistant_plan_url="https://assistant.example.test",
+        ).validate()
