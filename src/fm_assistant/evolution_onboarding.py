@@ -64,6 +64,10 @@ class EvolutionOnboarding:
         )
         return connection
 
+    def current(self, context: TenantContext) -> IntegrationConnection | None:
+        """Read-only tenant/unit scoped QR integration for customer onboarding."""
+        return self._repository.latest_for_provider(context, self.PROVIDER)
+
     def qr(self, context: TenantContext, connection_id: str) -> QRConnection:
         connection = self._repository.get(context, connection_id)
         if connection is None or connection.provider_key != self.PROVIDER:
