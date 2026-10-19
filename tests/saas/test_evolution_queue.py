@@ -189,3 +189,47 @@ def test_operator_reconciliation_api_scope(client, provision_credential):
     assert client.post(review,headers={"Authorization":f"Bearer {foreign_key}"}).status_code == 404
     assert client.post(review,headers={"Authorization":f"Bearer {own_key}"}).status_code == 200
     assert client.post(review,headers={"Authorization":f"Bearer {own_key}"}).status_code == 409
+
+
+def test_worker_claim_freshness_refuses_stale_and_quarantined(
+    client, provision_credential,
+):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="expired-lease",
+        sender="5511999999999", text="Never auto-resend",
+    )
+    item = queue.claim()
+    assert item is not None
+    queue.assert_claim_current(connection_id=cid, message_id=item.message_id)
+    engine = create_engine(client.app.state.settings.database_url)
+    with engine.begin() as db:
+        db.execute(text(
+            "UPDATE assistant_evolution_inbound_jobs SET claimed_at=:old "
+            "WHERE connection_id=:cid AND message_id=:mid"
+        ), {
+            "old": (datetime.now(UTC)-timedelta(minutes=10)).strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            ), "cid": cid, "mid": item.message_id,
+        })
+    engine.dispose()
+    with pytest.raises(RuntimeError, match="evolution_claim_expired_or_revoked"):
+        queue.assert_claim_current(connection_id=cid, message_id=item.message_id)
+    assert queue.quarantine_stale() == 1
+    with pytest.raises(RuntimeError, match="evolution_claim_expired_or_revoked"):
+        queue.assert_claim_current(connection_id=cid, message_id=item.message_id)
+    assert queue.claim() is None
+
+
+def test_queue_operational_snapshot_includes_age_without_private_data(
+    client, provision_credential,
+):
+    cid, queue = _setup(client, provision_credential)
+    assert queue.enqueue(
+        connection_id=cid, message_id="age-sample",
+        sender="5511988888888", text="Private payload sentinel",
+    )
+    overview = queue.operational_snapshot(connection_id=cid)
+    assert overview["oldest_age_seconds"]["pending"] >= 0
+    assert "5511988888888" not in str(overview)
+    assert "Private payload sentinel" not in str(overview)
