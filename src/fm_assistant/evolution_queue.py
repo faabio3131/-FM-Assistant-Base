@@ -73,11 +73,13 @@ class EvolutionInboundQueue:
                     update(EvolutionInboundJobORM)
                     .where(
                         EvolutionInboundJobORM.connection_id == job.connection_id,
-                    EvolutionInboundJobORM.message_id == job.message_id,
-                    EvolutionInboundJobORM.state == "pending",
-                )
-                    .values(state="processing", claimed_at=now,
-                            updated_at=now, attempt_count=job.attempt_count + 1)
+                        EvolutionInboundJobORM.message_id == job.message_id,
+                        EvolutionInboundJobORM.state == "pending",
+                    )
+                    .values(
+                        state="processing", claimed_at=now,
+                        updated_at=now, attempt_count=job.attempt_count + 1,
+                    )
                 )
                 if result.rowcount != 1:
                     session.rollback()
