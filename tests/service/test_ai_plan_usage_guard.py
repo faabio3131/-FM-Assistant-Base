@@ -130,8 +130,12 @@ def test_cross_tenant_projection_and_expired_license_denied(guarded):
 
 def test_fallback_totals_count_both_attempts_and_cache_not_double_counted(guarded):
     guard, store = guarded
+    with store._sessions.begin() as db:
+        db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.total_tokens")).limit_units = 600
+        db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.input_tokens")).limit_units = 400
+        db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.output_tokens")).limit_units = 400
     req = request()
-    policy = guard.admit(request=req, at=NOW)
+    policy = guard.admit(request=req, at=NOW, attempt_budget=2)
     assert guard.reconcile(request=req, policy=policy, events=(
         event(req,inp=20,out=10,cached=5),
         event(req,inp=25,out=15,cached=10,fallback=True),
