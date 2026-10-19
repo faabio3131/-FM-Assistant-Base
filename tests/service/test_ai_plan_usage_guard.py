@@ -180,3 +180,29 @@ def test_boolean_plan_revision_is_not_valid_policy():
             output_bound=80,
             scopes=(("ai.requests", "tenant"), ("ai.total_tokens", "tenant")),
         )
+
+
+def test_stale_licensed_revision_cannot_reserve_under_new_policy(guarded):
+    guard, store = guarded
+    with store._sessions.begin() as db:
+        policy = db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.requests"))
+        policy.revision = 2
+    with pytest.raises(QuotaDenied, match="policy_revision_mismatch"):
+        guard.admit(request=request(), at=NOW)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.requests", at=NOW,
+    ).reserved_units == 0
+
+
+def test_policy_revision_change_blocks_unsafe_settlement(guarded):
+    guard, store = guarded
+    req = request()
+    policy = guard.admit(request=req, at=NOW)
+    with store._sessions.begin() as db:
+        row = db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.requests"))
+        row.revision = 2
+    with pytest.raises(QuotaDenied, match="policy_revision_mismatch"):
+        guard.reconcile(request=req, policy=policy, events=(event(req),))
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 180
