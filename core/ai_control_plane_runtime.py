@@ -259,16 +259,6 @@ class CoreControlPlaneAIRuntime:
                 at=datetime.now(UTC),
                 for_execution=True,
             )
-        if policy is not None and isinstance(request.conteudo, TextRequestContent):
-            # Conservative byte-envelope preflight, not a provider tokenizer.
-            # Reject oversized prompts before credentials or paid API traffic.
-            prompt = request.conteudo.system_prompt
-            prompt_bytes = len(prompt.encode("utf-8"))
-            for message in request.conteudo.messages:
-                prompt_bytes += len(message.content.encode("utf-8"))
-                prompt_bytes += len(message.role.encode("utf-8"))
-            if prompt_bytes > policy.input_bound:
-                raise QuotaDenied("core_plan.input_envelope_exceeded")
         # Construct per-request executor only after quota admission and inject
         # the licensed provider-level output ceiling (OpenAI/Gemini).
         router = router_factory(
