@@ -100,10 +100,10 @@ def create_app(
                     secret=secret,
                     fetch=AssistantPlanHTTPSFetch(
                         origin=cfg.assistant_plan_url, secret=secret,
-                        bounds=lambda capability: (
-                            (8192, 2048) if capability == "atendimento_transcricao"
-                            else (4096, 2048)
-                        ),
+                        bounds=lambda capability: {
+                            name: (inp, out)
+                            for name, inp, out in cfg.assistant_plan_bounds
+                        }[capability],
                         client=policy_client,
                     ),
                 )
