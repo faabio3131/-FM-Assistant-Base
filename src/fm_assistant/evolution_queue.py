@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from .credential_vault import CredentialVault
 from .db import EvolutionInboundJobORM
@@ -68,20 +68,26 @@ class EvolutionInboundQueue:
             if job is None:
                 return None
             now = datetime.now(UTC)
-            result = session.execute(
-                update(EvolutionInboundJobORM)
-                .where(
-                    EvolutionInboundJobORM.connection_id == job.connection_id,
+            try:
+                result = session.execute(
+                    update(EvolutionInboundJobORM)
+                    .where(
+                        EvolutionInboundJobORM.connection_id == job.connection_id,
                     EvolutionInboundJobORM.message_id == job.message_id,
                     EvolutionInboundJobORM.state == "pending",
                 )
-                .values(state="processing", claimed_at=now,
-                        updated_at=now, attempt_count=job.attempt_count + 1)
-            )
-            if result.rowcount != 1:
+                    .values(state="processing", claimed_at=now,
+                            updated_at=now, attempt_count=job.attempt_count + 1)
+                )
+                if result.rowcount != 1:
+                    session.rollback()
+                    return None
+                session.commit()
+            except OperationalError:
+                # SQLite may detect competing snapshots as database-busy.
+                # Never infer a successful claim or execute AI in that case.
                 session.rollback()
                 return None
-            session.commit()
             # Invalid ciphertext is quarantined rather than exposed or replayed.
             try:
                 data = json.loads(self._vault.decrypt(job.ciphertext))
