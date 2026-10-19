@@ -837,3 +837,10 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 - All referenced checks use synthetic credentials/disposable databases/mocked HTTPS or internal contracts. No real provider/Vault/production network tested.
 - NEXT INTERNAL BUILD: trusted composition of `SignedAssistantPlanAuthority` into mandatory persistent Core runtime; signed versioned/revocable quota-policy projection into PostgreSQL, bounded provider input/output/attempt accounting, hard stops and immediate revocation checks, cross-runtime E2E and independent security review. Do not describe the contract as automatic production enforcement.
 - F3 `BUILD_IN_PROGRESS`; F4 `NOT_STARTED`; external F13 homologation `EXTERNAL_HOMOLOGATION_DEFERRED`. Kordena read-only; Command V2 untouched; no deploy, non-disposable migration or merge.
+
+
+2026-10-19 — F3/F9 COMMERCIAL BOOTSTRAP PLAN ENFORCEMENT SUBGATE
+- FM Core PR #1 `feat/ai-service-v1` functional SHA `0569a451d3d6d27448a0e25d10f9856f10acdd59`, CI `39193067739` SUCCESS, PostgreSQL quota `39193067850` SUCCESS. Commercial staging/production settings now mandate separate signed Assistant authority URL/key; API runtime composes that read-through authority into persistent Core quota guard for text and audio.
+- FM Assistant PR #1 remains at previous certified `69689c1570ffc64e53e2ccf56ea6c1f74ab907eb` (3/3 gates green); the existing signed license grant route is not replaced or duplicated. No deploy or production secrets.
+- NEXT: signed complete allowance/limit projection + revision/atomic reservations in Core PostgreSQL, provider hard token caps and reliable reconciliation, tests for suspension/rotation/no-policy/over-quota; finish internal integration before any external homologation.
+- STATUS: F3 `BUILD_IN_PROGRESS`, PRs DRAFT; no merge/deploy; do not touch Kordena or `fm-command-v2`.
