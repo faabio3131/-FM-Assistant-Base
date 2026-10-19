@@ -86,7 +86,10 @@ class EvolutionClient:
 
     def connect(self, instance: str) -> str | None:
         data = self._request("GET", "/instance/connect/" + self._instance(instance))
-        if data.get("status") in {"connected", "open"} or data.get("instance", {}).get("state") == "open":
+        instance_state = data.get("instance")
+        if data.get("status") in {"connected", "open"} or (
+            isinstance(instance_state, dict) and instance_state.get("state") == "open"
+        ):
             return None
         qr = data.get("base64")
         if qr is None and isinstance(data.get("qrcode"), dict):
