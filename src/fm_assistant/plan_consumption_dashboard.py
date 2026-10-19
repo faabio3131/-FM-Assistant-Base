@@ -19,8 +19,9 @@ def render_consumption_dashboard(data: dict) -> str:
             state = f"{safely(percent)}% da franquia comprometida"
             value = f"{safely(used)} utilizados · {safely(remaining)} disponíveis"
             label = "Consumo confirmado pelo Core"
+            progress = '<progress max="100" value="' + str(percent) + '"></progress>'
         else:
-            percent = 0
+            progress = ""
             state = "Aguardando telemetria autenticada"
             value = "Saldo não verificado"
             label = "O saldo não pode ser presumido como zero"
@@ -30,7 +31,7 @@ def render_consumption_dashboard(data: dict) -> str:
             '<div class="metric-count">Franquia: ' + safely(limit) + '</div>'
             '<div class="metric-count">' + value + '</div>'
             '<div class="metric-info">' + state + '</div>'
-            '<progress max="100" value="' + str(percent) + '"></progress>'
+            progress
             '<p class="quiet">' + label + '</p>'
             '</section>'
         )
