@@ -235,7 +235,7 @@ def test_native_webhook_backpressure_returns_retryable_429(client, provision_cre
 
 
 def test_worker_provider_failure_quarantined_without_second_send(client, provision_credential):
-    owner, _other, hooks, names, repo, queue = _prepare(client, provision_credential)
+    owner, _other, hooks, names, _repo, queue = _prepare(client, provision_credential)
     headers = {"Authorization": "Bearer " + owner}
     created = client.post("/v1/channels/whatsapp/qr/provision", headers=headers)
     assert created.status_code == 200
