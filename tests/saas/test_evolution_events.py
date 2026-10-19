@@ -9,7 +9,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from fm_assistant.channels.evolution_events import (
-    EvolutionEventDenied, EvolutionEventVerifier,
+    EvolutionEventDenied,
+    EvolutionEventVerifier,
 )
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
