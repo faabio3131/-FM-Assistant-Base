@@ -354,3 +354,9 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Testes de API exigem serviço autenticado, saldo real derivado de reservas/settlements e negativa para tenant não configurado. Core CI + PostgreSQL16 obrigatórios.
 - Assistant valida revisão, franquia, janela, freshness e escopo antes de exibir saldo ao cliente. Custos de modelo são dados internos FM, não entram no painel do assinante.
 - A leitura é incremental, NÃO completa o control-plane de políticas ou ativação obrigatória da quota no runtime. Construir projeção assinada Assistant→Core, hard-stop e billing/eventos; não esperar homologação externa.
+
+## F3/F9 — PONTO DE COMPOSIÇÃO DE LIMITES POR PLANO (2026-10-18)
+- `build_persistent_core(..., plan_authority=...)` agora permite injetar explicitamente autoridade governada de quotas do Assistant. A inicialização nunca deve provisionar quotas, consultar provedores nem gastar tokens; o integrador confiável fornece a autoridade.
+- Com `plan_authority` ausente, a compatibilidade anterior permanece, mas **isto não constitui lançamento comercial**. Antes de disponibilizar o VendeAtendeIA ao público, a composição deve exigir de modo irremovível policy assinada/atualizada, revogação, reserva atômica pré-provider, parâmetros de tokens e testes E2E.
+- Consulta de consumo do Assistant já deriva avisos de uso (confirmado + reservado) e manifesto de licença ativo; não usar snapshot de dashboard como fonte de verdade de autorização.
+- Estado: etapa interna incremental, F3 GLOBAL BUILD_IN_PROGRESS, homologação externa adiada. Gates no SHA final continuam necessários; sem merge/deploy/credenciais reais.
