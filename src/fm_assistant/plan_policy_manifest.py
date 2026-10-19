@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -101,9 +102,12 @@ class LicensedQuotaManifestService:
 def issue_core_plan_grant(
     *, manifest: LicensedQuotaManifest, capability: str,
     input_bound: int, output_bound: int, secret: bytes, now: datetime,
+    challenge: str,
 ) -> tuple[bytes, str]:
     if (
-        not isinstance(secret, bytes) or len(secret) < 32
+        not isinstance(challenge, str)
+        or re.fullmatch(r"[A-Za-z0-9_-]{22,96}", challenge) is None
+        or not isinstance(secret, bytes) or len(secret) < 32
         or now.tzinfo is None or now.utcoffset() is None
         or manifest.licensed_until.tzinfo is None
         or manifest.licensed_until.utcoffset() is None
@@ -141,6 +145,7 @@ def issue_core_plan_grant(
         "tenant_id": manifest.tenant_id,
         "unit_id": manifest.unit_id,
         "capability": capability,
+        "challenge": challenge,
         "plan_code": manifest.plan_code,
         "revision": manifest.revision,
         "expires_at": int(expiry.timestamp()),
