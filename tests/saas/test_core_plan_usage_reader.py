@@ -10,12 +10,13 @@ from fm_assistant.core_plan_usage_reader import CoreQuotaUsageHTTPReader
 
 
 def _response(*, now: datetime, **overrides):
-    result = dict(
-        tenant_id="tenant-a", unit_id="unit-a", resource="ai.total_tokens",
-        scope="tenant", policy_revision=3, limit_units=1000,
-        window_seconds=86400, consumed_units=300, reserved_units=200,
-        remaining_units=500, observed_at=now.isoformat(),
-    )
+    result = {
+        "tenant_id": "tenant-a", "unit_id": "unit-a",
+        "resource": "ai.total_tokens", "scope": "tenant",
+        "policy_revision": 3, "limit_units": 1000, "window_seconds": 86400,
+        "consumed_units": 300, "reserved_units": 200,
+        "remaining_units": 500, "observed_at": now.isoformat(),
+    }
     result.update(overrides)
     return httpx.Response(200, json=result, request=httpx.Request(
         "GET", "https://core.invalid/v1/plan/usage",
