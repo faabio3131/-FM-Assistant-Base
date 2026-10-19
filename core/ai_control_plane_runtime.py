@@ -13,9 +13,11 @@ from core.ai_circuit_breaker import CircuitDenied, CircuitOutcome
 from core.ai_circuit_state_store import PersistentCircuit
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneError, ResolvedCoreRoute
 from core.ai_providers import GeminiExecutor, OpenAICompatibleExecutor
+from core.ai_plan_usage_guard import PlanUsageGuard
 from core.ai_quota_store import QuotaReservations
 from core.ai_router import (
     AIModelRouter,
+    AIUsageEvent,
     CapabilityIA,
     ConteudoAudioIA,
     ExecutorModeloIA,
@@ -159,6 +161,18 @@ class ScopedCoreExecutor(ExecutorModeloIA):
         return response
 
 
+class _ScopedMetering(MedidorUsoIA):
+    """Per-request usage capture with the persistent meter remaining canonical."""
+
+    def __init__(self, inner: MedidorUsoIA, captured: list[AIUsageEvent]) -> None:
+        self._inner = inner
+        self._captured = captured
+
+    def registrar(self, evento: AIUsageEvent) -> None:
+        self._inner.registrar(evento)
+        self._captured.append(evento)
+
+
 class CoreControlPlaneAIRuntime:
     """Mantem os contratos da API sem duplicar o motor de roteamento."""
 
@@ -170,15 +184,20 @@ class CoreControlPlaneAIRuntime:
         metering: MedidorUsoIA | None = None,
         quota: QuotaReservations | None = None,
         circuit: PersistentCircuit | None = None,
+        plan_usage: PlanUsageGuard | None = None,
     ) -> None:
+        if quota is not None and plan_usage is not None:
+            raise ValueError("core_plan.ambiguous_quota_guards")
         self._quota = quota
+        self._plan_usage = plan_usage
         self._circuit = circuit
         self._control_plane = control_plane
         self._credentials = credentials
         self._metering = metering or MedidorUsoIAEmMemoria()
 
     def _router(
-        self, *, tenant_id: str, unit_id: str, capability: CapabilityIA
+        self, *, tenant_id: str, unit_id: str, capability: CapabilityIA,
+        capture: list[AIUsageEvent] | None = None,
     ) -> AIModelRouter:
         resolved = self._control_plane.resolve(
             tenant_id=tenant_id, unit_id=unit_id, capability=capability
@@ -191,15 +210,26 @@ class CoreControlPlaneAIRuntime:
             executor=ScopedCoreExecutor(
                 routes=resolved, credentials=self._credentials, circuit=self._circuit,
             ),
-            metering=self._metering,
+            metering=(
+                _ScopedMetering(self._metering, capture)
+                if capture is not None else self._metering
+            ),
         )
 
-    def _execute_guarded(self, router: AIModelRouter, request: SolicitacaoIA):
+    def _execute_guarded(
+        self, router: AIModelRouter, request: SolicitacaoIA,
+        capture: list[AIUsageEvent] | None = None,
+    ):
         """Opt-in per-request quota admission before ANY provider attempt.
 
         One request unit is reserved for the entire router/fallback chain.
         On unknown outcome do not refund or retry automatically.
         """
+        policy = None
+        if self._plan_usage is not None:
+            policy = self._plan_usage.admit(
+                request=request, at=datetime.now(UTC),
+            )
         if self._quota is not None:
             self._quota.reserve(
                 tenant_id=request.tenant_id,
@@ -211,6 +241,11 @@ class CoreControlPlaneAIRuntime:
                 for_execution=True,
             )
         result = router.executar(request)
+        if self._plan_usage is not None and policy is not None:
+            self._plan_usage.reconcile(
+                request=request, policy=policy,
+                events=tuple(capture or ()),
+            )
         if self._quota is not None:
             self._quota.settle(
                 tenant_id=request.tenant_id,
@@ -248,7 +283,7 @@ class CoreControlPlaneAIRuntime:
                     conteudo=TextRequestContent(
                         system_prompt=system_prompt, messages=messages
                     ),
-                )
+                ), capture=capture,
             )
         )
 
@@ -280,6 +315,6 @@ class CoreControlPlaneAIRuntime:
                     conteudo=ConteudoAudioIA(
                         audio=audio, mime_type=mime_type, instrucao=instruction
                     ),
-                )
+                ), capture=capture,
             )
         )
