@@ -79,6 +79,7 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
  });
  refresh.addEventListener("click",sync);
  sync();
+ setInterval(() => { if (!document.hidden && connection) sync(); }, 8000);
 })();
 </script></body></html>"""
 
