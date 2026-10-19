@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import secrets
 from datetime import UTC, datetime
 from typing import Callable
 
@@ -38,7 +39,7 @@ class SignedAssistantPlanAuthority:
 
     def __init__(
         self, *, secret: bytes,
-        fetch: Callable[[str, str, str], tuple[bytes, str]],
+        fetch: Callable[[str, str, str, str], tuple[bytes, str]],
     ) -> None:
         if not isinstance(secret, bytes) or len(secret) < 32:
             raise ValueError("core_plan.signer_unavailable")
@@ -55,8 +56,9 @@ class SignedAssistantPlanAuthority:
             or now.tzinfo is None or now.utcoffset() is None
         ):
             raise QuotaDenied("core_plan.scope_invalid")
+        challenge = secrets.token_urlsafe(24)
         try:
-            raw, signature = self._fetch(tenant_id, unit_id, capability)
+            raw, signature = self._fetch(tenant_id, unit_id, capability, challenge)
             if (
                 not isinstance(raw, bytes) or len(raw) > 8192
                 or not isinstance(signature, str) or len(signature) != 64
@@ -67,7 +69,7 @@ class SignedAssistantPlanAuthority:
                 raise QuotaDenied("core_plan.signature_invalid")
             obj = json.loads(raw)
             if not isinstance(obj, dict) or set(obj) != {
-                "tenant_id", "unit_id", "capability", "plan_code", "revision",
+                "tenant_id", "unit_id", "capability", "challenge", "plan_code", "revision",
                 "expires_at", "licensed_until", "input_bound",
                 "output_bound", "scopes",
             }:
@@ -75,6 +77,7 @@ class SignedAssistantPlanAuthority:
             if (
                 obj["tenant_id"] != tenant_id or obj["unit_id"] != unit_id
                 or obj["capability"] != capability
+                or obj["challenge"] != challenge
                 or not isinstance(obj["expires_at"], int)
                 or type(obj["expires_at"]) is not int
                 or type(obj["licensed_until"]) is not int
