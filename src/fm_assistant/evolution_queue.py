@@ -9,11 +9,15 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from .credential_vault import CredentialVault
 from .db import EvolutionInboundJobORM
+
+
+class EvolutionQueueCapacityExceeded(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -25,9 +29,14 @@ class QueuedInbound:
 
 
 class EvolutionInboundQueue:
-    def __init__(self, sessions, vault: CredentialVault):
+    def __init__(
+        self, sessions, vault: CredentialVault, *, max_pending_per_connection: int = 250,
+    ):
+        if type(max_pending_per_connection) is not int or not 1 <= max_pending_per_connection <= 10000:
+            raise ValueError("evolution_queue_capacity_invalid")
         self._sessions = sessions
         self._vault = vault
+        self._max_pending = max_pending_per_connection
 
     def enqueue(
         self, *, connection_id: str, message_id: str,
@@ -39,6 +48,24 @@ class EvolutionInboundQueue:
         }, separators=(",", ":"), ensure_ascii=False))
         now = datetime.now(UTC)
         with self._sessions() as session:
+            # Serialize capacity check + insertion for PostgreSQL across all
+            # API replicas. The unique PK independently enforces deduplication.
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+                    {"scope": "fm_evolution_queue:" + connection_id},
+                )
+            prior = session.get(EvolutionInboundJobORM, (connection_id, message_id))
+            if prior is not None:
+                return False
+            pending = session.scalar(
+                select(func.count()).select_from(EvolutionInboundJobORM).where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.state.in_(("pending", "processing")),
+                )
+            )
+            if int(pending or 0) >= self._max_pending:
+                raise EvolutionQueueCapacityExceeded("evolution_queue_capacity_exceeded")
             session.add(EvolutionInboundJobORM(
                 connection_id=connection_id, message_id=message_id,
                 ciphertext=cipher, state="pending", attempt_count=0,
@@ -171,3 +198,57 @@ class EvolutionInboundQueue:
         with self._sessions() as session:
             row = session.get(EvolutionInboundJobORM, (connection_id, message_id))
             return row.state if row is not None else None
+
+    def operational_snapshot(
+        self, *, connection_id: str, limit: int = 50,
+    ) -> dict:
+        """No phone or message content; tenant scope verified by caller."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("evolution_queue_snapshot_limit_invalid")
+        with self._sessions() as session:
+            counts = session.execute(
+                select(EvolutionInboundJobORM.state, func.count())
+                .where(EvolutionInboundJobORM.connection_id == connection_id)
+                .group_by(EvolutionInboundJobORM.state)
+            ).all()
+            jobs = session.scalars(
+                select(EvolutionInboundJobORM)
+                .where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.state == "reconcile_required",
+                )
+                .order_by(EvolutionInboundJobORM.updated_at.desc())
+                .limit(limit)
+            ).all()
+            return {
+                "counts": {state: total for state, total in counts},
+                "capacity": self._max_pending,
+                "reconciliation": [
+                    {
+                        "message_id": row.message_id,
+                        "error_code": row.error_code,
+                        "attempt_count": row.attempt_count,
+                        "updated_at": row.updated_at.isoformat(),
+                    }
+                    for row in jobs
+                ],
+            }
+
+    def acknowledge_reconciliation(
+        self, *, connection_id: str, message_id: str,
+    ) -> bool:
+        """Operator acknowledgment, never automatic replay or deletion."""
+        with self._sessions() as session:
+            result = session.execute(
+                update(EvolutionInboundJobORM)
+                .where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.message_id == message_id,
+                    EvolutionInboundJobORM.state == "reconcile_required",
+                )
+                .values(
+                    state="reviewed", updated_at=datetime.now(UTC),
+                )
+            )
+            session.commit()
+            return result.rowcount == 1
