@@ -258,7 +258,7 @@ class EvolutionRuntime:
                     channel_id=item.connection_id, message_id=item.message_id,
                     outbound_id=outbound_id,
                 )
-        except Exception:  # noqa: BLE001 - quarantine unknown committed side effects
+        except Exception:  # quarantine unknown committed side effects
             self._inbox.mark_reconcile(
                 channel_id=item.connection_id, message_id=item.message_id,
                 error_code="evolution_worker_uncertain",
