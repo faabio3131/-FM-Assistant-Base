@@ -608,3 +608,11 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 - `LicensedQuotaManifestService` prepara política de quotas a partir de tenant/unidade e licença canônica com plan_code+revision fixados. Negar assinatura suspensa, expirada, mudança de revisão ou recursos essenciais ausentes. Manifesto não é permissão de cliente para editar limite, nem deve ser encaminhado sem canal interno assinado/revogável ao Core.
 - Alertas são cálculos de leitura e não substituem `QuotaReservations` transacional do Core. Cobrar do cliente só assinatura/serviços aprovados; custo de IA FM-managed é da FM.
 - Trilha externa permanece diferida até build completo. Não promover F3 global antes da sincronização autorizada em runtime, FinOps e demais gates internos. Sem deploy nem alteração de Kordena.
+
+
+## F3/F9 — CORE SIGNED PLAN GRANT READ-THROUGH (2026-10-18)
+
+- Route `POST /internal/v1/assistant/core-plan-grant` is a private service-only issuer, disabled without `FM_ASSISTANT_CORE_PLAN_SIGNING_KEY`; key requires minimum length and cannot reuse Command/Core/Vault/session signing values.
+- Request HMAC is domain-bound to the method/path and exact body; a fresh challenge is copied into the separately signed short-lived response (max 30s), preventing reuse by a different Core request. Canonical license, tenant/unit and pinned published plan revision are read on every request; expired/suspended/invalid licenses deny. Response is no-store and signed on the exact returned JSON bytes.
+- Functional SHA `9b971d64ed8224641c58a3be5def886f7fb6d16d`. SaaS Foundation CI `39190924170` SUCCESS; Core Assistant Authenticated Bridge Contract `39190924237` SUCCESS; F3 PostgreSQL Core Bridge Security Gate `39190924161` SUCCESS.
+- Transport and issuer are internally tested but **not** proof of mutual TLS/private network, production key, mandatory Core runtime quotas or immediate revocation of every already issued grant. Remaining integration/guard gates are BUILD_IN_PROGRESS. No actual provider/production secrets/deploy/merge; Kordena and FM Command V2 untouched.
