@@ -12,6 +12,7 @@ from typing import Protocol
 
 from core.ai_quota_store import QuotaDenied, QuotaRequirement, QuotaReservations
 from core.ai_router import AIUsageEvent, SolicitacaoIA
+from core.ai_service_contracts import TextRequestContent
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -137,6 +138,18 @@ class PlanUsageGuard:
         policy = replace(
             self._policy(request, now), attempt_budget=attempt_budget,
         )
+        if isinstance(request.conteudo, TextRequestContent):
+            # Conservative UTF-8 envelope. Provider tokenization is checked
+            # separately; this rejects definitely oversized customer text
+            # before any reservation or credentials are touched.
+            content = request.conteudo
+            byte_count = len(content.system_prompt.encode("utf-8"))
+            byte_count += sum(
+                len(msg.role.encode("utf-8")) + len(msg.content.encode("utf-8"))
+                for msg in content.messages
+            )
+            if byte_count > policy.input_bound:
+                raise QuotaDenied("core_plan.input_envelope_exceeded")
         if policy.grants:
             self._quota.project_signed_grants(
                 tenant_id=request.tenant_id, unit_id=request.unidade_id,
