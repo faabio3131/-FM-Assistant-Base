@@ -9,9 +9,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 from datetime import UTC, datetime
 from typing import Callable
+from urllib.parse import urlsplit
+
+import httpx
 
 from core.ai_plan_usage_guard import PlanQuotaPolicy
 from core.ai_quota_store import QuotaDenied
@@ -109,4 +113,80 @@ class SignedAssistantPlanAuthority:
         except QuotaDenied:
             raise
         except (Exception,) as exc:
+            raise QuotaDenied("core_plan.grant_unavailable") from exc
+
+
+class AssistantPlanHTTPSFetch:
+    """Explicit HTTPS-only adapter for the Core's trusted policy read port.
+
+    Token ceilings come from a server-controlled capability configuration,
+    never from the browser or an arbitrary tenant request.
+    """
+
+    def __init__(
+        self, *, origin: str, secret: bytes,
+        bounds: Callable[[str], tuple[int, int]],
+        client: httpx.Client,
+    ) -> None:
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query or parsed.fragment
+            or parsed.port not in (None, 443)
+            or parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+            or parsed.hostname.endswith(".local")
+            or not isinstance(secret, bytes) or len(secret) < 32
+        ):
+            raise ValueError("core_plan.endpoint_invalid")
+        self._origin = origin.rstrip("/")
+        self._secret = secret
+        self._bounds = bounds
+        self._client = client
+
+    def __call__(
+        self, tenant_id: str, unit_id: str, capability: str,
+        challenge: str,
+    ) -> tuple[bytes, str]:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{22,96}", challenge):
+            raise QuotaDenied("core_plan.challenge_invalid")
+        try:
+            input_bound, output_bound = self._bounds(capability)
+            if (
+                type(input_bound) is not int or type(output_bound) is not int
+                or input_bound <= 0 or output_bound <= 0
+                or input_bound + output_bound > 2_000_000_000
+            ):
+                raise QuotaDenied("core_plan.bounds_invalid")
+            raw = json.dumps({
+                "tenant_id": tenant_id,
+                "unit_id": unit_id,
+                "capability": capability,
+                "challenge": challenge,
+                "input_bound": input_bound,
+                "output_bound": output_bound,
+                "requested_at": int(datetime.now(UTC).timestamp()),
+            }, sort_keys=True, separators=(",", ":")).encode()
+            signature = hmac.new(
+                self._secret, b"POST\n" + PATH.encode() + b"\n" + raw,
+                hashlib.sha256,
+            ).hexdigest()
+            response = self._client.post(
+                self._origin + PATH, content=raw,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-FM-Core-Plan-Signature": signature,
+                },
+                follow_redirects=False, timeout=5,
+            )
+            if response.status_code != 200 or len(response.content) > 8192:
+                raise QuotaDenied("core_plan.grant_unavailable")
+            return (
+                response.content,
+                response.headers.get("X-FM-Assistant-Plan-Signature", ""),
+            )
+        except QuotaDenied:
+            raise
+        except (ValueError, httpx.HTTPError) as exc:
             raise QuotaDenied("core_plan.grant_unavailable") from exc
