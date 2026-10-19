@@ -198,6 +198,10 @@ def test_core_grant_derived_from_license_and_signed(catalog):
     decoded = json.loads(body)
     assert decoded["challenge"] == "test-challenge-0123456789abcdef"
     assert decoded["revision"] == 1
+    assert decoded["grants"] == [
+        ["ai.requests", "tenant", 100, 86400],
+        ["ai.total_tokens", "tenant", 1000, 86400],
+    ]
     assert decoded["tenant_id"] == "tenant-a"
     assert decoded["expires_at"] - int(NOW.timestamp()) == 30
     with pytest.raises(PlanLimitDenied, match="bounds_exceeded"):
