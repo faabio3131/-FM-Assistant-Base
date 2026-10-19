@@ -13,10 +13,10 @@ from tests.service.test_ai_service_api import FakeRuntime, _settings
 
 def test_core_plan_read_denies_anonymous_and_unavailable_ledger(tmp_path):
     app = create_app(_settings(), runtime=FakeRuntime())
-    params = dict(
-        tenant_id="tenant-a", unit_id="unit-a",
-        resource="ai.total_tokens", scope="tenant",
-    )
+    params = {
+        "tenant_id": "tenant-a", "unit_id": "unit-a",
+        "resource": "ai.total_tokens", "scope": "tenant",
+    }
     with TestClient(app) as client:
         assert client.get("/v1/plan/usage", params=params).status_code == 401
         denied = client.get(
@@ -55,10 +55,10 @@ def test_core_plan_read_returns_only_requested_scope_and_real_ledger_balance(tmp
     app = create_app(_settings(), runtime=FakeRuntime())
     with TestClient(app) as client:
         app.state.control_plane_engine = engine
-        params = dict(
-            tenant_id="tenant-a", unit_id="unit-a",
-            resource="ai.total_tokens", scope="tenant",
-        )
+        params = {
+            "tenant_id": "tenant-a", "unit_id": "unit-a",
+            "resource": "ai.total_tokens", "scope": "tenant",
+        }
         res = client.get(
             "/v1/plan/usage", params=params,
             headers={"X-Core-Service-Key": "core-test-key"},
