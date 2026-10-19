@@ -41,7 +41,7 @@ class EvolutionOnboarding:
 
     def provision(self, context: TenantContext) -> IntegrationConnection:
         current = self._repository.latest_for_provider(context, self.PROVIDER)
-        if current is not None:
+        if current is not None and current.status is not IntegrationStatus.REVOKED:
             # Failed/ambiguous external creates must not be replayed blindly.
             raise RuntimeError("evolution_existing_connection_requires_review")
         instance = "fm_" + uuid4().hex
