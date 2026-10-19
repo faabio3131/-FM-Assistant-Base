@@ -424,3 +424,12 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Core now enforces an FM-configurable `FM_CORE_ASSISTANT_MAX_AUDIO_BYTES` audio payload ceiling (default 10 MiB, absolute max 64 MiB), validated at startup, injected from commercial CoreSettings through `build_persistent_core` into `PlanUsageGuard`. An oversize audio payload is denied before quota reservation, credential resolution and provider call. It is a *byte transport limit*, not audio token metering or model-aware token estimation.
 - Functional SHA `a343b3af2374cc5ceae08b65ffe72f12841a12ac`; Core AI Service CI `39274933331` SUCCESS, F3 Quota PostgreSQL Security Gate `39274933453` SUCCESS. Regression tests cover oversize uploads, untouched quota reservations and malformed FM configuration.
 - F3 BUILD_IN_PROGRESS. Pending provider-aware text/audio token accounting, uncertain-charge governed reconciliation, cross-service identity and PostgreSQL E2E, independent audit. No merge, deploy or external homologation.
+
+
+## F3 — 2026-10-19 ambiguous provider consumption recovery candidate
+
+- Internal `QuotaReservations.reconcile_ambiguous_bundle` implemented in `core/ai_quota_store.py` and regression tests added in `tests/service/test_ai_quota_store.py` and `tests/service/test_ai_quota_postgres.py`. Requires `VerifiedCommandAdmin`, fresh step-up, 64-hex SHA-256 evidence reference, explicit provider-confirmed positive usage or actual provider-confirmed no-charge, complete same-request metric bundle, matched revision, and atomic quota settlement + append-only Command admin audit with one-use token JTI.
+- Concurrent PostgreSQL recovery test enforces one settlement/one audit even with two contending authorized recovery calls. No external provider call, no automatic retry, no silent refund. Internal only; no public endpoint.
+- `docs/F3_8_AMBIGUOUS_USAGE_RECOVERY.md` documents limits: the evidence hash references reviewed material and is NOT itself proof that provider billed zero; independent provider evidence ingestion/verification and signed Command-facing API remain separate engineering work.
+- First functional Core quota reconciliation CI `39277663167` SUCCESS, PostgreSQL `39277662911` SUCCESS. Additional concurrent PostgreSQL and latest documentation runs were queued at this checkpoint; **do not mark final subgate GREEN** until their run results are verified.
+- F3 BUILD_IN_PROGRESS. No merge/deploy/production credentials or external homologation. Keep Command/Assistant/Kordena unchanged.
