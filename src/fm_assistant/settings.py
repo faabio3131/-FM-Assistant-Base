@@ -47,6 +47,7 @@ class Settings:
     core_plan_signing_key: str | None = field(default=None, repr=False)
     evolution_origin: str | None = None
     evolution_global_key: str | None = field(default=None, repr=False)
+    evolution_webhook_signing_key: str | None = field(default=None, repr=False)
 
     @property
     def production_like(self) -> bool:
@@ -127,6 +128,19 @@ class Settings:
                 self.core_plan_signing_key, self.model_api_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_EVOLUTION_KEY_REUSED")
+        if self.evolution_webhook_signing_key:
+            if not self.evolution_origin or not self.evolution_global_key:
+                raise RuntimeError("FM_ASSISTANT_EVOLUTION_WEBHOOK_REQUIRES_GATEWAY")
+            if len(self.evolution_webhook_signing_key) < 32:
+                raise RuntimeError("FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNER_INVALID")
+            if self.evolution_webhook_signing_key in {
+                self.evolution_global_key, self.admin_key,
+                self.credential_pepper, self.channel_encryption_key,
+                self.session_pepper, self.core_service_key,
+                self.core_bridge_signing_key, self.command_control_signing_key,
+                self.core_plan_signing_key,
+            }:
+                raise RuntimeError("FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNER_REUSED")
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible", "core"}:
             raise RuntimeError("FM_ASSISTANT_MODEL_BACKEND inválido")
@@ -212,6 +226,9 @@ def load_settings() -> Settings:
         core_plan_signing_key=os.getenv("FM_ASSISTANT_CORE_PLAN_SIGNING_KEY") or None,
         evolution_origin=os.getenv("FM_ASSISTANT_EVOLUTION_ORIGIN") or None,
         evolution_global_key=os.getenv("FM_ASSISTANT_EVOLUTION_GLOBAL_KEY") or None,
+        evolution_webhook_signing_key=(
+            os.getenv("FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNING_KEY") or None
+        ),
         core_bridge_key_id=os.getenv("FM_ASSISTANT_CORE_BRIDGE_KEY_ID") or None,
         core_bridge_signing_key=os.getenv("FM_ASSISTANT_CORE_BRIDGE_SIGNING_KEY") or None,
         command_control_key_id=os.getenv("FM_ASSISTANT_COMMAND_CONTROL_KEY_ID") or None,
