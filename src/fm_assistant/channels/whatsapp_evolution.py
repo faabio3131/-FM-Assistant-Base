@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import base64
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 import httpx
@@ -20,7 +20,7 @@ class EvolutionUnavailable(RuntimeError):
 @dataclass(frozen=True, kw_only=True)
 class EvolutionSettings:
     origin: str
-    global_key: str
+    global_key: str = field(repr=False)
     timeout_seconds: float = 8.0
 
     def __post_init__(self) -> None:
