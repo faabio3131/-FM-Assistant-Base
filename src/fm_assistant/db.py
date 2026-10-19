@@ -598,3 +598,22 @@ class PlanSyncNonceORM(Base):
     key_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     nonce: Mapped[str] = mapped_column(String(96), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PlanBindingAuditORM(Base):
+    """Immutable evidence of an FM-authorized initial tenant plan binding."""
+
+    __tablename__ = "assistant_plan_binding_audit"
+
+    key_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    nonce: Mapped[str] = mapped_column(String(96), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("assistant_tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False, index=True,
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    old_plan_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    plan_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    plan_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    bound_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
