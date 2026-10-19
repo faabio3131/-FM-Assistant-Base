@@ -47,6 +47,8 @@ def test_production_accepts_distinct_keys_and_postgres():
         routes=(),
         control_plane_database_url="postgresql+psycopg://core:password@db.example/test",
         admin_key="y" * 48,
+        assistant_plan_url="https://assistant.example.test",
+        assistant_plan_signing_key="p" * 48,
     ).validate()
     assert settings.production_like is True
     assert settings.persistent_control_plane is True
@@ -70,4 +72,6 @@ def test_production_rejects_sqlite_and_same_admin_key():
             routes=(),
             control_plane_database_url="postgresql://core:password@db.example/test",
             admin_key="x" * 48,
+            assistant_plan_url="https://assistant.example.test",
+            assistant_plan_signing_key="p" * 48,
         ).validate()
