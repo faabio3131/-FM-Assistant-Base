@@ -50,6 +50,7 @@ class Settings:
     evolution_webhook_signing_key: str | None = field(default=None, repr=False)
     evolution_native_webhook_base_url: str | None = None
     evolution_provider_family: str = "evolution_v2_whatsapp_baileys"
+    evolution_contract_baseline: str = "v2.3.7"
 
     @property
     def production_like(self) -> bool:
@@ -143,6 +144,8 @@ class Settings:
                 self.core_plan_signing_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNER_REUSED")
+        if self.evolution_contract_baseline != "v2.3.7":
+            raise RuntimeError("FM_ASSISTANT_EVOLUTION_CONTRACT_BASELINE_UNSUPPORTED")
         if self.evolution_provider_family != "evolution_v2_whatsapp_baileys":
             raise RuntimeError("FM_ASSISTANT_EVOLUTION_PROVIDER_FAMILY_UNSUPPORTED")
         if self.evolution_native_webhook_base_url:
@@ -244,6 +247,9 @@ def load_settings() -> Settings:
         evolution_origin=os.getenv("FM_ASSISTANT_EVOLUTION_ORIGIN") or None,
         evolution_native_webhook_base_url=(
             os.getenv("FM_ASSISTANT_EVOLUTION_NATIVE_WEBHOOK_BASE_URL") or None
+        ),
+        evolution_contract_baseline=os.getenv(
+            "FM_ASSISTANT_EVOLUTION_CONTRACT_BASELINE", "v2.3.7"
         ),
         evolution_provider_family=os.getenv(
             "FM_ASSISTANT_EVOLUTION_PROVIDER_FAMILY", "evolution_v2_whatsapp_baileys"
