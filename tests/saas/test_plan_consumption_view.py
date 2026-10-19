@@ -112,12 +112,15 @@ def test_trusted_meter_snapshots_are_distinguished_from_unknown(tmp_path):
             ))
 
     class Reader:
-        def read(self, *, tenant_id, unit_id, metric, scope, at):
+        def read(self, *, tenant_id, unit_id, metric, scope, at, policy_revision,
+                 limit_units, window_seconds):
             assert (tenant_id, unit_id, scope) == ("a", "u", "tenant")
             if metric == "ai.requests":
                 return MeterReading(
                     consumed_units=12, reserved_units=8,
                     remaining_units=80, observed_at=NOW,
+                    policy_revision=policy_revision, limit_units=limit_units,
+                    window_seconds=window_seconds,
                 )
             return None
 
