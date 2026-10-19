@@ -301,3 +301,113 @@ def test_expired_generation_cannot_be_renewed(client, provision_credential):
         )
     assert queue.quarantine_stale() == 1
     assert queue.state(connection_id=cid, message_id=item.message_id) == "reconcile_required"
+
+
+def test_outbound_intent_is_durable_and_not_replayable(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="outbound-first",
+        sender="5511999999999", text="Secret content",
+    )
+    item = queue.claim()
+    assert item is not None
+    operation = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    assert operation
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "sending"
+    with pytest.raises(RuntimeError, match="evolution_outbound_intent_conflict"):
+        queue.begin_outbound(
+            connection_id=cid, message_id=item.message_id,
+            claim_generation=item.claim_generation,
+        )
+    with pytest.raises(RuntimeError, match="evolution_outbound_result_conflict"):
+        queue.record_outbound_result(
+            connection_id=cid, message_id=item.message_id,
+            claim_generation=item.claim_generation, operation_id="forged",
+            outbound_reference="evolution-ack",
+        )
+    queue.record_outbound_result(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation, operation_id=operation,
+        outbound_reference="evolution-ack",
+    )
+    queue.finish(
+        connection_id=cid, message_id=item.message_id, reconciled=False,
+        claim_generation=item.claim_generation,
+    )
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "complete"
+    assert queue.enqueue(
+        connection_id=cid, message_id=item.message_id,
+        sender="5511999999999", text="Replay",
+    ) is False
+    assert queue.claim() is None
+
+
+def test_crashed_outbound_goes_to_manual_reconciliation_without_resend(
+    client, provision_credential,
+):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="send-unknown",
+        sender="5511999999999", text="Sensitive",
+    )
+    item = queue.claim()
+    assert item is not None
+    operation = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    engine = create_engine(client.app.state.settings.database_url)
+    with engine.begin() as db:
+        db.execute(text(
+            "UPDATE assistant_evolution_inbound_jobs SET claimed_at=:old "
+            "WHERE connection_id=:cid AND message_id=:mid"
+        ), {
+            "old": (datetime.now(UTC) - timedelta(minutes=10)).strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            ), "cid": cid, "mid": item.message_id,
+        })
+    engine.dispose()
+    assert queue.quarantine_stale() == 1
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "reconcile_required"
+    snapshot = queue.operational_snapshot(connection_id=cid)
+    reviewed = snapshot["reconciliation"][0]
+    assert reviewed["outbound_status"] == "uncertain"
+    assert reviewed["outbound_operation_id"] == operation
+    assert "Sensitive" not in str(snapshot)
+    assert "5511999999999" not in str(snapshot)
+    assert queue.claim() is None
+    assert queue.acknowledge_reconciliation(
+        connection_id=cid, message_id=item.message_id,
+    )
+    assert queue.enqueue(
+        connection_id=cid, message_id=item.message_id,
+        sender="5511999999999", text="Resend forbidden",
+    ) is False
+
+
+def test_concurrent_outbound_intent_has_single_winner(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="send-race",
+        sender="5511999999999", text="Race",
+    )
+    item = queue.claim()
+    assert item is not None
+
+    def attempt(_):
+        try:
+            return queue.begin_outbound(
+                connection_id=cid, message_id=item.message_id,
+                claim_generation=item.claim_generation,
+            )
+        except (RuntimeError, Exception) as exc:
+            return type(exc).__name__
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, range(2)))
+    winners = [result for result in results if isinstance(result, str) and len(result) == 32]
+    assert len(winners) == 1
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "sending"
