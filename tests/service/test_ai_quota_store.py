@@ -419,3 +419,101 @@ def test_signed_revision_cannot_change_period_window_after_usage(quota):
         tenant_id="a", unit_id="__tenant__",
         capability="ai.total_tokens", at=NOW,
     ).reserved_units == 200
+
+
+def test_evidence_backed_recovery_is_atomic_audited_and_replay_safe(quota):
+    from core.ai_admin_audit import CommandAdminAuditRecord
+    from core.ai_command_authority import VerifiedCommandAdmin
+
+    store, sessions = quota
+    store.reserve_bundle(
+        needs=(
+            QuotaRequirement(tenant_id="a", unit_id="u1",
+                             capability="text", units=2, policy_revision=1),
+            QuotaRequirement(tenant_id="a", unit_id="u2",
+                             capability="text", units=1, policy_revision=1),
+        ),
+        request_id="ambiguous-one", at=NOW,
+    )
+    def principal(token):
+        return VerifiedCommandAdmin(
+            user_id="operator-1", session_id="operator-session",
+            token_id=token, issued_at=int(NOW.timestamp()) - 10,
+            expires_at=int(NOW.timestamp()) + 90,
+            step_up_at=int(NOW.timestamp()) - 10,
+            permissions=frozenset({"core.ai.admin.mutate"}),
+        )
+    consumption = (
+        QuotaRequirement(tenant_id="a", unit_id="u1",
+                         capability="text", units=1, policy_revision=1),
+        QuotaRequirement(tenant_id="a", unit_id="u2",
+                         capability="text", units=1, policy_revision=1),
+    )
+    with pytest.raises(QuotaDenied, match="recovery_partial_bundle"):
+        store.reconcile_ambiguous_bundle(
+            usage=consumption[:1], request_id="ambiguous-one",
+            principal=principal("token-a"), evidence_digest="a" * 64,
+            evidence_kind="provider_usage_confirmed", at=NOW,
+        )
+    with pytest.raises(QuotaDenied, match="recovery_evidence_mismatch"):
+        store.reconcile_ambiguous_bundle(
+            usage=consumption, request_id="ambiguous-one",
+            principal=principal("token-a"), evidence_digest="a" * 64,
+            evidence_kind="provider_no_charge_confirmed", at=NOW,
+        )
+    store.reconcile_ambiguous_bundle(
+        usage=consumption, request_id="ambiguous-one",
+        principal=principal("token-a"), evidence_digest="a" * 64,
+        evidence_kind="provider_usage_confirmed", at=NOW,
+    )
+    with sessions() as db:
+        records = db.scalars(select(AIQuotaReservationRecord).where(
+            AIQuotaReservationRecord.request_id == "ambiguous-one",
+        )).all()
+        assert len(records) == 2
+        assert all(row.state == ReservationState.SETTLED for row in records)
+        assert sorted(row.consumed_units for row in records) == [1, 1]
+        audits = db.scalars(select(CommandAdminAuditRecord)).all()
+        assert len(audits) == 1
+        assert audits[0].action == "core.ai.quota.reconcile"
+        assert len(audits[0].request_digest) == 64
+    with pytest.raises(QuotaDenied, match="recovery_conflict"):
+        store.reconcile_ambiguous_bundle(
+            usage=consumption, request_id="ambiguous-one",
+            principal=principal("token-b"), evidence_digest="a" * 64,
+            evidence_kind="provider_usage_confirmed", at=NOW,
+        )
+
+
+def test_no_charge_attestation_only_releases_verified_full_bundle(quota):
+    from core.ai_command_authority import VerifiedCommandAdmin
+
+    store, _ = quota
+    reserve(store, "certainly-no-charge", units=3)
+    principal = VerifiedCommandAdmin(
+        user_id="human", session_id="session", token_id="no-charge-jti",
+        issued_at=int(NOW.timestamp()) - 5,
+        expires_at=int(NOW.timestamp()) + 60,
+        step_up_at=int(NOW.timestamp()) - 5,
+        permissions=frozenset({"core.ai.admin.mutate"}),
+    )
+    with pytest.raises(QuotaDenied, match="recovery_evidence_invalid"):
+        store.reconcile_ambiguous_bundle(
+            usage=(QuotaRequirement(tenant_id="a", unit_id="u1",
+                                    capability="text", units=0,
+                                    policy_revision=1),),
+            request_id="certainly-no-charge", principal=principal,
+            evidence_digest="unverified", evidence_kind="provider_no_charge_confirmed",
+            at=NOW,
+        )
+    store.reconcile_ambiguous_bundle(
+        usage=(QuotaRequirement(tenant_id="a", unit_id="u1",
+                                capability="text", units=0,
+                                policy_revision=1),),
+        request_id="certainly-no-charge", principal=principal,
+        evidence_digest="f" * 64, evidence_kind="provider_no_charge_confirmed",
+        at=NOW,
+    )
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="u1", capability="text", at=NOW,
+    ).remaining_units == 3
