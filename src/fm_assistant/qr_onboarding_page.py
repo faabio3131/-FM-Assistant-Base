@@ -29,7 +29,8 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
 <div id="qrbox" class="qr hide"><img id="qrcode" alt="QR Code temporário para vincular seu WhatsApp"></div>
 <div><button id="connect" type="button" class="hide">Gerar minha conexão</button>
 <button id="refresh" type="button" class="hide">Atualizar QR Code</button>
-<button id="pause" type="button" class="hide">Pausar atendimento</button></div>
+<button id="pause" type="button" class="hide">Pausar atendimento</button>
+<button id="logout" type="button" class="hide">Desvincular WhatsApp</button></div>
 <ol class="steps"><li>Abra o WhatsApp no celular.</li><li>Vá até <strong>Aparelhos conectados</strong> e escolha <strong>Conectar aparelho</strong>.</li><li>Leia o código exibido acima.</li></ol>
 <small>O QR Code é temporário e fica visível apenas nesta sessão autorizada. Se a conexão estiver indisponível, tente atualizar ou procure suporte.</small>
 </main>
@@ -40,6 +41,7 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
  const status=document.getElementById("status"), dot=document.getElementById("dot");
  const connect=document.getElementById("connect"), refresh=document.getElementById("refresh");
  const pause=document.getElementById("pause");
+ const logout=document.getElementById("logout");
  const qrbox=document.getElementById("qrbox"), qr=document.getElementById("qrcode");
  let connection=null, waiting=false, paused=false;
  // FM corporate default. Signed Command policy projection is a separate gate.
@@ -69,11 +71,11 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
        paused=true;shownQr=null;shownAt=0;
        if(expiryTimer!==null){clearTimeout(expiryTimer);expiryTimer=null;}
        qr.removeAttribute("src");visible(qrbox,false);
-       visible(refresh,false);visible(pause,false);
+       visible(refresh,false);visible(pause,false);visible(logout,true);
        show("Atendimento pausado. A vinculação do aparelho não foi removida; procure suporte para reativar.","pending");
        return;
      }
-     visible(pause,true);
+     visible(pause,true);visible(logout,true);
      const data=await request(base+"/"+encodeURIComponent(connection));
      qr.removeAttribute("src");visible(qrbox,false);
      if(data.status==="connected") {
@@ -121,6 +123,25 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
      if(response.status==="disabled"){paused=true;await sync();}
    } catch {show("Não foi possível pausar. Verifique suas permissões.","error");}
    finally{pause.disabled=false;}
+ });
+ logout.addEventListener("click",async()=>{
+   if(!connection || waiting || !window.confirm(
+     "Desvincular o WhatsApp deste atendimento? Será necessário escanear um novo QR Code futuramente."
+   ))return;
+   logout.disabled=true;
+   try{
+     const result=await request(base+"/"+encodeURIComponent(connection)+"/logout",{method:"POST"});
+     if(result.status==="revoked"){
+       paused=true;shownQr=null;shownAt=0;
+       if(expiryTimer!==null)clearTimeout(expiryTimer);
+       qr.removeAttribute("src");visible(qrbox,false);
+       visible(refresh,false);visible(pause,false);visible(logout,false);
+       show("WhatsApp desvinculado. A reconexão exige novo provisionamento governado.","ok");
+     }
+   }catch{
+     paused=true;qr.removeAttribute("src");visible(qrbox,false);
+     show("Desconexão remota não confirmada. Atendimento bloqueado; procure suporte.","error");
+   }finally{logout.disabled=false;}
  });
  refresh.addEventListener("click",sync);
  sync();
