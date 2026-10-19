@@ -75,6 +75,7 @@ def test_bad_qr_and_ambiguous_remote_failure_fail_closed():
 def test_tenant_scoped_api_provision_and_qr(client, provision_credential):
     key_a = provision_credential(client, "tenant-a", "unit-a")
     key_b = provision_credential(client, "tenant-b", "unit-b")
+    assert client.post("/v1/channels/whatsapp/qr/provision").status_code == 401
     assert client.post(
         "/v1/channels/whatsapp/qr/provision", headers=_headers(key_a),
     ).status_code == 503
@@ -103,6 +104,17 @@ def test_tenant_scoped_api_provision_and_qr(client, provision_credential):
     assert payload["status"] == "draft"
     assert "test-token-secret" not in created.text
     cid = payload["connection_id"]
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(client.app.state.settings.database_url)
+    with engine.connect() as db:
+        row = db.execute(text(
+            "SELECT ciphertext FROM assistant_integration_secret_versions "
+            "WHERE connection_id = :id AND secret_name = :name"
+        ), {"id": cid, "name": "instance_token"}).scalar_one()
+        assert row != "test-token-secret"
+        assert "test-token-secret" not in row
+    engine.dispose()
 
     other = client.get(
         f"/v1/channels/whatsapp/qr/{cid}", headers=_headers(key_b),
