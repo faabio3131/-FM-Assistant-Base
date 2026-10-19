@@ -328,3 +328,68 @@ def test_postgres_status_nonce_concurrent_replay_allows_one_read(postgres_bridge
             CoreBridgeGrantORM, (CORE_KEY_ID, TENANT_ID, UNIT_ID, CAPABILITY)
         )
         assert grant and grant.active
+
+
+def test_postgres_queue_capacity_is_atomic_across_ingress_replicas(postgres_bridge):
+    """Two producers against a one-slot queue cannot both be acknowledged."""
+    from fm_assistant.evolution_queue import (
+        EvolutionInboundQueue,
+        EvolutionQueueCapacityExceeded,
+    )
+
+    sessions, _, _ = postgres_bridge
+    queue = EvolutionInboundQueue(
+        sessions, FernetCredentialVault(VAULT_KEY), max_pending_per_connection=1,
+    )
+    gate = Barrier(2)
+
+    def produce(number: int) -> str:
+        gate.wait(timeout=10)
+        try:
+            accepted = queue.enqueue(
+                connection_id=CONNECTION_ID, message_id=f"PG-CAP-{number}",
+                sender="5511999999999", text="private synthetic event",
+            )
+            return "accepted" if accepted else "duplicate"
+        except EvolutionQueueCapacityExceeded:
+            return "full"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(produce, i) for i in range(2)]
+        results = [job.result(timeout=20) for job in jobs]
+    assert sorted(results) == ["accepted", "full"]
+    status = queue.operational_snapshot(connection_id=CONNECTION_ID)
+    assert status["counts"]["pending"] == 1
+    assert "5511999999999" not in str(status)
+
+
+def test_postgres_queue_eight_workers_claim_at_most_once(postgres_bridge):
+    from fm_assistant.evolution_queue import EvolutionInboundQueue
+
+    sessions, _, _ = postgres_bridge
+    queue = EvolutionInboundQueue(
+        sessions, FernetCredentialVault(VAULT_KEY),
+    )
+    assert queue.enqueue(
+        connection_id=CONNECTION_ID, message_id="PG-ONCE",
+        sender="5511999999999", text="one and only",
+    )
+    gate = Barrier(8)
+
+    def claim_once(_: int) -> str | None:
+        gate.wait(timeout=10)
+        item = queue.claim()
+        return item.message_id if item else None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(claim_once, i) for i in range(8)]
+        results = [future.result(timeout=20) for future in futures]
+    assert results.count("PG-ONCE") == 1
+    assert results.count(None) == 7
+    assert queue.state(connection_id=CONNECTION_ID, message_id="PG-ONCE") == "processing"
+    queue.finish(
+        connection_id=CONNECTION_ID, message_id="PG-ONCE", reconciled=True,
+        code="synthetic_uncertain_outcome",
+    )
+    assert queue.quarantine_stale() == 0
+    assert queue.claim() is None
