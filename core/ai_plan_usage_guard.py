@@ -112,7 +112,7 @@ class PlanUsageGuard:
             tenant_id=request.tenant_id,
             unit_id="__tenant__" if scope == "tenant" else request.unidade_id,
             capability=metric,
-            units=amounts[metric],
+            units=amounts[metric], policy_revision=policy.revision,
         ) for metric, scope in policy.scopes)
 
     def admit(
