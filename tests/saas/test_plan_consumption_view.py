@@ -54,6 +54,14 @@ def test_plan_dashboard_api_is_private_and_does_not_invent_usage(client):
     assert all(x["remaining_units"] is None for x in body["consumption"])
     assert "ai.cost_usd_microunits" not in result.text
     assert result.headers["cache-control"] == "no-store"
+    html = client.get("/v1/plan/consumption/dashboard")
+    assert html.status_code == 200
+    assert "Franquia 1" in html.text
+    assert "Saldo não verificado" in html.text
+    assert "ai.cost_usd_microunits" not in html.text
+    assert "<progress" not in html.text
+    assert html.headers["cache-control"] == "no-store"
+    assert "frame-ancestors 'none'" in html.headers["content-security-policy"]
 
 
 def test_foreign_tenant_scope_cannot_be_selected_by_query(client):
