@@ -73,6 +73,10 @@ class CoreSettings:
     assistant_bridge_signing_key: str | None = field(default=None, repr=False)
     assistant_plan_url: str | None = None
     assistant_plan_signing_key: str | None = field(default=None, repr=False)
+    assistant_plan_bounds: tuple[tuple[str, int, int], ...] = (
+        ("atendimento_interpretacao", 4096, 2048),
+        ("atendimento_transcricao", 8192, 2048),
+    )
     
     @property
     def persistent_control_plane(self) -> bool:
@@ -107,6 +111,20 @@ class CoreSettings:
             if self.assistant_bridge_signing_key in (self.service_key, self.admin_key):
                 raise RuntimeError("core_assistant_bridge_key_reused")
         plan_fields = (self.assistant_plan_url, self.assistant_plan_signing_key)
+        caps = self.assistant_plan_bounds
+        if (
+            len(caps) != 2
+            or {x[0] for x in caps} != {
+                "atendimento_interpretacao", "atendimento_transcricao"
+            }
+            or any(
+                type(inp) is not int or type(out) is not int
+                or not 1 <= inp <= 1_000_000 or not 1 <= out <= 1_000_000
+                or inp + out > 2_000_000_000
+                for _, inp, out in caps
+            )
+        ):
+            raise RuntimeError("core_plan_authority_bounds_invalid")
         if any(plan_fields) and not all(plan_fields):
             raise RuntimeError("core_plan_authority_config_incomplete")
         if all(plan_fields):
@@ -127,7 +145,9 @@ class CoreSettings:
                     AssistantPlanHTTPSFetch(
                         origin=self.assistant_plan_url or "",
                         secret=(self.assistant_plan_signing_key or "").encode(),
-                        bounds=lambda capability: (4096, 2048),
+                        bounds=lambda capability: dict(
+                            (c, (i, o)) for c, i, o in caps
+                        )[capability],
                         client=verify_client,
                     )
                 except ValueError as exc:
@@ -197,6 +217,31 @@ def _route_from_payload(payload: Any) -> ProviderRouteSettings:
         raise RuntimeError("configuraÃ§Ã£o de rota de IA invÃ¡lida") from exc
 
 
+def _load_assistant_plan_bounds() -> tuple[tuple[str, int, int], ...]:
+    raw = os.getenv("FM_CORE_ASSISTANT_PLAN_BOUNDS_JSON", "").strip()
+    if not raw:
+        return (
+            ("atendimento_interpretacao", 4096, 2048),
+            ("atendimento_transcricao", 8192, 2048),
+        )
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("not a mapping")
+        if set(payload) != {
+            "atendimento_interpretacao", "atendimento_transcricao",
+        }:
+            raise ValueError("incomplete capability map")
+        if any(not isinstance(v, list) or len(v) != 2 for v in payload.values()):
+            raise ValueError("invalid token ceilings")
+        return tuple(sorted(
+            (capability, values[0], values[1])
+            for capability, values in payload.items()
+        ))
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("core_plan_authority_bounds_invalid") from exc
+
+
 def load_settings() -> CoreSettings:
     load_dotenv(override=False)
     raw_env = os.getenv("FM_CORE_ENV", "development").strip().casefold()
@@ -230,4 +275,5 @@ def load_settings() -> CoreSettings:
         assistant_bridge_signing_key=os.getenv("FM_CORE_ASSISTANT_BRIDGE_SIGNING_KEY") or None,
         assistant_plan_url=os.getenv("FM_CORE_ASSISTANT_PLAN_URL") or None,
         assistant_plan_signing_key=os.getenv("FM_CORE_ASSISTANT_PLAN_SIGNING_KEY") or None,
+        assistant_plan_bounds=_load_assistant_plan_bounds(),
     ).validate()
