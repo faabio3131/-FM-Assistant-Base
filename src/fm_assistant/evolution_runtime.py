@@ -193,7 +193,7 @@ class EvolutionRuntime:
                         connection_id=item.connection_id, message_id=item.message_id,
                         claim_generation=item.claim_generation,
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001 - heartbeat fails closed on any DB failure
                     lost.set()
                     return
 
