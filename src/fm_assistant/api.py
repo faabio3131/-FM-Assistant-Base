@@ -34,7 +34,7 @@ from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDenied
 from .evolution_onboarding import EvolutionOnboarding
-from .evolution_queue import EvolutionInboundQueue
+from .evolution_queue import EvolutionInboundQueue, EvolutionQueueCapacityExceeded
 from .evolution_runtime import EvolutionRuntime
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .identity import (
@@ -1723,6 +1723,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
 
+    @app.get("/v1/channels/whatsapp/qr/{connection_id}/operations")
+    def whatsapp_queue_operations(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_READ)
+        ),
+    ) -> Response:
+        connection = integration_repository.get(context, connection_id)
+        if connection is None or connection.provider_key != "whatsapp_evolution":
+            raise HTTPException(status_code=404, detail="evolution_connection_not_found")
+        queue = EvolutionInboundQueue(session_factory, vault)
+        return JSONResponse(
+            queue.operational_snapshot(connection_id=connection_id),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/v1/channels/whatsapp/qr/{connection_id}/operations/{message_id}/review")
+    def whatsapp_queue_review(
+        connection_id: str,
+        message_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> Response:
+        connection = integration_repository.get(context, connection_id)
+        if connection is None or connection.provider_key != "whatsapp_evolution":
+            raise HTTPException(status_code=404, detail="evolution_connection_not_found")
+        queue = EvolutionInboundQueue(session_factory, vault)
+        if not queue.acknowledge_reconciliation(
+            connection_id=connection_id, message_id=message_id,
+        ):
+            raise HTTPException(status_code=409, detail="evolution_reconciliation_not_pending")
+        audit.record(
+            context=context, action="assistant.channel.whatsapp.reconciliation_reviewed",
+            resource_type="integration", resource_id=connection_id, outcome="success",
+        )
+        return JSONResponse({"status": "reviewed"}, headers={"Cache-Control": "no-store"})
+
     @app.post("/webhooks/evolution-native/{connection_id}", status_code=204)
     async def receive_native_evolution(
         connection_id: str, request: Request,
@@ -1743,6 +1783,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 connection_id=connection_id, raw=raw,
                 token=x_fm_evolution_token,
             )
+        except EvolutionQueueCapacityExceeded as exc:
+            raise HTTPException(status_code=429, detail="evolution_queue_full", headers={"Retry-After": "5"}) from exc
         except (NativeEvolutionDenied, EvolutionEventDenied, PermissionError, LookupError) as exc:
             raise HTTPException(status_code=401, detail="evolution_native_denied") from exc
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
@@ -1769,6 +1811,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 signature=x_fm_evolution_signature,
                 timestamp=x_fm_evolution_timestamp,
             )
+        except EvolutionQueueCapacityExceeded as exc:
+            raise HTTPException(status_code=429, detail="evolution_queue_full", headers={"Retry-After": "5"}) from exc
         except (EvolutionEventDenied, PermissionError, LookupError) as exc:
             raise HTTPException(status_code=401, detail="evolution_webhook_denied") from exc
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
