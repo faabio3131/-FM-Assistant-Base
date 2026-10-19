@@ -110,6 +110,32 @@ def test_signed_webhook_connects_and_replies_once(client, provision_credential):
     assert client.post(endpoint, content=body).status_code == 401
     assert len([c for c in calls if c[0].startswith("/message/sendText/")]) == 1
 
+    # A delayed but valid signed event is NOT allowed to undo an explicit
+    # local pause or cause a second outgoing message.
+    paused = client.post(
+        f"/v1/channels/whatsapp/qr/{cid}/pause", headers=_auth(key),
+    )
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "disabled"
+    event_body, event_headers = _signed(
+        cid, {"event": "connection.update", "instance": instance,
+              "data": {"state": "open"}},
+    )
+    assert client.post(
+        endpoint, content=event_body, headers=event_headers,
+    ).status_code == 401
+    original_message = {
+        "event": "messages.upsert", "instance": instance,
+        "data": [{"key": {"id": "WA-PAUSED", "fromMe": False,
+                           "remoteJid": "5511999999999@s.whatsapp.net"},
+                  "message": {"conversation": "Este canal está pausado"}}],
+    }
+    stopped_body, stopped_headers = _signed(cid, original_message)
+    assert client.post(
+        endpoint, content=stopped_body, headers=stopped_headers,
+    ).status_code == 401
+    assert len([c for c in calls if c[0].startswith("/message/sendText/")]) == 1
+
 
 def test_unconfigured_webhook_denied(client):
     assert client.post(
