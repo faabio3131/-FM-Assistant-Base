@@ -45,6 +45,8 @@ class Settings:
     command_control_signing_key: str | None = field(default=None, repr=False)
     trusted_command_organization_id: str | None = None
     core_plan_signing_key: str | None = field(default=None, repr=False)
+    evolution_origin: str | None = None
+    evolution_global_key: str | None = field(default=None, repr=False)
 
     @property
     def production_like(self) -> bool:
@@ -107,6 +109,23 @@ class Settings:
                 self.core_bridge_signing_key, self.command_control_signing_key,
             }:
                 raise RuntimeError("FM_ASSISTANT_CORE_PLAN_SIGNING_KEY_INVALID")
+        if bool(self.evolution_origin) != bool(self.evolution_global_key):
+            raise RuntimeError("FM_ASSISTANT_EVOLUTION_CONFIG_INCOMPLETE")
+        if self.evolution_origin and self.evolution_global_key:
+            from .channels.whatsapp_evolution import EvolutionSettings
+            try:
+                EvolutionSettings(
+                    origin=self.evolution_origin,
+                    global_key=self.evolution_global_key,
+                )
+            except ValueError as exc:
+                raise RuntimeError("FM_ASSISTANT_EVOLUTION_CONFIG_INVALID") from exc
+            if self.evolution_global_key in {
+                self.admin_key, self.credential_pepper, self.session_pepper,
+                self.channel_encryption_key, self.core_service_key,
+                self.command_control_signing_key, self.core_bridge_signing_key,
+            }:
+                raise RuntimeError("FM_ASSISTANT_EVOLUTION_KEY_REUSED")
         backend = self.model_backend.strip().casefold()
         if backend not in {"development", "openai_compatible", "core"}:
             raise RuntimeError("FM_ASSISTANT_MODEL_BACKEND inválido")
@@ -190,6 +209,8 @@ def load_settings() -> Settings:
         core_base_url=os.getenv("FM_ASSISTANT_CORE_BASE_URL"),
         core_service_key=os.getenv("FM_ASSISTANT_CORE_SERVICE_KEY"),
         core_plan_signing_key=os.getenv("FM_ASSISTANT_CORE_PLAN_SIGNING_KEY") or None,
+        evolution_origin=os.getenv("FM_ASSISTANT_EVOLUTION_ORIGIN") or None,
+        evolution_global_key=os.getenv("FM_ASSISTANT_EVOLUTION_GLOBAL_KEY") or None,
         core_bridge_key_id=os.getenv("FM_ASSISTANT_CORE_BRIDGE_KEY_ID") or None,
         core_bridge_signing_key=os.getenv("FM_ASSISTANT_CORE_BRIDGE_SIGNING_KEY") or None,
         command_control_key_id=os.getenv("FM_ASSISTANT_COMMAND_CONTROL_KEY_ID") or None,
