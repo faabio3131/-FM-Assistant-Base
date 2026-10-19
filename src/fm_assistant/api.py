@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.whatsapp_meta import WhatsAppProviderError
+from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
@@ -43,6 +44,7 @@ from .identity import (
 from .identity_repository import IdentityRepository, SessionPrincipal
 from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
+from .evolution_onboarding import EvolutionOnboarding
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
 from .plan_consumption_dashboard import render_consumption_dashboard
@@ -333,6 +335,12 @@ class IntegrationSecretMetadataResponse(BaseModel):
     revoked_at: str | None
 
 
+class QRConnectionResponse(BaseModel):
+    connection_id: str
+    status: str
+    qr_data_url: str | None = None
+
+
 class WhatsAppChannelRequest(BaseModel):
     phone_number_id: str = Field(min_length=1, max_length=128)
     business_account_id: str | None = Field(default=None, max_length=128)
@@ -454,6 +462,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         repository=integration_repository,
         vault=vault,
     )
+    evolution_onboarding = (
+        EvolutionOnboarding(
+            repository=integration_repository,
+            vault=vault,
+            transport=EvolutionClient(EvolutionSettings(
+                origin=cfg.evolution_origin,
+                global_key=cfg.evolution_global_key,
+            )),
+        )
+        if cfg.evolution_origin and cfg.evolution_global_key else None
+    )
     core_bridge = CoreBridgeService(
         sessions=session_factory,
         vault=vault,
@@ -513,6 +532,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.assistant_service = service
         app.state.integration_repository = integration_repository
         app.state.integration_service = integration_service
+        app.state.evolution_onboarding = evolution_onboarding
         app.state.whatsapp_channels = whatsapp_channels
         app.state.whatsapp_runtime = whatsapp_runtime
         yield
@@ -1497,6 +1517,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="core_bridge_denied") from exc
         return JSONResponse(
             {"secret": secret}, headers={"Cache-Control": "no-store"}
+        )
+
+    @app.post("/v1/channels/whatsapp/qr/provision", response_model=IntegrationResponse)
+    def provision_whatsapp_qr(
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> IntegrationResponse:
+        onboarding = request.app.state.evolution_onboarding
+        if onboarding is None:
+            raise HTTPException(status_code=503, detail="evolution_gateway_unavailable")
+        try:
+            connection = onboarding.provision(context)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit.record(
+            context=context,
+            action="assistant.channel.whatsapp.qr.provision",
+            resource_type="integration",
+            resource_id=connection.connection_id,
+            outcome="success",
+        )
+        return _integration_response(connection)
+
+    @app.get(
+        "/v1/channels/whatsapp/qr/{connection_id}",
+        response_model=QRConnectionResponse,
+    )
+    def get_whatsapp_qr(
+        connection_id: str,
+        request: Request,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_READ)
+        ),
+    ) -> Response:
+        onboarding = request.app.state.evolution_onboarding
+        if onboarding is None:
+            raise HTTPException(status_code=503, detail="evolution_gateway_unavailable")
+        try:
+            snapshot = onboarding.qr(context, connection_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (RuntimeError, EvolutionUnavailable) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return JSONResponse(
+            QRConnectionResponse(
+                connection_id=snapshot.connection_id,
+                status=snapshot.status, qr_data_url=snapshot.qr_data_url,
+            ).model_dump(),
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
 
     @app.put("/v1/channels/whatsapp", response_model=WhatsAppChannelResponse)
