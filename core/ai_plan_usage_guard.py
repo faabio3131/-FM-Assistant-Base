@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from core.ai_quota_store import QuotaDenied, QuotaRequirement, QuotaReservations
-from core.ai_router import AIUsageEvent, SolicitacaoIA
+from core.ai_router import AIUsageEvent, ConteudoAudioIA, SolicitacaoIA
 from core.ai_service_contracts import TextRequestContent
 
 
@@ -75,8 +75,12 @@ class PlanPolicyAuthority(Protocol):
 
 class PlanUsageGuard:
     def __init__(
-        self, *, quota: QuotaReservations, authority: PlanPolicyAuthority
+        self, *, quota: QuotaReservations, authority: PlanPolicyAuthority,
+        max_audio_bytes: int = 10 * 1024 * 1024,
     ) -> None:
+        if type(max_audio_bytes) is not int or not 1 <= max_audio_bytes <= 64 * 1024 * 1024:
+            raise ValueError("core_plan.audio_upload_ceiling_invalid")
+        self._max_audio_bytes = max_audio_bytes
         self._quota = quota
         self._authority = authority
 
@@ -150,6 +154,11 @@ class PlanUsageGuard:
             )
             if byte_count > policy.input_bound:
                 raise QuotaDenied("core_plan.input_envelope_exceeded")
+        if isinstance(request.conteudo, ConteudoAudioIA):
+            # Transport-size containment, NOT a statement about audio token
+            # equivalence. Actual model tokens remain separately metered.
+            if len(request.conteudo.audio) > self._max_audio_bytes:
+                raise QuotaDenied("core_plan.audio_upload_exceeded")
         if policy.grants:
             self._quota.project_signed_grants(
                 tenant_id=request.tenant_id, unit_id=request.unidade_id,
