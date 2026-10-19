@@ -291,6 +291,20 @@ class QuotaReservations:
                     if record.limit_units != limit or record.window_seconds != window:
                         raise QuotaDenied("core_quota.projection_conflict")
                     continue
+                if record.window_seconds != window:
+                    # Existing reservations are indexed by a period calculated
+                    # using the prior window. Switching window sizes in place
+                    # can orphan or double-spend usage. Require a governed
+                    # migration after all history is explicitly reconciled.
+                    any_history = db.scalar(
+                        select(AIQuotaReservationRecord.request_id).where(
+                            AIQuotaReservationRecord.tenant_id == tenant_id,
+                            AIQuotaReservationRecord.unit_id == scoped_unit,
+                            AIQuotaReservationRecord.capability == metric,
+                        ).limit(1)
+                    )
+                    if any_history is not None:
+                        raise QuotaDenied("core_quota.projection_window_change_blocked")
                 record.revision = revision
                 record.limit_units = limit
                 record.window_seconds = window
