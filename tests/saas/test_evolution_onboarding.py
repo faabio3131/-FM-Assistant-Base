@@ -125,3 +125,46 @@ def test_tenant_scoped_api_provision_and_qr(client, provision_credential):
         },
     )
     assert invalid_generic.status_code == 400
+
+
+def test_remote_ambiguous_create_never_retries_or_exposes_secret(
+    client, provision_credential,
+):
+    key = provision_credential(client, "tenant-uncertain", "unit-a")
+    attempts = []
+
+    def handler(request):
+        attempts.append(request.url.path)
+        return httpx.Response(503, json={"secret": "should-never-echo"})
+
+    from fm_assistant.credential_vault import FernetCredentialVault
+
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=client.app.state.integration_repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(handler),
+    )
+    first = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert first.status_code == 409
+    assert "should-never-echo" not in first.text
+    again = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert again.status_code == 409
+    assert attempts == ["/instance/create"]
+
+
+def test_catalog_registers_qr_provider_without_requiring_user_tokens(
+    client, provision_credential,
+):
+    key = provision_credential(client, "tenant-a", "unit-a")
+    result = client.get("/v1/integrations/catalog", headers=_headers(key))
+    assert result.status_code == 200
+    entry = next(
+        x for x in result.json()
+        if x["provider_key"] == "whatsapp_evolution"
+    )
+    assert "whatsapp.qr" in entry["capabilities"]
+    assert entry["integration_type"] == "whatsapp"
