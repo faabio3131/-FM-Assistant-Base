@@ -8,10 +8,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 
 from .db import (
     IntegrationCapabilityORM,
     IntegrationConnectionORM,
+    EvolutionWebhookReceiptORM,
     IntegrationEventORM,
     IntegrationProviderORM,
     IntegrationSecretVersionORM,
@@ -311,6 +313,28 @@ class IntegrationRepository:
                 expires_at=expires_at,
                 revoked_at=None,
             )
+
+    def claim_evolution_webhook(
+        self, *, connection_id: str, digest: str,
+    ) -> bool:
+        """One-shot receipt for verified connection events across workers.
+
+        A receipt is committed before transition; failures never replay
+        an uncertain transition automatically.
+        """
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError("evolution_receipt_digest_invalid")
+        with self._session_factory() as session:
+            session.add(EvolutionWebhookReceiptORM(
+                connection_id=connection_id, event_digest=digest,
+                received_at=datetime.now(UTC),
+            ))
+            try:
+                session.commit()
+                return True
+            except IntegrityError:
+                session.rollback()
+                return False
 
     def active_secret_ciphertexts(self, connection_id: str) -> dict[str, str]:
         now = datetime.now(UTC)
