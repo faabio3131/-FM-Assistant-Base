@@ -164,5 +164,62 @@ def test_trusted_meter_snapshots_are_distinguished_from_unknown(tmp_path):
     assert (req["consumed_units"], req["reserved_units"], req["remaining_units"]) == (
         12, 8, 80,
     )
+    assert req["committed_units"] == 20
+    assert req["utilization_percent"] == 20
+    assert req["warning_level"] == "normal"
     assert token["remaining_units"] is None
+    assert token["utilization_percent"] is None
+    assert token["warning_level"] == "unknown"
     engine.dispose()
+
+
+def test_warning_thresholds_include_pending_usage_and_do_not_invent_unknowns():
+    from fm_assistant.plan_consumption_dashboard import render_consumption_dashboard
+
+    rows = []
+    for consumed, reserved, expected in (
+        (50, 19, "normal"), (50, 20, "warning"),
+        (50, 40, "critical"), (60, 40, "blocked"),
+    ):
+        percent = consumed + reserved
+        level = (
+            "blocked" if percent >= 100 else
+            "critical" if percent >= 90 else
+            "warning" if percent >= 70 else "normal"
+        )
+        assert level == expected
+        rows.append({
+            "resource": "ai.total_tokens", "status": "observed",
+            "consumed_units": consumed, "reserved_units": reserved,
+            "committed_units": percent, "remaining_units": 100-percent,
+            "limit_units": 100, "utilization_percent": percent,
+            "warning_level": level,
+        })
+    markup = render_consumption_dashboard({
+        "plan_name": "Plano completo", "licensed_until": "2026-11-18",
+        "consumption": rows,
+    })
+    assert "reservados" in markup
+    assert "Franquia esgotada" in markup
+    assert "Atenção: franquia próxima" in markup
+    assert "Alerta: franquia acima de 70%" in markup
+    assert markup.count("<progress") == 4
+
+
+def test_customer_dashboard_never_renders_false_progress_for_unknown_usage():
+    from fm_assistant.plan_consumption_dashboard import render_consumption_dashboard
+
+    markup = render_consumption_dashboard({
+        "plan_name": "<script>steal()</script>",
+        "licensed_until": "unknown",
+        "consumption": [{
+            "resource": "ai.total_tokens", "status": "metering_unavailable",
+            "limit_units": 900, "remaining_units": None,
+            "consumed_units": None, "reserved_units": None,
+            "utilization_percent": None, "warning_level": "unknown",
+        }],
+    })
+    assert "<script>" not in markup
+    assert "&lt;script&gt;" in markup
+    assert "<progress" not in markup
+    assert "Saldo não verificado" in markup
