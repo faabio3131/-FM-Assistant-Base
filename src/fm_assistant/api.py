@@ -490,7 +490,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 signing_key=cfg.evolution_webhook_signing_key,
             ),
             sender_pepper=cfg.credential_pepper,
-            queue=EvolutionInboundQueue(session_factory, vault),
+            queue=EvolutionInboundQueue(
+                session_factory, vault,
+                max_pending_per_connection=cfg.evolution_max_pending_per_connection,
+            ),
         )
         if evolution_onboarding is not None and cfg.evolution_webhook_signing_key
         else None
@@ -1734,7 +1737,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         connection = integration_repository.get(context, connection_id)
         if connection is None or connection.provider_key != "whatsapp_evolution":
             raise HTTPException(status_code=404, detail="evolution_connection_not_found")
-        queue = EvolutionInboundQueue(session_factory, vault)
+        queue = EvolutionInboundQueue(
+            session_factory, vault,
+            max_pending_per_connection=cfg.evolution_max_pending_per_connection,
+        )
         return JSONResponse(
             queue.operational_snapshot(connection_id=connection_id),
             headers={"Cache-Control": "no-store"},
