@@ -346,3 +346,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Kordena `main` possui metering/projector/dashboard; **PR #230 Draft** traz também ledger de budget monetário com `UPDATE` condicionado, `AIFranchiseBudgetGuard` pré-provider, pendência conservadora no timeout, ciclo/entitlement e alertas ao cliente. Reaproveitar padrões no Core atual (quota store, FinOps preflight, ledger de attempts), sem duplicar fonte canônica de saldo. Não interpretar read-model assíncrono como reserva atômica; preservar tokens desconhecidos e identidade de attempts. Custo/pricing já possuem conteúdo idêntico em ambos projetos.
 - Referência principal: `faabio3131/-FM-Assistant-Base/docs/governance/ADR-009-ALL-FEATURES-PLAN-CONSUMPTION-AND-KORDENA-FINOPS.md`.
 - Construção antes de provas externas; nenhuma chamada provider real, merge com deploy indireto, segredo real ou migração não descartável sem aprovação específica.
+
+## F3/F9 — LEITURA EXATA DE SALDO POR CLIENTE (2026-10-18)
+
+- `GET /v1/plan/usage` usa a chave de serviço já existente do Core, com tenant/unit/resource/scope explícitos. Responde somente se o ledger persistente estiver configurado e a política existir. Não inferir `remaining=0` quando Core/policy está indisponível.
+- Resposta inclui policy_revision, limit_units, window_seconds, consumed_units, reserved_units, remaining_units, period_ends_at e observed_at. Scope tenant usa chave técnica `__tenant__`; scope unidade usa unit_id específico. Não confiar em `__tenant__` fornecido pelo browser; somente Assistant autenticado envia o escopo real.
+- Testes de API exigem serviço autenticado, saldo real derivado de reservas/settlements e negativa para tenant não configurado. Core CI + PostgreSQL16 obrigatórios.
+- Assistant valida revisão, franquia, janela, freshness e escopo antes de exibir saldo ao cliente. Custos de modelo são dados internos FM, não entram no painel do assinante.
+- A leitura é incremental, NÃO completa o control-plane de políticas ou ativação obrigatória da quota no runtime. Construir projeção assinada Assistant→Core, hard-stop e billing/eventos; não esperar homologação externa.
