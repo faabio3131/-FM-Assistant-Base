@@ -29,6 +29,8 @@ def assertion(*, challenge="test-challenge-0123456789abcdef", **updates):
         "licensed_until": int(NOW.timestamp()) + 86400,
         "input_bound": 100, "output_bound": 50,
         "scopes": [["ai.requests", "tenant"], ["ai.total_tokens", "tenant"]],
+        "grants": [["ai.requests", "tenant", 50, 86400],
+                   ["ai.total_tokens", "tenant", 10000, 86400]],
     }
     obj.update(updates)
     raw = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
@@ -50,6 +52,7 @@ def resolve(*, grant=None, tenant="tenant-a", fetch=None):
 def test_valid_signed_grant_is_scoped_and_bounded():
     p = resolve()
     assert p.revision == 3
+    assert p.grants[1] == ("ai.total_tokens", "tenant", 10000, 86400)
     assert p.valid_until.timestamp() == NOW.timestamp() + 30
     assert p.scopes == (("ai.requests", "tenant"), ("ai.total_tokens", "tenant"))
 
