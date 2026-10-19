@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -175,6 +177,34 @@ class EvolutionRuntime:
             reconcile_required=reconcile,
         )
 
+    @contextmanager
+    def _lease_heartbeat(self, item: QueuedInbound):
+        """Renew the current generation during long-running model/provider work."""
+        if self._queue is None:
+            yield None
+            return
+        stop = threading.Event()
+        lost = threading.Event()
+
+        def refresh() -> None:
+            while not stop.wait(30):
+                try:
+                    self._queue.renew_claim(
+                        connection_id=item.connection_id, message_id=item.message_id,
+                        claim_generation=item.claim_generation,
+                    )
+                except Exception:
+                    lost.set()
+                    return
+
+        thread = threading.Thread(target=refresh, daemon=True)
+        thread.start()
+        try:
+            yield lost
+        finally:
+            stop.set()
+            thread.join(timeout=2)
+
     def recover_stale(self, *, older_than_seconds: int = 300) -> int:
         """Quarantine expired worker claims; never replay uncertain side effects."""
         if self._queue is None:
@@ -195,7 +225,10 @@ class EvolutionRuntime:
             if item is None:
                 break
             try:
-                completed = self._process_queued(item)
+                with self._lease_heartbeat(item) as lease_lost:
+                    completed = self._process_queued(item, lease_lost=lease_lost)
+                    if lease_lost is not None and lease_lost.is_set():
+                        raise RuntimeError("evolution_worker_lease_lost")
                 if completed:
                     processed += 1
                 else:
@@ -210,7 +243,7 @@ class EvolutionRuntime:
                 # Never reopen it or replay a provider send.
                 if self._queue.state(
                     connection_id=item.connection_id, message_id=item.message_id,
-                ) == "processing":
+                ) in {"processing", "sending"}:
                     try:
                         self._queue.finish(
                             connection_id=item.connection_id, message_id=item.message_id,
@@ -225,7 +258,7 @@ class EvolutionRuntime:
             processed=processed, duplicates=duplicates, reconcile_required=reconcile,
         )
 
-    def _process_queued(self, item: QueuedInbound) -> bool:
+    def _process_queued(self, item: QueuedInbound, *, lease_lost=None) -> bool:
         connection = self._integrations.get_unscoped(item.connection_id)
         if (
             connection is None or connection.provider_key != "whatsapp_evolution"
@@ -284,10 +317,22 @@ class EvolutionRuntime:
                         connection_id=item.connection_id, message_id=item.message_id,
                         claim_generation=item.claim_generation,
                     )
+                if lease_lost is not None and lease_lost.is_set():
+                    raise RuntimeError("evolution_worker_lease_lost")
+                operation_id = self._queue.begin_outbound(
+                    connection_id=item.connection_id, message_id=item.message_id,
+                    claim_generation=item.claim_generation,
+                ) if self._queue is not None else None
                 outbound_id = self._transport.send_text(
                     instance, instance_token=self._vault.decrypt(token),
                     recipient=item.sender, message=reply.content,
                 )
+                if self._queue is not None and operation_id is not None:
+                    self._queue.record_outbound_result(
+                        connection_id=item.connection_id, message_id=item.message_id,
+                        claim_generation=item.claim_generation,
+                        operation_id=operation_id, outbound_reference=outbound_id,
+                    )
                 self._inbox.complete(
                     channel_id=item.connection_id, message_id=item.message_id,
                     outbound_id=outbound_id,
