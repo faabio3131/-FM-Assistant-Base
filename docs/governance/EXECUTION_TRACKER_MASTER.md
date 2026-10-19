@@ -898,3 +898,8 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 - Delivered bounded tenant-scoped `processing` stale quarantine and no-blind-retry recovery; PostgreSQL SKIP LOCKED and conditional update, with SQLite synthetic isolation tests. Verified duplicate event still cannot cause another model/provider execution after quarantine.
 - SHA `2f7700bdb2bc7cdfb835d02baa2fd172c4dac86b`: SaaS `39297829882` SUCCESS, PostgreSQL `39297829871` SUCCESS, Core/Assistant bridge `39297829914` SUCCESS.
 - FM Command cross-SaaS configuration/data-ingestion architecture is deliberately held for user review. No new Command integration claims or dynamic QR policy synchronization. Keep approved 45s fallback in Assistant. Native Evolution ingress proof, queues/workers, real provider pinning and remote lifecycle are NOT_DONE, external homologation only after build completion.
+
+
+2026-10-19 — WHATSAPP QR LOCAL CHANNEL PAUSE CONSTRUCTION
+- Add customer-local pause endpoint protected by tenant/unit integration.manage, revision and event audit. No remote logout is implied and restart is blocked pending governed resume implementation. UI respects disabled status and avoids misleading connected indicators. Regression test demonstrates signed stale "open" webhook cannot reactivate locally disabled channel.
+- Separate upstream native Evolution authentication, real remote disconnect/reconnect, durable inbox/worker and cross-SaaS Command policy delivery remain NOT_DONE; Command architectural review held by user; no real VPS credentials or homologation.
