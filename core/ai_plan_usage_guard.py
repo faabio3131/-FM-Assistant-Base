@@ -6,7 +6,7 @@ tokens retain the reservation rather than being accounted as zero.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -27,11 +27,15 @@ class PlanQuotaPolicy:
     # ai.total_tokens are always mandatory.
     scopes: tuple[tuple[str, str], ...]
     grants: tuple[tuple[str, str, int, int], ...] = ()
+    attempt_budget: int = 1
 
     def __post_init__(self) -> None:
         if (
             not self.tenant_id or not self.unit_id or not self.plan_code
             or type(self.revision) is not int or self.revision < 1
+            or type(self.attempt_budget) is not int
+            or not 1 <= self.attempt_budget <= 8
+            or (self.input_bound + self.output_bound) * self.attempt_budget > 2_000_000_000
             or self.valid_until.tzinfo is None
             or self.valid_until.utcoffset() is None
             or type(self.input_bound) is not int or self.input_bound <= 0
@@ -96,12 +100,13 @@ class PlanUsageGuard:
         if usage is None:
             amounts = {
                 "ai.requests": 1,
-                "ai.total_tokens": policy.input_bound + policy.output_bound,
-                "ai.input_tokens": policy.input_bound,
-                "ai.output_tokens": policy.output_bound,
+                "ai.total_tokens": (policy.input_bound + policy.output_bound)
+                * policy.attempt_budget,
+                "ai.input_tokens": policy.input_bound * policy.attempt_budget,
+                "ai.output_tokens": policy.output_bound * policy.attempt_budget,
                 # Cached tokens are a subset of input and must not add
                 # themselves to total_tokens again.
-                "ai.cached_tokens": policy.input_bound,
+                "ai.cached_tokens": policy.input_bound * policy.attempt_budget,
             }
         else:
             input_used, output_used, cached_used = usage
@@ -126,9 +131,12 @@ class PlanUsageGuard:
 
     def admit(
         self, *, request: SolicitacaoIA, at: datetime,
+        attempt_budget: int = 1,
     ) -> PlanQuotaPolicy:
         now = at.astimezone(UTC)
-        policy = self._policy(request, now)
+        policy = replace(
+            self._policy(request, now), attempt_budget=attempt_budget,
+        )
         if policy.grants:
             self._quota.project_signed_grants(
                 tenant_id=request.tenant_id, unit_id=request.unidade_id,
@@ -164,8 +172,9 @@ class PlanUsageGuard:
         used_output = sum(int(e.output_tokens) for e in events)
         used_cached = sum(int(e.cached_tokens) for e in events)
         if (
-            used_input > policy.input_bound
-            or used_output > policy.output_bound
+            len(events) > policy.attempt_budget
+            or used_input > policy.input_bound * policy.attempt_budget
+            or used_output > policy.output_bound * policy.attempt_budget
             or used_cached > used_input
         ):
             # Provider exceeded trusted caps; quarantine held reservation,
