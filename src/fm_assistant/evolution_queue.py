@@ -97,6 +97,7 @@ class EvolutionInboundQueue:
             if job is None:
                 return None
             now = datetime.now(UTC)
+            generation = job.attempt_count + 1
             try:
                 result = session.execute(
                     update(EvolutionInboundJobORM)
@@ -107,7 +108,7 @@ class EvolutionInboundQueue:
                     )
                     .values(
                         state="processing", claimed_at=now,
-                        updated_at=now, attempt_count=job.attempt_count + 1,
+                        updated_at=now, attempt_count=generation,
                     )
                 )
                 if result.rowcount != 1:
@@ -134,7 +135,7 @@ class EvolutionInboundQueue:
             return QueuedInbound(
                 connection_id=job.connection_id, message_id=job.message_id,
                 sender=sender, text=message,
-                claim_generation=job.attempt_count + 1,
+                claim_generation=generation,
             )
 
     def assert_claim_current(
