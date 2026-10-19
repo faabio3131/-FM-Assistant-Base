@@ -134,7 +134,7 @@ class EvolutionRuntime:
                         outbound_id=outbound_id,
                     )
                 processed += 1
-            except Exception:
+            except Exception:  # noqa: BLE001 - quarantine any ambiguous side effect
                 # A message may already have been committed or sent. Do not
                 # retry from a duplicate webhook without operator review.
                 self._inbox.mark_reconcile(
