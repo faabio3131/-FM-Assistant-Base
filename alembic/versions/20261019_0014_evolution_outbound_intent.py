@@ -15,37 +15,33 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("assistant_evolution_inbound_jobs", sa.Column("outbound_operation_id", sa.String(64), nullable=True))
-    op.add_column("assistant_evolution_inbound_jobs", sa.Column("outbound_status", sa.String(32), nullable=True))
-    op.add_column("assistant_evolution_inbound_jobs", sa.Column("outbound_reference", sa.String(160), nullable=True))
-    op.add_column("assistant_evolution_inbound_jobs", sa.Column("send_started_at", sa.DateTime(timezone=True), nullable=True))
-    op.create_check_constraint(
-        "ck_assistant_evolution_job_outbound_status",
-        "assistant_evolution_inbound_jobs",
-        "outbound_status IS NULL OR outbound_status IN ('uncertain', 'provider_acknowledged')",
-    )
-    op.execute(
-        "ALTER TABLE assistant_evolution_inbound_jobs DROP CONSTRAINT "
-        "ck_assistant_evolution_job_state"
-    ) if op.get_bind().dialect.name == "postgresql" else None
-    if op.get_bind().dialect.name == "postgresql":
-        op.create_check_constraint(
+    # SQLite test databases require batch table recreation for named checks.
+    with op.batch_alter_table("assistant_evolution_inbound_jobs", recreate="auto") as batch:
+        batch.add_column(sa.Column("outbound_operation_id", sa.String(64), nullable=True))
+        batch.add_column(sa.Column("outbound_status", sa.String(32), nullable=True))
+        batch.add_column(sa.Column("outbound_reference", sa.String(160), nullable=True))
+        batch.add_column(sa.Column("send_started_at", sa.DateTime(timezone=True), nullable=True))
+        batch.drop_constraint("ck_assistant_evolution_job_state", type_="check")
+        batch.create_check_constraint(
             "ck_assistant_evolution_job_state",
-            "assistant_evolution_inbound_jobs",
             "state IN ('pending','processing','sending','complete','reconcile_required','reviewed')",
+        )
+        batch.create_check_constraint(
+            "ck_assistant_evolution_job_outbound_status",
+            "outbound_status IS NULL OR outbound_status IN ('uncertain','provider_acknowledged')",
         )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_assistant_evolution_job_outbound_status", "assistant_evolution_inbound_jobs", type_="check")
-    op.drop_column("assistant_evolution_inbound_jobs", "send_started_at")
-    op.drop_column("assistant_evolution_inbound_jobs", "outbound_reference")
-    op.drop_column("assistant_evolution_inbound_jobs", "outbound_status")
-    op.drop_column("assistant_evolution_inbound_jobs", "outbound_operation_id")
-    if op.get_bind().dialect.name == "postgresql":
-        op.drop_constraint("ck_assistant_evolution_job_state", "assistant_evolution_inbound_jobs", type_="check")
-        op.create_check_constraint(
+    # For disposable test DB only. Never execute destructive downgrade in production.
+    with op.batch_alter_table("assistant_evolution_inbound_jobs", recreate="auto") as batch:
+        batch.drop_constraint("ck_assistant_evolution_job_outbound_status", type_="check")
+        batch.drop_constraint("ck_assistant_evolution_job_state", type_="check")
+        batch.create_check_constraint(
             "ck_assistant_evolution_job_state",
-            "assistant_evolution_inbound_jobs",
             "state IN ('pending','processing','complete','reconcile_required','reviewed')",
         )
+        batch.drop_column("send_started_at")
+        batch.drop_column("outbound_reference")
+        batch.drop_column("outbound_status")
+        batch.drop_column("outbound_operation_id")
