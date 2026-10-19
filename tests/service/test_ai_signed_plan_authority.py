@@ -1,13 +1,21 @@
 """Contract security tests for signed Assistant policy assertions."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+
+import httpx
 from datetime import UTC, datetime
 
 import pytest
 
 from core.ai_quota_store import QuotaDenied
-from core.ai_signed_plan_authority import SignedAssistantPlanAuthority, signed_plan_body
+from core.ai_signed_plan_authority import (
+    AssistantPlanHTTPSFetch,
+    SignedAssistantPlanAuthority,
+    signed_plan_body,
+)
 
 NOW = datetime(2026, 10, 18, 20, 0, tzinfo=UTC)
 SECRET = b"assistant-to-core-test-secret-key-32-bytes-12345"
@@ -94,3 +102,60 @@ def test_replayed_signed_grant_from_previous_request_is_denied():
     resolve(fetch=fetch)
     with pytest.raises(QuotaDenied, match="grant_invalid"):
         resolve(fetch=fetch)
+
+
+def test_real_http_adapter_contract_with_signed_response():
+    def handler(request):
+        data = json.loads(request.content)
+        expected = hmac.new(
+            SECRET,
+            b"POST\\n/internal/v1/assistant/core-plan-grant\n" + request.content,
+            hashlib.sha256,
+        ).hexdigest()
+        assert request.headers["X-FM-Core-Plan-Signature"] == expected
+        assert request.url.path == "/internal/v1/assistant/core-plan-grant"
+        raw, signature = assertion(challenge=data["challenge"])
+        return httpx.Response(
+            200, content=raw,
+            headers={"X-FM-Assistant-Plan-Signature": signature},
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        port = AssistantPlanHTTPSFetch(
+            origin="https://assistant.example.test", secret=SECRET,
+            bounds=lambda capability: (100, 50), client=client,
+        )
+        policy = resolve(fetch=port)
+        assert policy.revision == 3
+
+
+def test_http_adapter_denies_provider_error_and_redirect():
+    for status in (302, 401, 500):
+        with httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                status, headers={"location": "https://untrusted.example/"}
+            )
+        )) as client:
+            port = AssistantPlanHTTPSFetch(
+                origin="https://assistant.example.test", secret=SECRET,
+                bounds=lambda capability: (100, 50), client=client,
+            )
+            with pytest.raises(QuotaDenied, match="grant_unavailable"):
+                resolve(fetch=port)
+
+
+def test_http_adapter_requires_https_and_trusted_bounds():
+    with httpx.Client(transport=httpx.MockTransport(
+        lambda request: pytest.fail("provider contacted on invalid quota caps")
+    )) as client:
+        with pytest.raises(ValueError, match="endpoint_invalid"):
+            AssistantPlanHTTPSFetch(
+                origin="http://assistant.example.test", secret=SECRET,
+                bounds=lambda capability: (100, 50), client=client,
+            )
+        port = AssistantPlanHTTPSFetch(
+            origin="https://assistant.example.test", secret=SECRET,
+            bounds=lambda capability: (True, 50), client=client,
+        )
+        with pytest.raises(QuotaDenied, match="bounds_invalid"):
+            resolve(fetch=port)
