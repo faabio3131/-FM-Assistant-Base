@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from fm_assistant.db import PlanLimitORM, PlanVersionORM, TenantLicenseORM
 from fm_assistant.plan_consumption_view import MeterReading, PlanConsumptionView
+
+
 def _bootstrap(client, *, tenant_id="tenant-a", email="owner-a@example.com"):
     res = client.post(
         "/v1/bootstrap/tenant-owner",
