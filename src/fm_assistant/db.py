@@ -496,6 +496,36 @@ class IntegrationInboundORM(Base):
     )
 
 
+class EvolutionInboundJobORM(Base):
+    """Durable encrypted message queue; no plaintext phone or message."""
+
+    __tablename__ = "assistant_evolution_inbound_jobs"
+
+    connection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("assistant_integration_connections.connection_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    message_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_assistant_evolution_inbound_pending", "state", "created_at"),
+    )
+
+
 class EvolutionWebhookReceiptORM(Base):
     """Durable one-shot receipt for a VERIFIED signed ingress delivery."""
 
