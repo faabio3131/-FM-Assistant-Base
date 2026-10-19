@@ -266,10 +266,12 @@ class CoreControlPlaneAIRuntime:
         system_prompt: str,
         messages: tuple[TextMessage, ...],
     ) -> CoreAIResult:
+        capture: list[AIUsageEvent] | None = [] if self._plan_usage is not None else None
         router = self._router(
             tenant_id=tenant_id,
             unit_id=unit_id,
             capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
+            capture=capture,
         )
         return _result(
             self._execute_guarded(
@@ -298,10 +300,12 @@ class CoreControlPlaneAIRuntime:
         mime_type: str,
         instruction: str,
     ) -> CoreAIResult:
+        capture: list[AIUsageEvent] | None = [] if self._plan_usage is not None else None
         router = self._router(
             tenant_id=tenant_id,
             unit_id=unit_id,
             capability=CapabilityIA.ATENDIMENTO_TRANSCRICAO,
+            capture=capture,
         )
         return _result(
             self._execute_guarded(
