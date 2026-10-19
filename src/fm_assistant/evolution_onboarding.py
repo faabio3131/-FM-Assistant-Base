@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionUnavailable
@@ -14,6 +15,7 @@ from .integration import (
     IntegrationStatus,
 )
 from .integration_repository import IntegrationRepository
+from .whatsapp_repository import WhatsAppInboundRepository
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -67,6 +69,21 @@ class EvolutionOnboarding:
     def current(self, context: TenantContext) -> IntegrationConnection | None:
         """Read-only tenant/unit scoped QR integration for customer onboarding."""
         return self._repository.latest_for_provider(context, self.PROVIDER)
+
+    def quarantine_stale(
+        self, context: TenantContext, *, connection_id: str,
+        inbox: WhatsAppInboundRepository, older_than_seconds: int = 300,
+    ) -> int:
+        """Governed internal recovery hook, not exposed as a tenant API."""
+        if type(older_than_seconds) is not int or not 60 <= older_than_seconds <= 86400:
+            raise ValueError("evolution_recovery_window_invalid")
+        connection = self._repository.get(context, connection_id)
+        if connection is None or connection.provider_key != self.PROVIDER:
+            raise LookupError("evolution_connection_not_found")
+        cutoff = datetime.now(UTC) - timedelta(seconds=older_than_seconds)
+        return inbox.quarantine_stale_processing(
+            channel_id=connection_id, older_than=cutoff,
+        )
 
     def qr(self, context: TenantContext, connection_id: str) -> QRConnection:
         connection = self._repository.get(context, connection_id)
