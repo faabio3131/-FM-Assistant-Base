@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from .channels.evolution_events import EvolutionEventVerifier
-from .channels.whatsapp_evolution import EvolutionClient, EvolutionUnavailable
+from .channels.whatsapp_evolution import EvolutionClient
 from .credential_vault import CredentialVault
 from .domain import Channel, ConversationStatus, TenantContext
 from .integration import IntegrationStatus
