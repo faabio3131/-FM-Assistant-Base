@@ -185,6 +185,10 @@ def test_operator_reconciliation_api_scope(client, provision_credential):
     assert response.status_code == 200, response.text
     assert "Privacidade" not in response.text
     assert response.json()["reconciliation"][0]["message_id"] == "operator-1"
+    assert response.json()["lifecycle"][0]["message_id"] == "operator-1"
+    assert response.json()["lifecycle"][0]["provider_delivery_confirmed"] is False
+    assert "Privacidade" not in str(response.json()["lifecycle"])
+    assert "5511999999999" not in str(response.json()["lifecycle"])
     review = url + "/operator-1/review"
     assert client.post(review,headers={"Authorization":f"Bearer {foreign_key}"}).status_code == 404
     assert client.post(review,headers={"Authorization":f"Bearer {own_key}"}).status_code == 200
@@ -474,3 +478,26 @@ def test_lifecycle_isolated_by_connection(client, provision_credential):
     )
     assert queue.operational_snapshot(connection_id=other.connection_id)["lifecycle"] == []
     assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["message_id"] == "isolated-trace"
+
+
+def test_concurrent_reviews_have_one_winner_without_replay(client, provision_credential):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="review-race",
+        sender="5511999999999", text="Private",
+    )
+    item = queue.claim()
+    assert item is not None
+    queue.finish(
+        connection_id=cid, message_id=item.message_id,
+        reconciled=True, claim_generation=item.claim_generation,
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        winners = list(executor.map(
+            lambda _: queue.acknowledge_reconciliation(
+                connection_id=cid, message_id=item.message_id,
+            ), range(2),
+        ))
+    assert winners.count(True) == 1
+    assert queue.state(connection_id=cid, message_id=item.message_id) == "reviewed"
+    assert queue.claim() is None
