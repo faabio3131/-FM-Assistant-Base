@@ -872,3 +872,9 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 2026-10-19 — F3 INTERNAL AUDIO PAYLOAD SAFETY SUBGATE
 - Core functional SHA `a343b3af2374cc5ceae08b65ffe72f12841a12ac`, AI Service CI `39274933331` SUCCESS, PG security `39274933453` SUCCESS. FM-managed maximum audio upload bytes now validates settings and denies oversized audio pre-quota; 10MiB default, 64MiB upper configuration bound, strict false-positive-free byte limit. Audio bytes are NOT token accounting.
 - Core and Assistant production homologation remains deferred until software construction complete. F3 IN_PROGRESS: model-specific token accounting, ambiguous usage reconciliation, Command/Assistant/Core PostgreSQL E2E, independent security review. PRs remain Draft without merge/deploy, Kordena and fm-command-v2 unchanged.
+
+
+2026-10-19 — F3 AMBIGUOUS PROVIDER CONSUMPTION GOVERNED RECOVERY: IMPLEMENTED, PENDING FINAL CI
+- Core `QuotaReservations.reconcile_ambiguous_bundle` now stages verified human-admin recovery with provider evidence reference and exact all-metrics quota settlement atomically with the Command admin audit. No auto-refund on provider timeout/unknown usage; rejects incomplete or repeated settlement.
+- SQLite negative/positive cases added; concurrent PostgreSQL two-worker regression added. `docs/F3_8_AMBIGUOUS_USAGE_RECOVERY.md` formalizes the required provider-issued no-charge evidence, proof retention and guarded release conditions. No externally reachable API was implemented.
+- Initial functional CI `39277663167` SUCCESS and PG `39277662911` SUCCESS. Latest tests (including multiworker PG) were queued when checked; final certification remains pending. Follow-up: confirm latest workflows, verify signed Command boundary and independent provider evidence ingestion/retention. F3 BUILD_IN_PROGRESS, F4 NOT_STARTED; no merge, deploy or external homologation.
