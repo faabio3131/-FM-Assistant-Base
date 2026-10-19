@@ -13,10 +13,10 @@ NOW = datetime(2026, 10, 18, 20, 0, tzinfo=UTC)
 SECRET = b"assistant-to-core-test-secret-key-32-bytes-12345"
 
 
-def assertion(**updates):
+def assertion(*, challenge="test-challenge-0123456789abcdef", **updates):
     obj = {
         "tenant_id": "tenant-a", "unit_id": "u1",
-        "capability": "atendimento_interpretacao",
+        "capability": "atendimento_interpretacao", "challenge": challenge,
         "plan_code": "all", "revision": 3,
         "expires_at": int(NOW.timestamp()) + 30,
         "licensed_until": int(NOW.timestamp()) + 86400,
@@ -29,10 +29,10 @@ def assertion(**updates):
 
 
 def resolve(*, grant=None, tenant="tenant-a", fetch=None):
-    payload = grant if grant is not None else assertion()
+    payload = grant
     authority = SignedAssistantPlanAuthority(
         secret=SECRET,
-        fetch=fetch or (lambda t, u, c: payload),
+        fetch=fetch or (lambda t, u, c, ch: payload if payload is not None else assertion(challenge=ch)),
     )
     return authority.resolve(
         tenant_id=tenant, unit_id="u1",
@@ -70,12 +70,27 @@ def test_tampered_body_or_signature_is_denied():
 
 
 def test_revocation_and_assistant_outage_are_checked_per_request():
-    calls = [assertion()]
-    def fetch(_tenant, _unit, _cap):
+    calls = [True]
+    def fetch(_tenant, _unit, _cap, challenge):
         if calls:
-            return calls.pop()
+            calls.pop()
+            return assertion(challenge=challenge)
         raise OSError("assistant unreachable")
 
     resolve(fetch=fetch)
     with pytest.raises(QuotaDenied, match="grant_unavailable"):
+        resolve(fetch=fetch)
+
+
+def test_replayed_signed_grant_from_previous_request_is_denied():
+    captured = None
+
+    def fetch(_tenant, _unit, _cap, challenge):
+        nonlocal captured
+        if captured is None:
+            captured = assertion(challenge=challenge)
+        return captured
+
+    resolve(fetch=fetch)
+    with pytest.raises(QuotaDenied, match="grant_invalid"):
         resolve(fetch=fetch)
