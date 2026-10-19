@@ -18,8 +18,8 @@ from sqlalchemy import (
     Integer,
     String,
     func,
-    text,
     select,
+    text,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
