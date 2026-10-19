@@ -23,7 +23,10 @@ async def _run(*, batch: int, sleep_seconds: float, once: bool) -> None:
         if runtime is None:
             raise RuntimeError("evolution_worker_not_configured")
         while True:
+            quarantined = await asyncio.to_thread(runtime.recover_stale)
             result = await asyncio.to_thread(runtime.process_pending, limit=batch)
+            if quarantined:
+                _LOGGER.warning("evolution_worker_quarantined_stale count=%d", quarantined)
             _LOGGER.info(
                 "evolution_worker_batch processed=%d duplicates=%d reconcile=%d",
                 result.processed, result.duplicates, result.reconcile_required,
