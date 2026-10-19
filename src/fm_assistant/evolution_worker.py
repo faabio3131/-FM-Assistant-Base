@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import time
 
 from .api import create_app
 from .settings import load_settings
