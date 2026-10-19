@@ -111,6 +111,7 @@ def create_app(
                 cfg.control_plane_database_url or "",
                 tenant_gateway=tenant_gateway,
                 plan_authority=plan_authority,
+                max_audio_bytes=cfg.assistant_max_audio_bytes,
             )
         else:
             ai_runtime = runtime or CoreAIRuntime.from_settings(cfg)
