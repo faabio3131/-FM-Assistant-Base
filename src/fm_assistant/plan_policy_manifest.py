@@ -91,3 +91,66 @@ class LicensedQuotaManifestService:
             plan_code=ref.plan_code, revision=ref.revision,
             licensed_until=ref.licensed_until, grants=grants,
         )
+
+
+# Signed read-through grant for the Core. Only a trusted, authenticated
+# service route may invoke this issuer; never expose the signing key to tenants.
+def issue_core_plan_grant(
+    *, manifest: LicensedQuotaManifest, capability: str,
+    input_bound: int, output_bound: int, secret: bytes, now: datetime,
+) -> tuple[bytes, str]:
+    import hashlib
+    import hmac
+    import json
+    from datetime import UTC, timedelta
+
+    if (
+        not isinstance(secret, bytes) or len(secret) < 32
+        or now.tzinfo is None or now.utcoffset() is None
+        or manifest.licensed_until.tzinfo is None
+        or manifest.licensed_until.utcoffset() is None
+        or manifest.licensed_until <= now
+        or not isinstance(capability, str) or not 0 < len(capability) <= 128
+        or type(input_bound) is not int or type(output_bound) is not int
+        or input_bound <= 0 or output_bound <= 0
+        or input_bound + output_bound > 2_000_000_000
+    ):
+        raise PlanLimitDenied("plan.grant_denied")
+    grants = {g.resource: g for g in manifest.grants}
+    if len(grants) != len(manifest.grants) or not {
+        "ai.requests", "ai.total_tokens",
+    }.issubset(grants):
+        raise PlanLimitDenied("plan.grant_metrics_invalid")
+    if input_bound + output_bound > grants["ai.total_tokens"].limit_units:
+        raise PlanLimitDenied("plan.grant_bounds_exceeded")
+    for metric, bound in (
+        ("ai.input_tokens", input_bound),
+        ("ai.output_tokens", output_bound),
+    ):
+        if metric in grants and bound > grants[metric].limit_units:
+            raise PlanLimitDenied("plan.grant_bounds_exceeded")
+    allowed = {
+        "ai.requests", "ai.total_tokens", "ai.input_tokens",
+        "ai.output_tokens", "ai.cached_tokens",
+    }
+    scopes = sorted([
+        [g.resource, g.scope] for g in manifest.grants if g.resource in allowed
+    ])
+    if any(scope not in {"tenant", "unit"} for _, scope in scopes):
+        raise PlanLimitDenied("plan.grant_scope_invalid")
+    expiry = min(manifest.licensed_until, now + timedelta(seconds=30))
+    body = json.dumps({
+        "tenant_id": manifest.tenant_id,
+        "unit_id": manifest.unit_id,
+        "capability": capability,
+        "plan_code": manifest.plan_code,
+        "revision": manifest.revision,
+        "expires_at": int(expiry.timestamp()),
+        "licensed_until": int(manifest.licensed_until.timestamp()),
+        "input_bound": input_bound, "output_bound": output_bound,
+        "scopes": scopes,
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return body, hmac.new(
+        secret, b"/internal/v1/assistant/core-plan-grant\n" + body,
+        hashlib.sha256,
+    ).hexdigest()
