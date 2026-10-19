@@ -34,6 +34,7 @@ from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_onboarding import EvolutionOnboarding
 from .evolution_runtime import EvolutionRuntime
+from .evolution_queue import EvolutionInboundQueue
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .identity import (
     MACHINE_PERMISSIONS,
@@ -487,6 +488,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 signing_key=cfg.evolution_webhook_signing_key,
             ),
             sender_pepper=cfg.credential_pepper,
+            queue=EvolutionInboundQueue(session_factory, vault),
         )
         if evolution_onboarding is not None and cfg.evolution_webhook_signing_key
         else None
