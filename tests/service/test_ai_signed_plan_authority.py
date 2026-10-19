@@ -4,10 +4,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-
-import httpx
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 
 from core.ai_quota_store import QuotaDenied
@@ -132,8 +131,8 @@ def test_real_http_adapter_contract_with_signed_response():
 def test_http_adapter_denies_provider_error_and_redirect():
     for status in (302, 401, 500):
         with httpx.Client(transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                status, headers={"location": "https://untrusted.example/"}
+            lambda request, code=status: httpx.Response(
+                code, headers={"location": "https://untrusted.example/"}
             )
         )) as client:
             port = AssistantPlanHTTPSFetch(
