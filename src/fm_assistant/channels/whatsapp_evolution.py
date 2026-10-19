@@ -62,7 +62,7 @@ class EvolutionClient:
             else:
                 response = self._client.request(
                     method, self._settings.origin.rstrip("/") + path,
-                    json=payload, headers={"apikey": self._settings.global_key},
+                    json=payload, headers=headers,
                     timeout=self._settings.timeout_seconds,
                     follow_redirects=False,
                 )
