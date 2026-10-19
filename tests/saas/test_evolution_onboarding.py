@@ -402,3 +402,54 @@ def test_remote_logout_failure_never_revokes_unverified_remote_session(
     assert repository.get(scoped, cid).status.value == "disabled"
     assert "instance_token" in repository.active_secret_ciphertexts(cid)
     assert calls == ["/instance/create", "/instance/logout/" + created.json()["config"]["instance_name"]]
+
+
+def test_resume_requires_remote_open_and_rejects_foreign_scope(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    owner = provision_credential(client, "resume-tenant", "resume-unit")
+    foreign = provision_credential(client, "resume-foreign", "resume-foreign-unit")
+    states = ["close", "open"]
+    calls = []
+
+    def remote(request):
+        calls.append((request.url.path, request.headers["apikey"]))
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {
+                "token": "synthetic-individual-resume-token",
+            }})
+        if request.url.path.startswith("/instance/connectionState/"):
+            assert request.headers["apikey"] == "synthetic-individual-resume-token"
+            return httpx.Response(200, json={"instance": {"state": states.pop(0)}})
+        return httpx.Response(503)
+
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(owner),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    endpoint = f"/v1/channels/whatsapp/qr/{cid}/resume"
+    assert client.post(
+        f"/v1/channels/whatsapp/qr/{cid}/pause", headers=_headers(owner),
+    ).status_code == 200
+    assert client.post(endpoint).status_code == 401
+    assert client.post(endpoint, headers=_headers(foreign)).status_code == 404
+    closed = client.post(endpoint, headers=_headers(owner))
+    assert closed.status_code == 409
+    assert client.get(
+        "/v1/channels/whatsapp/qr/current", headers=_headers(owner),
+    ).json()["status"] == "disabled"
+    reopened = client.post(endpoint, headers=_headers(owner))
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["status"] == "active"
+    assert client.post(endpoint, headers=_headers(owner)).status_code == 200
+    assert len([path for path, _ in calls if path.startswith(
+        "/instance/connectionState/"
+    )]) == 2
