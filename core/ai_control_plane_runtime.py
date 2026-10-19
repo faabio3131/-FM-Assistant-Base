@@ -15,7 +15,7 @@ from core.ai_circuit_state_store import PersistentCircuit
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneError, ResolvedCoreRoute
 from core.ai_plan_usage_guard import PlanUsageGuard
 from core.ai_providers import GeminiExecutor, OpenAICompatibleExecutor
-from core.ai_quota_store import QuotaReservations
+from core.ai_quota_store import QuotaDenied, QuotaReservations
 from core.ai_router import (
     AIModelRouter,
     AIUsageEvent,
@@ -203,6 +203,7 @@ class CoreControlPlaneAIRuntime:
         self, *, tenant_id: str, unit_id: str, capability: CapabilityIA,
         capture: list[AIUsageEvent] | None = None,
         output_token_cap: int | None = None,
+        attempt_budget: int | None = None,
     ) -> AIModelRouter:
         resolved = self._control_plane.resolve(
             tenant_id=tenant_id, unit_id=unit_id, capability=capability
@@ -212,6 +213,7 @@ class CoreControlPlaneAIRuntime:
             raise ControlPlaneError("core_control_plane.mixed_credential_fallback_forbidden")
         return AIModelRouter(
             rotas=tuple(item.route for item in resolved),
+            max_attempts=attempt_budget,
             executor=ScopedCoreExecutor(
                 routes=resolved, credentials=self._credentials, circuit=self._circuit,
                 output_token_cap=output_token_cap,
@@ -223,7 +225,7 @@ class CoreControlPlaneAIRuntime:
         )
 
     def _execute_guarded(
-        self, router_factory: Callable[[int | None], AIModelRouter],
+        self, router_factory: Callable[[int | None, int | None], AIModelRouter],
         request: SolicitacaoIA, capture: list[AIUsageEvent] | None = None,
     ):
         """Opt-in per-request quota admission before ANY provider attempt.
@@ -232,9 +234,20 @@ class CoreControlPlaneAIRuntime:
         On unknown outcome do not refund or retry automatically.
         """
         policy = None
+        attempt_budget = None
         if self._plan_usage is not None:
+            # Resolve only trusted route metadata; provider credentials are not
+            # touched until the full fallback exposure is reserved.
+            available = self._control_plane.resolve(
+                tenant_id=request.tenant_id, unit_id=request.unidade_id,
+                capability=request.capability,
+            )
+            attempt_budget = len(available)
+            if not 1 <= attempt_budget <= 8:
+                raise QuotaDenied("core_plan.attempt_budget_invalid")
             policy = self._plan_usage.admit(
                 request=request, at=datetime.now(UTC),
+                attempt_budget=attempt_budget,
             )
         if self._quota is not None:
             self._quota.reserve(
@@ -248,7 +261,10 @@ class CoreControlPlaneAIRuntime:
             )
         # Construct per-request executor only after quota admission and inject
         # the licensed provider-level output ceiling (OpenAI/Gemini).
-        router = router_factory(policy.output_bound if policy is not None else None)
+        router = router_factory(
+            policy.output_bound if policy is not None else None,
+            attempt_budget,
+        )
         result = router.executar(request)
         if self._plan_usage is not None and policy is not None:
             self._plan_usage.reconcile(
@@ -276,12 +292,13 @@ class CoreControlPlaneAIRuntime:
         messages: tuple[TextMessage, ...],
     ) -> CoreAIResult:
         capture: list[AIUsageEvent] | None = [] if self._plan_usage is not None else None
-        router_factory = lambda output_cap: self._router(
+        router_factory = lambda output_cap, attempts: self._router(
             tenant_id=tenant_id,
             unit_id=unit_id,
             capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
             capture=capture,
             output_token_cap=output_cap,
+            attempt_budget=attempts,
         )
         return _result(
             self._execute_guarded(
