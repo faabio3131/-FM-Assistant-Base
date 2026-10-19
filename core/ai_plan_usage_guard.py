@@ -26,6 +26,7 @@ class PlanQuotaPolicy:
     # These are independently enforced metrics; ai.requests and
     # ai.total_tokens are always mandatory.
     scopes: tuple[tuple[str, str], ...]
+    grants: tuple[tuple[str, str, int, int], ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -50,6 +51,14 @@ class PlanQuotaPolicy:
             for key, scope in self.scopes
         ):
             raise QuotaDenied("core_plan.metric_scope_invalid")
+        if self.grants and (
+            len(self.grants) != len(self.scopes)
+            or tuple((m, scope) for m, scope, _, _ in self.grants) != self.scopes
+            or any(type(limit) is not int or not 0 < limit <= 2_000_000_000
+                   or type(window) is not int or not 0 < window <= 31_536_000
+                   for _, _, limit, window in self.grants)
+        ):
+            raise QuotaDenied("core_plan.grants_invalid")
 
 
 class PlanPolicyAuthority(Protocol):
