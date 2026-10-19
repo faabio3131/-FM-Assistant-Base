@@ -8,8 +8,10 @@ from .channels.whatsapp_evolution import EvolutionClient, EvolutionUnavailable
 from .credential_vault import CredentialVault
 from .domain import TenantContext
 from .integration import (
-    CredentialSource, IntegrationConnection, IntegrationStatus,
     WHATSAPP_EVOLUTION_PROVIDER,
+    CredentialSource,
+    IntegrationConnection,
+    IntegrationStatus,
 )
 from .integration_repository import IntegrationRepository
 
