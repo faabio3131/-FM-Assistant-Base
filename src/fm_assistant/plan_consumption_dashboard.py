@@ -25,16 +25,16 @@ def render_consumption_dashboard(data: dict) -> str:
             state = "Aguardando telemetria autenticada"
             value = "Saldo não verificado"
             label = "O saldo não pode ser presumido como zero"
-        cards.append(
-            '<section class="metric" aria-label="' + safely(row["resource"]) + '">'
-            '<div class="metric-name">' + safely(row["resource"]) + '</div>'
-            '<div class="metric-count">Franquia: ' + safely(limit) + '</div>'
-            '<div class="metric-count">' + value + '</div>'
-            '<div class="metric-info">' + state + '</div>'
-            progress
-            '<p class="quiet">' + label + '</p>'
-            '</section>'
-        )
+        cards.append("".join((
+            '<section class="metric" aria-label="' + safely(row["resource"]) + '">',
+            '<div class="metric-name">' + safely(row["resource"]) + '</div>',
+            '<div class="metric-count">Franquia: ' + safely(limit) + '</div>',
+            '<div class="metric-count">' + value + '</div>',
+            '<div class="metric-info">' + state + '</div>',
+            progress,
+            '<p class="quiet">' + label + '</p>',
+            '</section>',
+        )))
     return (
         '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
