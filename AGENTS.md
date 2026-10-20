@@ -445,3 +445,11 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 
 
 - F3 synthetic end-to-end canonical quota test expanded on functional SHA `c7b336bac11931f73d20c387e5f7e40c1b1b83ae`: signed-grant-shaped plan projection → Core atomic request/token reserve → provider evidence typed receipt → Command-authorized Core recovery → exact remaining quota and duplicate settlement rejection, all in one test database. Exact-SHA Core AI Service CI `39349243629` SUCCESS and PostgreSQL quota security gate `39349243605` SUCCESS. This confirms deterministic flow logic only; the plan tuple is supplied as a trusted test input and Command principal is a synthetic verified instance, not an actual signed HTTP identity exchange between processes.
+
+
+## F3 — 2026-10-19 SIGNED COMMAND RECOVERY BOUNDARY (INTERNAL BUILD)
+
+- New `core/ai_governed_recovery.py` verifies short-lived RS256 Command platform-admin identity and fetches actual provider usage only through a separately injected trusted `ProviderEvidenceVerifier`, matching exact tenant/unit/request. Invalid identity, missing evidence, wrong scope, stale step-up or incomplete canonical bundle fail closed. Delegates settlement to existing Core quota ledger; no second ledger or auto-release for unknown charges.
+- `core/ai_governed_recovery_api.py` defines an opt-in internal POST `/internal/v1/command/ai/usage/reconcile`, which only accepts an opaque evidence ID and signed human authorization; default Core app does NOT register it without a verified provider evidence source. Tests enforce unsigned/tenant-role rejection and default-unmounted status.
+- Functional SHA `9e8d01f4fc4b68e053825493597e810582d98c2e`: AI Service CI run `39350176109` SUCCESS, F3 Quota PostgreSQL Security Gate `39350176117` SUCCESS. Documentation updates require fresh exact-HEAD CI.
+- NOT yet an integrated live Command↔Assistant↔Core multi-process E2E, nor a certifiable provider evidence verifier/immutable evidence store. Signed identity is validated with ephemeral synthetic RSA in tests. No payment/usage recovery API promoted to production. Continue internal construction; external homologation only after complete software build. PR #1 remains Draft; no merge/deploy.
