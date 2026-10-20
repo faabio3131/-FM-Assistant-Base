@@ -54,12 +54,12 @@ def test_verified_no_charge_has_zero_bundle_but_is_not_inferred_from_timeout():
     ("tenant_id", ""),
 ])
 def test_malformed_receipt_never_generates_recovery_charge(field, value):
-    args = dict(
-        provider="gemini", model="m", request_id="r",
-        tenant_id="tenant-A", unit_id="unit-1", input_tokens=1,
-        output_tokens=2, provider_cost_usd=Decimal("0.1"),
-        evidence_digest="c" * 64, no_charge=False,
-    )
+    args = {
+        "provider": "gemini", "model": "m", "request_id": "r",
+        "tenant_id": "tenant-A", "unit_id": "unit-1", "input_tokens": 1,
+        "output_tokens": 2, "provider_cost_usd": Decimal("0.1"),
+        "evidence_digest": "c" * 64, "no_charge": False,
+    }
     args[field] = value
     with pytest.raises(QuotaDenied):
         VerifiedProviderUsageReceipt(**args)
