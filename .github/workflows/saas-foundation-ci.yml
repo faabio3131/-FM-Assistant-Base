@@ -34,3 +34,5 @@ jobs:
           alembic/versions/20261018_0011_plan_binding_audit.py
       - name: Pytest
         run: pytest tests/saas
+      - name: Validate pinned Evolution Compose (no containers started)
+        run: docker compose --env-file deploy/evolution/.env.example -f deploy/evolution/docker-compose.yml config --quiet
