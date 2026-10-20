@@ -579,3 +579,81 @@ def test_foreign_connection_delivery_reference_cannot_be_correlated(
         status="read", evidence_sha256="d" * 64,
     )
     assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["delivery_status"] is None
+
+
+def test_provider_evidence_candidate_never_unlocks_ambiguous_job(
+    client, provision_credential,
+):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="missing-provider-ref",
+        sender="5511999999999", text="Encrypted only",
+    )
+    item = queue.claim()
+    assert item is not None
+    operation_id = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    queue.finish(
+        connection_id=cid, message_id=item.message_id,
+        reconciled=True, claim_generation=item.claim_generation,
+    )
+    assert not queue.can_investigate_missing_reference(
+        connection_id="other-tenant-connection", message_id=item.message_id,
+        operation_id=operation_id,
+    )
+    assert queue.can_investigate_missing_reference(
+        connection_id=cid, message_id=item.message_id,
+        operation_id=operation_id,
+    )
+    assert not queue.stage_provider_evidence_candidate(
+        connection_id=cid, message_id=item.message_id, operation_id="f" * 32,
+        provider_reference="possible-outbound", evidence_digest="a" * 64,
+    )
+    assert queue.stage_provider_evidence_candidate(
+        connection_id=cid, message_id=item.message_id, operation_id=operation_id,
+        provider_reference="possible-outbound", evidence_digest="a" * 64,
+    )
+    assert not queue.stage_provider_evidence_candidate(
+        connection_id=cid, message_id=item.message_id, operation_id=operation_id,
+        provider_reference="replacement", evidence_digest="b" * 64,
+    )
+    snapshot = queue.operational_snapshot(connection_id=cid)
+    assert snapshot["reconciliation"][0]["evidence_candidate_only"]
+    assert "Encrypted only" not in str(snapshot)
+    assert queue.acknowledge_reconciliation(
+        connection_id=cid, message_id=item.message_id,
+    ) is False
+    assert queue.claim() is None
+
+
+def test_outbound_connection_guard_denies_paused_and_wrong_revision(
+    client, provision_credential,
+):
+    from fm_assistant.integration import IntegrationStatus
+
+    cid, queue = _setup(client, provision_credential)
+    repo = client.app.state.integration_repository
+    context = TenantContext(
+        tenant_id="queue-tenant", unit_id="queue-unit", credential_id="test",
+    )
+    conn = repo.get(context, cid)
+    assert conn is not None
+    with queue.outbound_connection_guard(
+        connection_id=cid, expected_revision=conn.revision,
+    ):
+        pass
+    with pytest.raises(PermissionError, match="evolution_connection_changed_before_send"):
+        with queue.outbound_connection_guard(
+            connection_id=cid, expected_revision=conn.revision + 1,
+        ):
+            pass
+    repo.update_connection(
+        context, cid, status=IntegrationStatus.DISABLED, bump_revision=True,
+    )
+    with pytest.raises(PermissionError, match="evolution_connection_changed_before_send"):
+        with queue.outbound_connection_guard(
+            connection_id=cid, expected_revision=conn.revision,
+        ):
+            pass
