@@ -187,9 +187,10 @@ class EvolutionClient:
         import hashlib
         import json
 
-        sanitized = {"id": provider_reference, "fromMe": True}
+        # Hash the actual provider response, never persist the record body.
         return hashlib.sha256(
-            json.dumps(sanitized, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(matches[0], sort_keys=True, separators=(",", ":"),
+                       ensure_ascii=False).encode("utf-8")
         ).hexdigest()
 
     def connection_state(self, instance: str, *, instance_token: str) -> str:
