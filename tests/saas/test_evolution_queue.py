@@ -661,3 +661,45 @@ def test_outbound_connection_guard_denies_paused_and_wrong_revision(
         ),
     ):
         pass
+
+
+def test_evidence_investigation_api_requires_scope_and_never_grants_send(
+    client, provision_credential,
+):
+    cid, queue = _setup(client, provision_credential)
+    own = provision_credential(client, "queue-tenant", "queue-unit")
+    foreign = provision_credential(client, "foreign-tenant", "foreign-unit")
+    queue.enqueue(
+        connection_id=cid, message_id="api-evidence",
+        sender="5511999999999", text="No storage in logs",
+    )
+    item = queue.claim()
+    assert item is not None
+    op = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    queue.finish(
+        connection_id=cid, message_id=item.message_id,
+        reconciled=True, claim_generation=item.claim_generation,
+    )
+    url = (
+        f"/v1/channels/whatsapp/qr/{cid}/operations/"
+        "api-evidence/investigate"
+    )
+    payload = {"operation_id": op, "provider_reference": "OUT-1"}
+    assert client.post(url, json=payload).status_code == 401
+    assert client.post(
+        url, json=payload, headers={"Authorization": f"Bearer {foreign}"},
+    ).status_code == 404
+    assert client.post(
+        url, json={"operation_id": "f" * 32, "provider_reference": "OUT-1"},
+        headers={"Authorization": f"Bearer {own}"},
+    ).status_code == 409
+    # Unit test fixture intentionally has no Evolution credentials. It cannot
+    # invent proof or silently clear an uncertain attempt.
+    assert client.post(
+        url, json=payload, headers={"Authorization": f"Bearer {own}"},
+    ).status_code == 503
+    assert queue.state(connection_id=cid, message_id="api-evidence") == "reconcile_required"
+    assert queue.claim() is None
