@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, pool
 import core.ai_admin_audit
 import core.ai_circuit_state_store
 import core.ai_quota_store
+import core.ai_provider_evidence_store
 import core.ai_usage_ledger  # noqa: F401 - registra tabelas do ledger
 from alembic import context
 from core.ai_control_plane import ControlPlaneBase
