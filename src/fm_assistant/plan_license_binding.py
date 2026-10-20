@@ -25,6 +25,7 @@ from .db import (
 )
 
 BIND_PATH = "/internal/v1/command/assistant-plans/bind"
+STATUS_PATH = "/internal/v1/command/assistant-plans/binding-status"
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 NONCE = re.compile(r"^[A-Za-z0-9_-]{22,96}$")
 
@@ -42,6 +43,66 @@ class GovernedPlanLicenseBinding:
         self._key = signing_key
         self._key_id = key_id
         self._org = trusted_organization
+
+    def binding_status(
+        self, *, headers: dict[str, str | None], raw_body: bytes,
+        product_code: str, organization_id: str, tenant_id: str,
+        plan_code: str, plan_revision: int,
+    ) -> str:
+        """Read-only, signed status proof for uncertain Command outbox attempts.
+
+        A nonce is consumed before looking up the persisted binding, blocking
+        replay; no tenant can query another tenant without Command authority.
+        """
+        now = datetime.now(UTC)
+        ts = headers.get("timestamp") or ""
+        kid = headers.get("key_id") or ""
+        nonce = headers.get("nonce") or ""
+        signature = headers.get("signature") or ""
+        if (
+            not self._key or len(self._key) < 32 or not self._key_id
+            or not self._org or kid != self._key_id
+            or product_code != "VENDEATENDEIA" or organization_id != self._org
+            or not NONCE.fullmatch(nonce) or len(raw_body) > 2048
+            or len(ts) != 10 or not ts.isascii() or not ts.isdecimal()
+            or abs(int(ts) - int(now.timestamp())) > 60
+            or len(signature) != 64
+            or any(not isinstance(x, str) or not IDENTIFIER.fullmatch(x)
+                   for x in (tenant_id, plan_code))
+            or type(plan_revision) is not int or plan_revision < 1
+        ):
+            raise PlanLicenseBindingDenied("plan.binding_denied")
+        expected = sign_command_control(
+            key=self._key, key_id=kid, timestamp=ts, nonce=nonce,
+            body=raw_body, path=STATUS_PATH,
+        )
+        if not hmac.compare_digest(expected, signature):
+            raise PlanLicenseBindingDenied("plan.binding_denied")
+        try:
+            decoded = json.loads(raw_body)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise PlanLicenseBindingDenied("plan.binding_denied") from exc
+        if decoded != {
+            "product_code": product_code, "organization_id": organization_id,
+            "tenant_id": tenant_id, "plan_code": plan_code,
+            "plan_revision": plan_revision,
+        }:
+            raise PlanLicenseBindingDenied("plan.binding_denied")
+        try:
+            with self._sessions.begin() as db:
+                db.add(PlanSyncNonceORM(key_id=kid, nonce=nonce, created_at=now))
+                db.flush()
+                row = db.scalar(select(TenantLicenseORM).where(
+                    TenantLicenseORM.tenant_id == tenant_id,
+                ))
+                if (
+                    row is None or row.plan_code != plan_code
+                    or row.plan_revision != plan_revision
+                ):
+                    return "not_confirmed"
+                return "bound_confirmed"
+        except IntegrityError as exc:
+            raise PlanLicenseBindingDenied("plan.binding_denied") from exc
 
     def bind(
         self, *, headers: dict[str, str | None], raw_body: bytes,
