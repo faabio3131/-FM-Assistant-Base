@@ -59,7 +59,7 @@ class EvolutionRuntime:
         connection = self._integrations.get_unscoped(connection_id)
         if connection is None or connection.provider_key != "whatsapp_evolution":
             raise LookupError("evolution_connection_not_found")
-        if connection.status in {IntegrationStatus.DISABLED, IntegrationStatus.REVOKED}:
+        if connection.status is IntegrationStatus.REVOKED:
             raise PermissionError("evolution_connection_inactive")
         instance = connection.config.get("instance_name")
         if not isinstance(instance, str):
@@ -110,7 +110,9 @@ class EvolutionRuntime:
             # Verified by the existing signed FM broker before parsing payload.
             # Authenticated native ingress already checks its per-instance secret.
             # Status must describe our own outbound reference, never inbound.
-            if self._queue is None or connection.status is not IntegrationStatus.ACTIVE:
+            if self._queue is None or connection.status not in {
+                IntegrationStatus.ACTIVE, IntegrationStatus.DISABLED,
+            }:
                 raise PermissionError("evolution_delivery_correlation_unavailable")
             updates = payload.get("data")
             updates = updates if isinstance(updates, list) else [updates]
