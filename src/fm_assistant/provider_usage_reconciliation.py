@@ -51,7 +51,12 @@ def from_trusted_core_receipt(receipt: dict, *, request_id: str) -> ProviderUsag
     """Parse trusted Core result only. No fallback from text length or pricing."""
     if not isinstance(receipt, dict) or receipt.get("request_id") != request_id:
         raise ValueError("provider_usage_receipt_mismatch")
-    if not all(isinstance(receipt.get(key), str) and receipt[key].strip()\n               for key in ("provider", "model")):\n        raise ValueError("provider_usage_identity_invalid")\n    state = receipt.get("usage_status")
+    if not all(
+        isinstance(receipt.get(key), str) and receipt[key].strip()
+        for key in ("provider", "model")
+    ):
+        raise ValueError("provider_usage_identity_invalid")
+    state = receipt.get("usage_status")
     if state == "uncertain":
         return ProviderUsage(
             provider=receipt["provider"], model=receipt["model"],
