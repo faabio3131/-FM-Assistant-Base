@@ -381,10 +381,24 @@ class EvolutionRuntime:
                     or (lease_lost is not None and lease_lost.is_set())
                 ):
                     raise PermissionError("evolution_connection_changed_before_send")
-                outbound_id = self._transport.send_text(
-                    instance, instance_token=self._vault.decrypt(token),
-                    recipient=item.sender, message=reply.content,
-                )
+                # The lock is held through HTTP, serializing against
+                # pause/revoke state mutations on PostgreSQL.
+                if self._queue is not None:
+                    with self._queue.outbound_connection_guard(
+                        connection_id=item.connection_id,
+                        expected_revision=connection.revision,
+                    ):
+                        if lease_lost is not None and lease_lost.is_set():
+                            raise RuntimeError("evolution_worker_lease_lost")
+                        outbound_id = self._transport.send_text(
+                            instance, instance_token=self._vault.decrypt(token),
+                            recipient=item.sender, message=reply.content,
+                        )
+                else:
+                    outbound_id = self._transport.send_text(
+                        instance, instance_token=self._vault.decrypt(token),
+                        recipient=item.sender, message=reply.content,
+                    )
                 if self._queue is not None and operation_id is not None:
                     self._queue.record_outbound_result(
                         connection_id=item.connection_id, message_id=item.message_id,
