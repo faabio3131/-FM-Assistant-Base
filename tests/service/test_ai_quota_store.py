@@ -517,3 +517,69 @@ def test_no_charge_attestation_only_releases_verified_full_bundle(quota):
     assert store.usage_snapshot(
         tenant_id="a", unit_id="u1", capability="text", at=NOW,
     ).remaining_units == 3
+
+
+def test_verified_provider_receipt_settles_canonical_core_reservation_once(quota):
+    """No parallel Assistant ledger, no inferred usage and no double charge."""
+    from decimal import Decimal
+
+    from core.ai_admin_audit import CommandAdminAuditRecord
+    from core.ai_command_authority import VerifiedCommandAdmin
+    from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
+
+    store, sessions = quota
+    with sessions.begin() as db:
+        for metric, bound in (("ai.requests", 50), ("ai.total_tokens", 1000)):
+            db.add(AIQuotaPolicyRecord(
+                tenant_id="a", unit_id="__tenant__", capability=metric,
+                limit_units=bound, window_seconds=60, revision=7,
+            ))
+    reserved = (
+        QuotaRequirement(
+            tenant_id="a", unit_id="__tenant__", capability="ai.requests",
+            units=1, policy_revision=7,
+        ),
+        QuotaRequirement(
+            tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens",
+            units=400, policy_revision=7,
+        ),
+    )
+    store.reserve_bundle(needs=reserved, request_id="provider-confirmed", at=NOW)
+    before = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert before.reserved_units == 400 and before.consumed_units == 0
+    principal = VerifiedCommandAdmin(
+        user_id="fm-human-admin", session_id="fm-session",
+        token_id="token-provider-confirmed-123456789",
+        issued_at=int(NOW.timestamp()) - 3,
+        expires_at=int(NOW.timestamp()) + 120,
+        step_up_at=int(NOW.timestamp()) - 3,
+        permissions=frozenset({"core.ai.admin.mutate"}),
+    )
+    receipt = VerifiedProviderUsageReceipt(
+        tenant_id="a", unit_id="u1", provider="gemini", model="gemini-model",
+        request_id="provider-confirmed", input_tokens=140, output_tokens=60,
+        provider_cost_usd=Decimal("0.015"),
+        evidence_digest="d" * 64,
+    )
+    store.reconcile_verified_provider_receipt(
+        receipt=receipt, request_policy_revision=7, tokens_policy_revision=7,
+        principal=principal, at=NOW,
+    )
+    after = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert after.reserved_units == 0
+    assert after.consumed_units == 200
+    with sessions() as db:
+        assert len(db.scalars(select(CommandAdminAuditRecord).where(
+            CommandAdminAuditRecord.action == "core.ai.quota.reconcile",
+        )).all()) == 1
+    with pytest.raises(QuotaDenied, match="core_quota.recovery_conflict"):
+        store.reconcile_verified_provider_receipt(
+            receipt=receipt, request_policy_revision=7,
+            tokens_policy_revision=7, principal=principal, at=NOW,
+        )
