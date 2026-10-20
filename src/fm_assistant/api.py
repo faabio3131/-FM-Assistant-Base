@@ -51,6 +51,10 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .commercial_license_transition import (
+    CommercialLicenseTransitionDenied,
+    SignedCommercialLicenseTransition,
+)
 from .license_security_hold import LicenseSecurityHoldDenied, SignedLicenseSecurityHold
 from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
@@ -181,6 +185,29 @@ class PlanBindingStatusPayload(BaseModel):
     plan_code: str = Field(min_length=2, max_length=120)
     plan_revision: int = Field(gt=0)
     operation_nonce: str = Field(min_length=22, max_length=96)
+
+
+class CommandCommercialTransitionPayload(BaseModel):
+    """Strict internal FM-only entitlement lifecycle; no client token access."""
+
+    model_config = {"extra": "forbid"}
+
+    product_code: str = Field(pattern=r"^VENDEATENDEIA$")
+    organization_id: str = Field(min_length=1, max_length=128)
+    tenant_id: str = Field(min_length=1, max_length=128)
+    actor_user_id: str = Field(min_length=1, max_length=128)
+    command_request_id: str = Field(min_length=1, max_length=128)
+    approved_at: int = Field(strict=True)
+    action: str = Field(pattern=r"^(SUSPEND_DELINQUENCY|REACTIVATE_VERIFIED|RENEW_VERIFIED|APPLY_UPGRADE|APPLY_DOWNGRADE|CANCEL_AT_PERIOD_END)$")
+    expected_status: str = Field(pattern=r"^(active|trial|suspended)$")
+    expected_plan_code: str = Field(min_length=1, max_length=120)
+    expected_plan_revision: int = Field(strict=True, gt=0)
+    expected_valid_until: int = Field(strict=True, gt=0)
+    target_plan_code: str = Field(min_length=1, max_length=120)
+    target_plan_revision: int = Field(strict=True, gt=0)
+    target_valid_until: int = Field(strict=True, gt=0)
+    effective_at: int = Field(strict=True, gt=0)
+    verified_payment_ref: str = Field(min_length=1, max_length=128)
 
 
 class CommandLicenseSecurityHoldPayload(BaseModel):
@@ -575,6 +602,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         trusted_organization=cfg.trusted_command_organization_id,
     )
     qr_display_policy = CommandQrDisplayPolicyService(
+        sessions=session_factory,
+        key_id=cfg.command_control_key_id,
+        signing_key=cfg.command_control_signing_key,
+        trusted_organization=cfg.trusted_command_organization_id,
+    )
+    commercial_license_transition = SignedCommercialLicenseTransition(
         sessions=session_factory,
         key_id=cfg.command_control_key_id,
         signing_key=cfg.command_control_signing_key,
@@ -1448,6 +1481,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for row in rows
         ]
 
+
+    @app.post(
+        "/internal/v1/command/assistant-plans/commercial-transition",
+        include_in_schema=False,
+    )
+    async def internal_command_commercial_transition(request: Request) -> JSONResponse:
+        raw = await request.body()
+        if len(raw) > 3072:
+            raise HTTPException(status_code=401, detail="license.commercial_denied")
+        try:
+            payload = CommandCommercialTransitionPayload.model_validate_json(raw)
+            status = commercial_license_transition.apply(
+                raw_body=raw,
+                headers={
+                    "key_id": request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Command-Nonce"),
+                    "signature": request.headers.get("X-FM-Command-Signature"),
+                },
+                **payload.model_dump(),
+            )
+        except (CommercialLicenseTransitionDenied, ValidationError) as exc:
+            raise HTTPException(
+                status_code=401, detail="license.commercial_denied",
+            ) from exc
+        return JSONResponse(
+            {"status": status}, headers={"Cache-Control": "no-store"},
+        )
 
     @app.post(
         "/internal/v1/command/assistant-plans/security-hold",
