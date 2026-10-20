@@ -522,6 +522,42 @@ class QuotaReservations:
                 row.consumed_units = consumed
             db.flush()
 
+    def reconcile_verified_provider_receipt(
+        self, *, receipt, request_policy_revision: int,
+        tokens_policy_revision: int, principal: VerifiedCommandAdmin,
+        at: datetime, request_scope: str = "__tenant__",
+        tokens_scope: str = "__tenant__",
+    ) -> None:
+        """Bind verified provider evidence to the *existing* atomic ledger.
+
+        Callers must separately authenticate a provider evidence source and
+        verify the signed Command admin actor; this method does NOT accept an
+        unauthenticated webhook/tenant payload. It delegates all audit, JTI,
+        revision, one-time and no-charge controls to reconcile_ambiguous_bundle.
+        """
+        from core.ai_verified_usage_receipt import (
+            VerifiedProviderUsageReceipt,
+            recovery_bundle_from_verified_receipt,
+        )
+
+        if not isinstance(receipt, VerifiedProviderUsageReceipt):
+            raise QuotaDenied("core_usage_receipt_unverified")
+        requirements = recovery_bundle_from_verified_receipt(
+            receipt,
+            request_policy_revision=request_policy_revision,
+            tokens_policy_revision=tokens_policy_revision,
+            request_scope=request_scope, tokens_scope=tokens_scope,
+        )
+        return self.reconcile_ambiguous_bundle(
+            usage=requirements, request_id=receipt.request_id,
+            principal=principal, evidence_digest=receipt.evidence_digest,
+            evidence_kind=(
+                "provider_no_charge_confirmed"
+                if receipt.no_charge else "provider_usage_confirmed"
+            ),
+            at=at,
+        )
+
     def usage_snapshot(
         self, *, tenant_id: str, unit_id: str,
         capability: str, at: datetime,
