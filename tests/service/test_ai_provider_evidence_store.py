@@ -103,3 +103,57 @@ def test_missing_record_never_bypasses_command_recovery(store):
             evidence_id="missing", request_id="req-a",
             tenant_id="tenant-a", unit_id="unit-a",
         )
+
+
+def test_verified_signed_source_is_mandatory_before_gateway_acceptance(store):
+    import json
+    from datetime import UTC, datetime
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from core.ai_provider_source_verifier import ProviderSigningPolicy
+
+    ledger, _ = store
+    key = Ed25519PrivateKey.generate()
+    pinned = ProviderSigningPolicy(
+        issuer="signed-provider-ci",
+        public_key=key.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+        ),
+    )
+    now = datetime.now(UTC)
+    raw = json.dumps({
+        "issuer": "signed-provider-ci",
+        "request_id": "req-a", "tenant_id": "tenant-a", "unit_id": "unit-a",
+        "provider": "gemini", "model": "gemini-model",
+        "input_tokens": 100, "output_tokens": 50,
+        "cost_usd": "0.0025", "no_charge": False,
+        "observed_at": int(now.timestamp()),
+    }, sort_keys=True, separators=(",", ":")).encode()
+    signed = key.sign(b"FM_PROVIDER_USAGE_SOURCE_V1\n" + raw)
+    with pytest.raises(QuotaDenied, match="provider_source_unauthenticated"):
+        ledger.record_verified_source(
+            evidence_id="provider-signed-1", provider_payload=raw,
+            provider_signature=b"", source_policy=pinned,
+            expected_request_id="req-a", expected_tenant_id="tenant-a",
+            expected_unit_id="unit-a", at=now,
+        )
+    with pytest.raises(QuotaDenied):
+        ledger.record_verified_source(
+            evidence_id="provider-signed-1", provider_payload=raw,
+            provider_signature=signed, source_policy=pinned,
+            expected_request_id="req-a", expected_tenant_id="foreign",
+            expected_unit_id="unit-a", at=now,
+        )
+    assert ledger.record_verified_source(
+        evidence_id="provider-signed-1", provider_payload=raw,
+        provider_signature=signed, source_policy=pinned,
+        expected_request_id="req-a", expected_tenant_id="tenant-a",
+        expected_unit_id="unit-a", at=now,
+    )
+    evidence = ledger.verify(
+        evidence_id="provider-signed-1", request_id="req-a",
+        tenant_id="tenant-a", unit_id="unit-a",
+    )
+    assert evidence.input_tokens + evidence.output_tokens == 150
