@@ -433,3 +433,12 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - `docs/F3_8_AMBIGUOUS_USAGE_RECOVERY.md` documents limits: the evidence hash references reviewed material and is NOT itself proof that provider billed zero; independent provider evidence ingestion/verification and signed Command-facing API remain separate engineering work.
 - First functional Core quota reconciliation CI `39277663167` SUCCESS, PostgreSQL `39277662911` SUCCESS. Additional concurrent PostgreSQL and latest documentation runs were queued at this checkpoint; **do not mark final subgate GREEN** until their run results are verified.
 - F3 BUILD_IN_PROGRESS. No merge/deploy/production credentials or external homologation. Keep Command/Assistant/Kordena unchanged.
+
+
+## F3 — 2026-10-19 GOVERNED PROVIDER RECEIPT TO CORE QUOTA SETTLEMENT
+
+- Implemented `core/ai_verified_usage_receipt.py` for strict provider/model/request/tenant/unit identity, nonnegative integer input/output tokens, finite nonnegative Decimal FM-private provider cost and a SHA-256 evidence reference. A provider no-charge attestation must be explicitly verified; timeout/unknown status never becomes zero-cost.
+- `QuotaReservations.reconcile_verified_provider_receipt` delegates to existing canonical `reconcile_ambiguous_bundle`; human `VerifiedCommandAdmin`, fresh step-up, unique Command token JTI, complete reservation bundle, policy revision, single settlement and append-only audit remain mandatory. No second Assistant ledger or self-service recovery path created.
+- Added `tests/service/test_ai_verified_usage_receipt.py` plus canonical ledger settlement/integrity test in `tests/service/test_ai_quota_store.py`. All tests synthetic. Functional SHA `0f4d6b5df71cb4f606dd40bdc1e68334827dfbe8`. CI status MUST be verified independently before certification.
+- These typed receipts are not themselves proof of the provider's signature: independent evidence ingestion/verification and signed Command HTTP authority remain pending internal construction. No public recovery endpoint is opened.
+- Cross-service Command→Assistant→Core multi-process E2E with PostgreSQL still open; passing local contracts do NOT imply it is certified. FM Core is the financial/usage source of truth; prices/costs remain FM-private. All external provider credential/version/production homologation remains after full software construction. No merge/deploy, real secrets or production database changes. F3 BUILD_IN_PROGRESS.
