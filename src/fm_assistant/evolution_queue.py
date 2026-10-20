@@ -521,6 +521,22 @@ class EvolutionInboundQueue:
                 ],
             }
 
+    def can_investigate_missing_reference(
+        self, *, connection_id: str, message_id: str, operation_id: str,
+    ) -> bool:
+        """Never query the provider for an arbitrary tenant-controlled reference."""
+        with self._sessions() as session:
+            return bool(session.scalar(
+                select(func.count()).select_from(EvolutionInboundJobORM).where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.message_id == message_id,
+                    EvolutionInboundJobORM.outbound_operation_id == operation_id,
+                    EvolutionInboundJobORM.state == "reconcile_required",
+                    EvolutionInboundJobORM.outbound_reference.is_(None),
+                    EvolutionInboundJobORM.evidence_candidate_reference.is_(None),
+                )
+            ))
+
     def stage_provider_evidence_candidate(
         self, *, connection_id: str, message_id: str, operation_id: str,
         provider_reference: str, evidence_digest: str,
