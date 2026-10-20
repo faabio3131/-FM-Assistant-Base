@@ -76,3 +76,73 @@ def test_recovery_scope_and_revision_cannot_be_forged():
             _receipt(), request_policy_revision=2,
             tokens_policy_revision=2, request_scope="other-unit",
         )
+
+
+def test_license_projection_reservation_and_verified_recovery_use_same_core_ledger(tmp_path):
+    """Synthetic Command policy → Assistant scope → Core reserve/reconcile."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from core.ai_command_authority import VerifiedCommandAdmin
+    from core.ai_control_plane import ControlPlaneBase
+    from core.ai_quota_store import QuotaRequirement, QuotaReservations
+
+    now = datetime(2026, 10, 19, 12, tzinfo=UTC)
+    engine = create_engine(f"sqlite:///{tmp_path / 'signed-plan-usage.db'}")
+    ControlPlaneBase.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    ledger = QuotaReservations(sessions)
+    try:
+        ledger.project_signed_grants(
+            tenant_id="tenant-A", unit_id="unit-1", revision=5,
+            grants=(("ai.requests", "tenant", 50, 3600),
+                    ("ai.total_tokens", "tenant", 3000, 3600)),
+        )
+        reserved = (
+            QuotaRequirement(
+                tenant_id="tenant-A", unit_id="__tenant__",
+                capability="ai.requests", units=1, policy_revision=5,
+            ),
+            QuotaRequirement(
+                tenant_id="tenant-A", unit_id="__tenant__",
+                capability="ai.total_tokens", units=450, policy_revision=5,
+            ),
+        )
+        ledger.reserve_bundle(
+            needs=reserved, request_id="request-1", at=now,
+        )
+        before = ledger.usage_snapshot(
+            tenant_id="tenant-A", unit_id="__tenant__",
+            capability="ai.total_tokens", at=now,
+        )
+        assert before.reserved_units == 450
+        human = VerifiedCommandAdmin(
+            user_id="human", session_id="session",
+            token_id="command-admin-jti-license-123",
+            issued_at=int(now.timestamp()) - 5,
+            expires_at=int(now.timestamp()) + 60,
+            step_up_at=int(now.timestamp()) - 5,
+            permissions=frozenset({"core.ai.admin.mutate"}),
+        )
+        ledger.reconcile_verified_provider_receipt(
+            receipt=_receipt(tokens=200, cost="0.02"),
+            request_policy_revision=5, tokens_policy_revision=5,
+            principal=human, at=now,
+        )
+        after = ledger.usage_snapshot(
+            tenant_id="tenant-A", unit_id="__tenant__",
+            capability="ai.total_tokens", at=now,
+        )
+        assert after.reserved_units == 0
+        assert after.consumed_units == 250
+        assert after.remaining_units == 2750
+        with pytest.raises(QuotaDenied):
+            ledger.reconcile_verified_provider_receipt(
+                receipt=_receipt(tokens=200, cost="0.02"),
+                request_policy_revision=5, tokens_policy_revision=5,
+                principal=human, at=now,
+            )
+    finally:
+        engine.dispose()
