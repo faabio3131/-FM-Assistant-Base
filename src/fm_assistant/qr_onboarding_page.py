@@ -54,9 +54,28 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
  const resume=document.getElementById("resume");
  const qrbox=document.getElementById("qrbox"), qr=document.getElementById("qrcode");
  let connection=null, waiting=false, paused=false;
- // FM corporate default. Signed Command policy projection is a separate gate.
- const QR_DISPLAY_CAP_MS=45000;
+ // FM-safe fallback until a signed corporate revision is projected.
+ let QR_DISPLAY_CAP_MS=45000;
  let shownQr=null, shownAt=0, expiryTimer=null;
+ function setDisplayCap(seconds) {
+   const next=(Number.isInteger(seconds) && seconds>=15 && seconds<=120)
+     ?seconds*1000:45000;
+   if(next===QR_DISPLAY_CAP_MS)return;
+   QR_DISPLAY_CAP_MS=next;
+   // Changes to the FM policy cannot restart an already visible QR window.
+   // Recalculate the original deadline, including when the tab is inactive.
+   if(!shownQr || !shownAt)return;
+   const sameQr=shownQr;
+   if(expiryTimer!==null){clearTimeout(expiryTimer);expiryTimer=null;}
+   const remaining=Math.max(0,shownAt+QR_DISPLAY_CAP_MS-Date.now());
+   const expire=()=>{
+     if(shownQr!==sameQr)return;
+     qr.removeAttribute("src");visible(qrbox,false);
+     show("QR Code expirado na tela. Aguardando código novo do provedor…","pending");
+   };
+   if(remaining===0)expire();
+   else expiryTimer=setTimeout(expire,remaining);
+ }
  function show(message,mode) {
    status.textContent=message;
    dot.style.background=mode==="ok"?"#36c6b3":mode==="error"?"#f58c7d":"#e4b55c";
@@ -72,11 +91,13 @@ a{color:#8de5e5}@media(max-width:500px){main{padding:22px}}
    try {
      if(!connection) {
        const latest=await request(base+"/current");
+       setDisplayCap(latest.qr_display_seconds);
        if(!latest.connection_id) {show("Pronto para conectar","pending");visible(connect,true);return;}
        connection=latest.connection_id;
      }
      visible(connect,false);
      const current=await request(base+"/current");
+     setDisplayCap(current.qr_display_seconds);
      if(current.connection_id===connection && current.status==="disabled") {
        paused=true;shownQr=null;shownAt=0;
        if(expiryTimer!==null){clearTimeout(expiryTimer);expiryTimer=null;}
