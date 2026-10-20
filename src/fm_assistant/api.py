@@ -170,6 +170,16 @@ class PlanLicenseBindPayload(BaseModel):
     plan_revision: int = Field(gt=0)
 
 
+class PlanBindingStatusPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    product_code: str = Field(pattern=r"^VENDEATENDEIA$")
+    organization_id: str = Field(min_length=1, max_length=128)
+    tenant_id: str = Field(min_length=1, max_length=128)
+    plan_code: str = Field(min_length=2, max_length=120)
+    plan_revision: int = Field(gt=0)
+
+
 class CommandPlanProjectionPayload(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -1417,6 +1427,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="plan_binding_denied") from exc
         return JSONResponse(
             {"status": state}, headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post(
+        "/internal/v1/command/assistant-plans/binding-status",
+        include_in_schema=False,
+    )
+    async def internal_command_plan_binding_status(request: Request) -> JSONResponse:
+        raw = await request.body()
+        if len(raw) > 2048:
+            raise HTTPException(status_code=401, detail="plan_binding_denied")
+        try:
+            payload = PlanBindingStatusPayload.model_validate_json(raw)
+            status = plan_license_binding.binding_status(
+                raw_body=raw,
+                headers={
+                    "key_id": request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Command-Nonce"),
+                    "signature": request.headers.get("X-FM-Command-Signature"),
+                },
+                **payload.model_dump(),
+            )
+        except (PlanLicenseBindingDenied, ValidationError) as exc:
+            raise HTTPException(status_code=401, detail="plan_binding_denied") from exc
+        return JSONResponse(
+            {"status": status}, headers={"Cache-Control": "no-store"},
         )
 
     @app.post("/internal/v1/command/assistant-plans/project", include_in_schema=False)
