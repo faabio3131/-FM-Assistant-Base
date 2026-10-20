@@ -11,7 +11,11 @@ from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.command_bridge_control_service import sign_command_control
 from fm_assistant.db import Base, LicenseSecurityHoldAuditORM, TenantLicenseORM, TenantORM
-from fm_assistant.license_security_hold import PATH, LicenseSecurityHoldDenied, SignedLicenseSecurityHold
+from fm_assistant.license_security_hold import (
+    PATH,
+    LicenseSecurityHoldDenied,
+    SignedLicenseSecurityHold,
+)
 
 KEY = "synthetic-fm-license-security-test-key-32-characters"
 
