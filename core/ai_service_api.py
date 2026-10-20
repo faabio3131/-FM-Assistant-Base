@@ -226,7 +226,8 @@ def create_app(
                 instruction=payload.instruction,
             )
         except (
-            ControlPlaneError, SegredoAusente, ReferenciaSegredoInvalida, SQLAlchemyError
+            ControlPlaneError, QuotaDenied, SegredoAusente, ReferenciaSegredoInvalida,
+            SQLAlchemyError,
         ) as exc:
             raise HTTPException(
                 status_code=503, detail="core_control_plane_dependency_unavailable"
