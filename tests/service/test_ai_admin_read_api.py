@@ -106,3 +106,39 @@ def test_operator_read_api_disabled_without_admin_key(fixture):
             headers={"X-Core-Admin-Key": "operator-secret"},
         )
         assert response.status_code == 404
+
+
+def test_operator_finops_alert_requires_admin_key_and_preserves_unknown_cost(fixture):
+    with TestClient(create_app(_cfg(fixture))) as client:
+        url = "/v1/admin/ai/usage/request"
+        parameters = {
+            "tenant_id": "tenant-a", "unit_id": "unit-1", "request_id": "req",
+        }
+        assert client.get(url, params=parameters).status_code == 401
+        assert client.get(
+            url, params=parameters,
+            headers={"X-Core-Service-Key": "consumer-only"},
+        ).status_code == 401
+        authorized = {"X-Core-Admin-Key": "operator-secret"}
+        result = client.get(url, params=parameters, headers=authorized)
+        assert result.status_code == 200
+        payload = result.json()
+        assert payload["status"] == "needs_attention"
+        assert payload["reasons"] == ["provider_cost_unverified"]
+        assert payload["unknown_attempts"] == 1
+        assert payload["known_cost_subtotal"] == "0"
+        assert payload["all_costs_known"] is False
+        cross_tenant = client.get(
+            url, params={**parameters, "tenant_id": "tenant-b"},
+            headers=authorized,
+        )
+        assert cross_tenant.status_code == 200
+        assert cross_tenant.json()["status"] == "needs_attention"
+        assert cross_tenant.json()["reasons"] == ["usage_evidence_unavailable"]
+        assert cross_tenant.json()["observed_attempts"] == 0
+        mismatch = client.get(
+            url, params={**parameters, "maximum_known_cost": "0.05", "currency": "BRL"},
+            headers=authorized,
+        )
+        assert mismatch.status_code == 200
+        assert mismatch.json()["unknown_attempts"] == 1
