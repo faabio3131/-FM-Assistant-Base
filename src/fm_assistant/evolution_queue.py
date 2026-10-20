@@ -484,6 +484,9 @@ class EvolutionInboundQueue:
                         "outbound_status": row.outbound_status,
                         "outbound_operation_id": row.outbound_operation_id,
                         "outbound_reference": row.outbound_reference,
+                        "evidence_candidate_reference": row.evidence_candidate_reference,
+                        "evidence_candidate_digest": row.evidence_candidate_digest,
+                        "evidence_candidate_only": row.evidence_candidate_reference is not None,
                         "delivery_status": row.delivery_status,
                         "delivery_evidence_sha256": row.delivery_evidence_sha256,
                         "delivery_observed_at": (
@@ -503,6 +506,9 @@ class EvolutionInboundQueue:
                         "outbound_status": row.outbound_status,
                         "outbound_operation_id": row.outbound_operation_id,
                         "outbound_reference": row.outbound_reference,
+                        "evidence_candidate_reference": row.evidence_candidate_reference,
+                        "evidence_candidate_digest": row.evidence_candidate_digest,
+                        "evidence_candidate_only": row.evidence_candidate_reference is not None,
                         "delivery_status": row.delivery_status,
                         "delivery_evidence_sha256": row.delivery_evidence_sha256,
                         "delivery_observed_at": (
@@ -514,6 +520,49 @@ class EvolutionInboundQueue:
                     for row in jobs
                 ],
             }
+
+    def stage_provider_evidence_candidate(
+        self, *, connection_id: str, message_id: str, operation_id: str,
+        provider_reference: str, evidence_digest: str,
+    ) -> bool:
+        """Store read-only provider lookup evidence without clearing quarantine.
+
+        An external provider record alone cannot establish that an ambiguous
+        HTTP attempt created that record. It is a lead for governed review,
+        never conclusive linking proof or a refund/automatic resend trigger.
+        """
+        import re
+
+        if (
+            not isinstance(operation_id, str)
+            or re.fullmatch(r"[0-9a-f]{32}", operation_id) is None
+            or not isinstance(provider_reference, str)
+            or re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", provider_reference) is None
+            or not isinstance(evidence_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", evidence_digest) is None
+        ):
+            raise ValueError("evolution_evidence_candidate_invalid")
+        with self._sessions() as session:
+            result = session.execute(
+                update(EvolutionInboundJobORM).where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.message_id == message_id,
+                    EvolutionInboundJobORM.state == "reconcile_required",
+                    EvolutionInboundJobORM.outbound_operation_id == operation_id,
+                    EvolutionInboundJobORM.outbound_reference.is_(None),
+                    EvolutionInboundJobORM.evidence_candidate_reference.is_(None),
+                ).values(
+                    evidence_candidate_reference=provider_reference,
+                    evidence_candidate_digest=evidence_digest,
+                    evidence_requested_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            if result.rowcount != 1:
+                session.rollback()
+                return False
+            session.commit()
+            return True
 
     def acknowledge_reconciliation(
         self, *, connection_id: str, message_id: str,
