@@ -9,16 +9,18 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from core.ai_control_plane import (
-    AIControlPlaneStore, ControlPlaneBase, RouteDefinition,
+    AIControlPlaneStore,
+    ControlPlaneBase,
+    RouteDefinition,
 )
 from core.ai_control_plane_runtime import CoreControlPlaneAIRuntime
 from core.ai_plan_usage_guard import PlanQuotaPolicy, PlanUsageGuard
 from core.ai_providers import _int_or_none
-from core.ai_quota_store import QuotaDenied, QuotaReservations
+from core.ai_quota_store import AIQuotaReservationRecord, QuotaDenied, QuotaReservations
 from core.ai_router import CapabilityIA
 from core.seguranca.segredos import SecretValue
 
@@ -173,8 +175,6 @@ def test_audio_oversize_and_revoked_license_never_resolve_secret(
         transcribe(runtime(active=False),request_id="revoked")
     assert creds.calls==0 and sends==[]
     with ledger._sessions() as db:
-        from sqlalchemy import select
-        from core.ai_quota_store import AIQuotaReservationRecord
         assert db.scalars(select(AIQuotaReservationRecord)).all() == []
 
 
