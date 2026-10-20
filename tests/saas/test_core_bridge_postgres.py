@@ -12,7 +12,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from threading import Barrier
+from threading import Barrier, Event
 from uuid import uuid4
 
 import pytest
@@ -393,3 +393,71 @@ def test_postgres_queue_eight_workers_claim_at_most_once(postgres_bridge):
     )
     assert queue.quarantine_stale() == 0
     assert queue.claim() is None
+
+
+@pytest.mark.parametrize("terminal_state", ["disabled", "revoked"])
+def test_postgres_send_lock_serializes_pause_and_revoke(
+    postgres_bridge, terminal_state,
+):
+    """Real PostgreSQL row-lock contention, not SQLite FOR UPDATE emulation."""
+    from fm_assistant.domain import TenantContext
+    from fm_assistant.evolution_queue import EvolutionInboundQueue
+    from fm_assistant.integration import IntegrationStatus
+    from fm_assistant.integration_repository import IntegrationRepository
+
+    sessions, _, _ = postgres_bridge
+    with sessions.begin() as db:
+        db.add(IntegrationProviderORM(
+            provider_key="whatsapp_evolution", integration_type="channel",
+            display_name="Evolution Fixture", definition_version=1,
+            enabled=True, created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        ))
+    with sessions.begin() as db:
+        row = db.get(IntegrationConnectionORM, CONNECTION_ID)
+        row.provider_key = "whatsapp_evolution"
+        row.integration_type = "channel"
+    queue = EvolutionInboundQueue(sessions, FernetCredentialVault(VAULT_KEY))
+    repository = IntegrationRepository(sessions)
+    context = TenantContext(
+        tenant_id=TENANT_ID, unit_id=UNIT_ID, credential_id="synthetic-worker",
+    )
+    acquired = Event()
+    release = Event()
+    mutation_done = Event()
+
+    def outbound() -> str:
+        with queue.outbound_connection_guard(
+            connection_id=CONNECTION_ID, expected_revision=1,
+        ):
+            acquired.set()
+            assert release.wait(timeout=10)
+            with sessions() as verify:
+                # PostgreSQL MVCC: another transaction must not have
+                # committed a terminal change while send lock is held.
+                row = verify.get(IntegrationConnectionORM, CONNECTION_ID)
+                assert row.status == "active" and row.revision == 1
+        return "released"
+
+    def mutate() -> str:
+        assert acquired.wait(timeout=10)
+        result = repository.update_connection(
+            context, CONNECTION_ID,
+            status=IntegrationStatus(terminal_state), bump_revision=True,
+        )
+        mutation_done.set()
+        return result.status.value
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        running_send = pool.submit(outbound)
+        running_mutation = pool.submit(mutate)
+        assert acquired.wait(timeout=10)
+        # The mutator must block on the row lock while the HTTP phase holds it.
+        assert not mutation_done.wait(timeout=0.25)
+        release.set()
+        assert running_send.result(timeout=10) == "released"
+        assert running_mutation.result(timeout=10) == terminal_state
+    with pytest.raises(PermissionError, match="evolution_connection_changed_before_send"):
+        with queue.outbound_connection_guard(
+            connection_id=CONNECTION_ID, expected_revision=1,
+        ):
+            pass
