@@ -650,6 +650,20 @@ class PlanLimitORM(Base):
         ),
     )
 
+class WhatsAppQRDisplayPolicyORM(Base):
+    """Signed corporate display-window projection. Never provider QR TTL."""
+
+    __tablename__ = "assistant_whatsapp_qr_display_policy"
+
+    product_code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    display_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PlanSyncNonceORM(Base):
     """Signed Command plan imports reject network replay transactionally."""
 
