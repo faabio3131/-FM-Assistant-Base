@@ -6,6 +6,7 @@ quarantine instead of replay to prevent duplicate model charges and messages.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -15,7 +16,7 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from .credential_vault import CredentialVault
-from .db import EvolutionInboundJobORM
+from .db import EvolutionInboundJobORM, IntegrationConnectionORM
 
 
 class EvolutionQueueCapacityExceeded(RuntimeError):
@@ -275,6 +276,37 @@ class EvolutionInboundQueue:
             session.commit()
             return changed
 
+
+    @contextmanager
+    def outbound_connection_guard(
+        self, *, connection_id: str, expected_revision: int,
+    ):
+        """Serialize provider-send window with connection pause/revoke on PostgreSQL.
+
+        A row lock is held through the bounded HTTP request. A pause/revocation
+        acquiring this same row lock cannot complete while a send is in flight.
+        Not a guarantee of provider delivery or cancellation of a started send.
+        SQLite FOR UPDATE is a no-op; SQLite tests are functional, not a proof
+        of distributed serialization.
+        """
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ValueError("evolution_connection_revision_invalid")
+        with self._sessions() as session:
+            row = session.scalar(
+                select(IntegrationConnectionORM)
+                .where(IntegrationConnectionORM.connection_id == connection_id)
+                .with_for_update()
+            )
+            if (
+                row is None or row.provider_key != "whatsapp_evolution"
+                or row.status != "active" or row.revision != expected_revision
+            ):
+                raise PermissionError("evolution_connection_changed_before_send")
+            try:
+                yield
+            finally:
+                # Release only after external request completes or throws.
+                session.rollback()
 
     def begin_outbound(
         self, *, connection_id: str, message_id: str, claim_generation: int,
