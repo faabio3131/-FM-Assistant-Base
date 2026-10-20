@@ -93,6 +93,38 @@ class TrustedProviderEvidenceStore:
         self._secret = gateway_secret
         self._source_id = source_id
 
+    def record_verified_source(
+        self, *, evidence_id: str, provider_payload: bytes,
+        provider_signature: bytes, source_policy,
+        expected_request_id: str, expected_tenant_id: str,
+        expected_unit_id: str, at: datetime | None = None,
+    ) -> bool:
+        """Only a pinned, independently signed provider statement can reach
+        the FM gateway ledger via this strict source verification path.
+        Unsigned providers require a separately audited adapter and MUST NOT
+        silently use a synthetic statement.
+        """
+        from core.ai_provider_source_verifier import (
+            ProviderSigningPolicy, verified_signed_usage_source,
+        )
+
+        if not isinstance(source_policy, ProviderSigningPolicy):
+            raise QuotaDenied("core_evidence_provider_policy_missing")
+        receipt = verified_signed_usage_source(
+            payload=provider_payload, signature=provider_signature,
+            policy=source_policy, expected_request_id=expected_request_id,
+            expected_tenant_id=expected_tenant_id,
+            expected_unit_id=expected_unit_id, at=at,
+        )
+        tag = sign_verified_gateway_attestation(
+            evidence_id=evidence_id, source_id=self._source_id,
+            receipt=receipt, secret=self._secret,
+        )
+        return self.record_attested(
+            evidence_id=evidence_id, receipt=receipt,
+            gateway_signature=tag,
+        )
+
     def record_attested(
         self, *, evidence_id: str,
         receipt: VerifiedProviderUsageReceipt,
