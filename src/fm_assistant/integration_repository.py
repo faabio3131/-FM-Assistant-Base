@@ -171,7 +171,7 @@ class IntegrationRepository:
                     IntegrationConnectionORM.connection_id == connection_id,
                     IntegrationConnectionORM.tenant_id == context.tenant_id,
                     IntegrationConnectionORM.unit_id == context.unit_id,
-                )
+                ).with_for_update()
             )
             if row is None:
                 raise LookupError("integration_not_found")
