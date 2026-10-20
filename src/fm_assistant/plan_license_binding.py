@@ -94,9 +94,13 @@ class GovernedPlanLicenseBinding:
             with self._sessions.begin() as db:
                 db.add(PlanSyncNonceORM(key_id=kid, nonce=nonce, created_at=now))
                 db.flush()
+                # A historical binding audit is NOT proof of a CURRENTLY
+                # authorized license. Never reconcile a Command delivery as
+                # active after suspension, expiry, or tenant deactivation.
                 row = db.scalar(select(TenantLicenseORM).where(
                     TenantLicenseORM.tenant_id == tenant_id,
-                ))
+                ).with_for_update())
+                tenant = db.get(TenantORM, tenant_id)
                 proof = db.scalar(select(PlanBindingAuditORM).where(
                     PlanBindingAuditORM.tenant_id == tenant_id,
                     PlanBindingAuditORM.nonce == operation_nonce,
@@ -104,10 +108,23 @@ class GovernedPlanLicenseBinding:
                     PlanBindingAuditORM.plan_revision == plan_revision,
                 ))
                 if (
-                    row is None or row.plan_code != plan_code
+                    row is None or tenant is None
+                    or tenant.status != "active"
+                    or row.status not in {"active", "trial"}
+                    or row.plan_code != plan_code
                     or row.plan_revision != plan_revision
                     or proof is None
                 ):
+                    return "not_confirmed"
+                cutoff = (
+                    row.trial_ends_at if row.status == "trial"
+                    else row.period_ends_at
+                )
+                if cutoff is None:
+                    return "not_confirmed"
+                if cutoff.tzinfo is None:
+                    cutoff = cutoff.replace(tzinfo=UTC)
+                if cutoff.astimezone(UTC) <= now:
                     return "not_confirmed"
                 return "bound_confirmed"
         except IntegrityError as exc:
