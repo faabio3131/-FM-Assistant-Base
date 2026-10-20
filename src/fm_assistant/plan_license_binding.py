@@ -47,7 +47,7 @@ class GovernedPlanLicenseBinding:
     def binding_status(
         self, *, headers: dict[str, str | None], raw_body: bytes,
         product_code: str, organization_id: str, tenant_id: str,
-        plan_code: str, plan_revision: int,
+        plan_code: str, plan_revision: int, operation_nonce: str,
     ) -> str:
         """Read-only, signed status proof for uncertain Command outbox attempts.
 
@@ -63,7 +63,8 @@ class GovernedPlanLicenseBinding:
             not self._key or len(self._key) < 32 or not self._key_id
             or not self._org or kid != self._key_id
             or product_code != "VENDEATENDEIA" or organization_id != self._org
-            or not NONCE.fullmatch(nonce) or len(raw_body) > 2048
+            or not NONCE.fullmatch(nonce) or not NONCE.fullmatch(operation_nonce)
+            or len(raw_body) > 2048
             or len(ts) != 10 or not ts.isascii() or not ts.isdecimal()
             or abs(int(ts) - int(now.timestamp())) > 60
             or len(signature) != 64
@@ -86,6 +87,7 @@ class GovernedPlanLicenseBinding:
             "product_code": product_code, "organization_id": organization_id,
             "tenant_id": tenant_id, "plan_code": plan_code,
             "plan_revision": plan_revision,
+            "operation_nonce": operation_nonce,
         }:
             raise PlanLicenseBindingDenied("plan.binding_denied")
         try:
@@ -95,9 +97,16 @@ class GovernedPlanLicenseBinding:
                 row = db.scalar(select(TenantLicenseORM).where(
                     TenantLicenseORM.tenant_id == tenant_id,
                 ))
+                proof = db.scalar(select(PlanBindingAuditORM).where(
+                    PlanBindingAuditORM.tenant_id == tenant_id,
+                    PlanBindingAuditORM.nonce == operation_nonce,
+                    PlanBindingAuditORM.plan_code == plan_code,
+                    PlanBindingAuditORM.plan_revision == plan_revision,
+                ))
                 if (
                     row is None or row.plan_code != plan_code
                     or row.plan_revision != plan_revision
+                    or proof is None
                 ):
                     return "not_confirmed"
                 return "bound_confirmed"
