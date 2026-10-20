@@ -494,6 +494,13 @@ class EvolutionInboundQueue:
                     EvolutionInboundJobORM.connection_id == connection_id,
                     EvolutionInboundJobORM.message_id == message_id,
                     EvolutionInboundJobORM.state == "reconcile_required",
+                    # A potentially sent message cannot be administratively
+                    # cleared on an unsupported assertion. It needs a scoped
+                    # authenticated provider status receipt first.
+                    (
+                        EvolutionInboundJobORM.outbound_operation_id.is_(None)
+                        | EvolutionInboundJobORM.delivery_evidence_sha256.is_not(None)
+                    ),
                 )
                 .values(
                     state="reviewed", updated_at=datetime.now(UTC),
