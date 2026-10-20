@@ -7,6 +7,7 @@ import json
 from datetime import UTC, datetime
 
 import httpx
+import pytest
 
 from fm_assistant.channels.evolution_events import EvolutionEventVerifier
 from fm_assistant.channels.whatsapp_evolution import EvolutionClient, EvolutionSettings
@@ -304,3 +305,94 @@ def test_signed_webhook_queues_without_sending_until_worker(client, provision_cr
     assert runtime.process_pending(limit=5).processed == 0
     assert len(sent) == 1
 
+
+
+def test_signed_delivery_updates_match_only_existing_scoped_receipts(
+    client, provision_credential,
+):
+    from fm_assistant.domain import TenantContext
+    from fm_assistant.evolution_queue import EvolutionInboundQueue
+    from fm_assistant.integration import WHATSAPP_EVOLUTION_PROVIDER, IntegrationStatus
+
+    key = provision_credential(client, "status-tenant", "status-unit")
+    ctx = TenantContext(tenant_id="status-tenant", unit_id="status-unit", credential_id=key)
+    repo = client.app.state.integration_repository
+    connection = repo.create_connection(
+        ctx, provider=WHATSAPP_EVOLUTION_PROVIDER,
+        config={"instance_name": "fm_" + "e" * 32},
+        status=IntegrationStatus.ACTIVE,
+    )
+    cid = connection.connection_id
+    vault = FernetCredentialVault(client.app.state.settings.channel_encryption_key)
+    queue = EvolutionInboundQueue(repo._session_factory, vault)
+    runtime = EvolutionRuntime(
+        integrations=repo,
+        inbox=WhatsAppInboundRepository(repo._session_factory),
+        assistant=client.app.state.assistant_service,
+        vault=vault,
+        transport=EvolutionClient(
+            EvolutionSettings(
+                origin="https://evolution.example.test", global_key="f" * 40,
+            ),
+            client=httpx.Client(transport=httpx.MockTransport(
+                lambda _: httpx.Response(503),
+            )),
+        ),
+        verifier=EvolutionEventVerifier(signing_key=SIGNER),
+        sender_pepper=client.app.state.settings.credential_pepper,
+        queue=queue,
+    )
+    assert queue.enqueue(
+        connection_id=cid, message_id="inbound-for-receipt",
+        sender="5511999999999", text="Secret",
+    )
+    item = queue.claim()
+    assert item is not None
+    operation_id = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    queue.record_outbound_result(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+        operation_id=operation_id, outbound_reference="PROVIDER-RECEIPT-ID",
+    )
+    queue.finish(
+        connection_id=cid, message_id=item.message_id,
+        reconciled=True, claim_generation=item.claim_generation,
+    )
+    event = {
+        "event": "messages.update",
+        "instance": connection.config["instance_name"],
+        "data": [{"key": {"id": "PROVIDER-RECEIPT-ID", "fromMe": True},
+                  "update": {"status": "DELIVERED"}}],
+    }
+    raw, headers = _signed(cid, event)
+    with pytest.raises(ValueError):
+        runtime.receive(
+            connection_id=cid, raw=raw,
+            signature="0" * 64,
+            timestamp=headers["X-FM-Evolution-Timestamp"],
+        )
+    assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["delivery_status"] is None
+    runtime.receive(
+        connection_id=cid, raw=raw,
+        signature=headers["X-FM-Evolution-Signature"],
+        timestamp=headers["X-FM-Evolution-Timestamp"],
+    )
+    verified = queue.operational_snapshot(connection_id=cid)["lifecycle"][0]
+    assert verified["delivery_status"] == "delivered"
+    assert verified["delivery_evidence_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert queue.acknowledge_reconciliation(
+        connection_id=cid, message_id=item.message_id,
+    )
+    raw, headers = _signed(cid, {
+        **event, "data": [{"key": {"id": "PROVIDER-RECEIPT-ID", "fromMe": True},
+                          "update": {"status": "SENT"}}],
+    })
+    runtime.receive(
+        connection_id=cid, raw=raw,
+        signature=headers["X-FM-Evolution-Signature"],
+        timestamp=headers["X-FM-Evolution-Timestamp"],
+    )
+    assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["delivery_status"] == "delivered"
