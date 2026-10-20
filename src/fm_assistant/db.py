@@ -674,6 +674,26 @@ class PlanSyncNonceORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class LicenseSecurityHoldAuditORM(Base):
+    """Append-only FM signed suspension evidence, separate from billing."""
+
+    __tablename__ = "assistant_license_security_hold_audit"
+
+    key_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    nonce: Mapped[str] = mapped_column(String(96), primary_key=True)
+    command_request_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("assistant_tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False, index=True,
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    plan_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    plan_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    old_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    expected_valid_until: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    held_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PlanBindingAuditORM(Base):
     """Immutable evidence of an FM-authorized initial tenant plan binding."""
 
