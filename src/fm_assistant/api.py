@@ -187,6 +187,16 @@ class PlanBindingStatusPayload(BaseModel):
     operation_nonce: str = Field(min_length=22, max_length=96)
 
 
+class CommandCommercialStatusPayload(BaseModel):
+    """Exact authenticated FM read-back, no external authorization."""
+    model_config = {"extra": "forbid"}
+
+    product_code: str = Field(pattern=r"^VENDEATENDEIA$")
+    organization_id: str = Field(min_length=1, max_length=128)
+    tenant_id: str = Field(min_length=1, max_length=128)
+    command_request_id: str = Field(min_length=1, max_length=128)
+
+
 class CommandCommercialTransitionPayload(BaseModel):
     """Strict internal FM-only entitlement lifecycle; no client token access."""
 
@@ -1481,6 +1491,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for row in rows
         ]
 
+
+    @app.post(
+        "/internal/v1/command/assistant-plans/commercial-status",
+        include_in_schema=False,
+    )
+    async def internal_command_commercial_status(request: Request) -> JSONResponse:
+        raw = await request.body()
+        if len(raw) > 1024:
+            raise HTTPException(status_code=401, detail="license.commercial_denied")
+        try:
+            payload = CommandCommercialStatusPayload.model_validate_json(raw)
+            data = commercial_license_transition.read_status(
+                raw_body=raw,
+                headers={
+                    "key_id":request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp":request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce":request.headers.get("X-FM-Command-Nonce"),
+                    "signature":request.headers.get("X-FM-Command-Signature"),
+                },
+                **payload.model_dump(),
+            )
+        except (CommercialLicenseTransitionDenied, ValidationError) as exc:
+            raise HTTPException(
+                status_code=401,detail="license.commercial_denied",
+            ) from exc
+        return JSONResponse(data,headers={"Cache-Control":"no-store"})
 
     @app.post(
         "/internal/v1/command/assistant-plans/commercial-transition",
