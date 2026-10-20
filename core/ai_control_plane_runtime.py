@@ -328,12 +328,16 @@ class CoreControlPlaneAIRuntime:
         instruction: str,
     ) -> CoreAIResult:
         capture: list[AIUsageEvent] | None = [] if self._plan_usage is not None else None
-        router_factory = lambda output_cap: self._router(
+        # The shared guarded runner invokes every router factory with both
+        # the admitted output ceiling AND the reserved fallback-attempt budget.
+        # Audio must follow the same pre-provider quota contract as text.
+        router_factory = lambda output_cap, attempts: self._router(
             tenant_id=tenant_id,
             unit_id=unit_id,
             capability=CapabilityIA.ATENDIMENTO_TRANSCRICAO,
             capture=capture,
             output_token_cap=output_cap,
+            attempt_budget=attempts,
         )
         return _result(
             self._execute_guarded(
