@@ -37,7 +37,7 @@ def _prepare(client, provision_credential):
             data = json.loads(req.content)
             assert data["webhook"]["headers"]["X-FM-Evolution-Token"]
             assert data["webhook"]["events"] == [
-                "MESSAGES_UPSERT", "CONNECTION_UPDATE",
+                "MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE",
             ]
             registered.append(data["webhook"])
             return httpx.Response(200, json={"webhook": {
