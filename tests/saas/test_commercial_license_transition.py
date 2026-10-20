@@ -184,3 +184,42 @@ def test_replay_cross_tenant_fake_plan_bad_signature_and_clock_denied(commercial
     with sessions() as db:
         assert db.scalars(select(CommercialLicenseTransitionAuditORM)).all()==[]
         assert db.get(TenantLicenseORM,"tenant-one").status=="active"
+
+
+def test_downgrade_only_at_paid_boundary_after_verified_renewal(commercial):
+    service,sessions=commercial
+    with sessions.begin() as db:
+        db.get(TenantLicenseORM,"tenant-one").plan_code="PLUS"
+    upcoming=signed(sessions,"APPLY_DOWNGRADE",
+                    target_plan_code="BASE",
+                    target_valid_until=int((datetime.now(UTC)+timedelta(days=32)).timestamp()))
+    with pytest.raises(CommercialLicenseTransitionDenied):
+        service.apply(**upcoming)
+    with sessions.begin() as db:
+        db.get(TenantLicenseORM,"tenant-one").period_ends_at=(
+            datetime.now(UTC).replace(microsecond=0)-timedelta(seconds=10)
+        )
+    ready=signed(sessions,"APPLY_DOWNGRADE",target_plan_code="BASE",
+                 target_valid_until=int((datetime.now(UTC)+timedelta(days=31)).timestamp()))
+    assert service.apply(**ready)=="active"
+    with sessions() as db:
+        row=db.get(TenantLicenseORM,"tenant-one")
+        assert row.plan_code=="BASE" and row.status=="active"
+
+
+def test_end_of_paid_period_is_final_cancellation_not_automatic_reactivation(commercial):
+    service,sessions=commercial
+    before=signed(sessions,"CANCEL_AT_PERIOD_END")
+    with pytest.raises(CommercialLicenseTransitionDenied):
+        service.apply(**before)  # paid time remains
+    with sessions.begin() as db:
+        db.get(TenantLicenseORM,"tenant-one").period_ends_at=(
+            datetime.now(UTC).replace(microsecond=0)-timedelta(seconds=10)
+        )
+    after=signed(sessions,"CANCEL_AT_PERIOD_END")
+    assert service.apply(**after)=="cancelled"
+    with sessions() as db:
+        assert db.get(TenantLicenseORM,"tenant-one").status=="cancelled"
+    with pytest.raises(CommercialLicenseTransitionDenied):
+        service.apply(**signed(sessions,"REACTIVATE_VERIFIED",
+            target_valid_until=int((datetime.now(UTC)+timedelta(days=30)).timestamp())))
