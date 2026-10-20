@@ -232,3 +232,64 @@ def test_binding_status_refuses_unsigned_foreign_scope(binding):
     with pytest.raises(PlanLicenseBindingDenied):
         service.binding_status(headers=headers, raw_body=raw, **scope)
     assert STATUS_PATH.endswith("/binding-status")
+
+
+def test_remote_binding_proof_never_confirms_suspended_expired_or_inactive_license(binding):
+    """A signed historical event is not a fresh entitlement."""
+    from fm_assistant.plan_license_binding import STATUS_PATH
+
+    service, sessions = binding
+    operation_nonce = uuid4().hex
+    request = signed(payload(), nonce=operation_nonce)
+    assert service.bind(**request) == "bound"
+
+    status = {
+        "product_code": "VENDEATENDEIA",
+        "organization_id": "fm-corporate",
+        "tenant_id": "tenant-a",
+        "plan_code": "PLAN_FULL",
+        "plan_revision": 1,
+        "operation_nonce": operation_nonce,
+    }
+
+    def verify_fresh() -> str:
+        raw = json.dumps(status, separators=(",", ":"), sort_keys=True).encode()
+        ts = str(int(datetime.now(UTC).timestamp()))
+        nonce = uuid4().hex
+        auth = {
+            "key_id": "fm-key", "timestamp": ts, "nonce": nonce,
+            "signature": sign_command_control(
+                key=KEY, key_id="fm-key", timestamp=ts,
+                nonce=nonce, body=raw, path=STATUS_PATH,
+            ),
+        }
+        return service.binding_status(headers=auth, raw_body=raw, **status)
+
+    assert verify_fresh() == "bound_confirmed"
+    with sessions.begin() as db:
+        row = db.get(TenantLicenseORM, "tenant-a")
+        row.status = "suspended"
+    assert verify_fresh() == "not_confirmed"
+    with sessions.begin() as db:
+        db.get(TenantLicenseORM, "tenant-a").status = "trial"
+        db.get(TenantLicenseORM, "tenant-a").trial_ends_at = (
+            datetime.now(UTC) - timedelta(seconds=1)
+        )
+    assert verify_fresh() == "not_confirmed"
+    with sessions.begin() as db:
+        db.get(TenantLicenseORM, "tenant-a").trial_ends_at = (
+            datetime.now(UTC) + timedelta(hours=1)
+        )
+        db.get(TenantORM, "tenant-a").status = "disabled"
+    assert verify_fresh() == "not_confirmed"
+    with sessions.begin() as db:
+        db.get(TenantORM, "tenant-a").status = "active"
+        row = db.get(TenantLicenseORM, "tenant-a")
+        row.status = "active"
+        row.period_ends_at = None
+    assert verify_fresh() == "not_confirmed"
+    with sessions.begin() as db:
+        db.get(TenantLicenseORM, "tenant-a").period_ends_at = (
+            datetime.now(UTC) + timedelta(days=2)
+        )
+    assert verify_fresh() == "bound_confirmed"
