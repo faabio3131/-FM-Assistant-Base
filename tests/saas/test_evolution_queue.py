@@ -644,16 +644,20 @@ def test_outbound_connection_guard_denies_paused_and_wrong_revision(
         connection_id=cid, expected_revision=conn.revision,
     ):
         pass
-    with pytest.raises(PermissionError, match="evolution_connection_changed_before_send"):
-        with queue.outbound_connection_guard(
+    with (
+        pytest.raises(PermissionError, match="evolution_connection_changed_before_send"),
+        queue.outbound_connection_guard(
             connection_id=cid, expected_revision=conn.revision + 1,
-        ):
-            pass
+        ),
+    ):
+        pass
     repo.update_connection(
         context, cid, status=IntegrationStatus.DISABLED, bump_revision=True,
     )
-    with pytest.raises(PermissionError, match="evolution_connection_changed_before_send"):
-        with queue.outbound_connection_guard(
+    with (
+        pytest.raises(PermissionError, match="evolution_connection_changed_before_send"),
+        queue.outbound_connection_guard(
             connection_id=cid, expected_revision=conn.revision,
-        ):
-            pass
+        ),
+    ):
+        pass
