@@ -385,7 +385,7 @@ def test_crashed_outbound_goes_to_manual_reconciliation_without_resend(
     assert queue.claim() is None
     assert queue.acknowledge_reconciliation(
         connection_id=cid, message_id=item.message_id,
-    )
+    ) is False  # uncertain provider operation requires actual evidence
     assert queue.enqueue(
         connection_id=cid, message_id=item.message_id,
         sender="5511999999999", text="Resend forbidden",
@@ -452,11 +452,11 @@ def test_lifecycle_snapshot_is_scoped_and_never_claims_delivery(client, provisio
     assert pending_review["requires_review"] is True
     assert "5511977777777" not in str(pending_review)
     assert "Top secret" not in str(pending_review)
-    queue.acknowledge_reconciliation(
+    assert queue.acknowledge_reconciliation(
         connection_id=cid, message_id=item.message_id,
-    )
+    ) is False
     final = queue.operational_snapshot(connection_id=cid)["lifecycle"][0]
-    assert final["state"] == "reviewed"
+    assert final["state"] == "reconcile_required"
     assert final["outbound_status"] == "uncertain"
     assert final["provider_delivery_confirmed"] is False
 
@@ -501,3 +501,81 @@ def test_concurrent_reviews_have_one_winner_without_replay(client, provision_cre
     assert winners.count(True) == 1
     assert queue.state(connection_id=cid, message_id=item.message_id) == "reviewed"
     assert queue.claim() is None
+
+
+def test_authenticated_delivery_evidence_matches_only_own_provider_reference(
+    client, provision_credential,
+):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="delivery-proof",
+        sender="5511999999999", text="Sensitive",
+    )
+    item = queue.claim()
+    assert item is not None
+    operation = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    queue.record_outbound_result(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+        operation_id=operation, outbound_reference="PROVIDER-123",
+    )
+    queue.finish(
+        connection_id=cid, message_id=item.message_id,
+        reconciled=True, claim_generation=item.claim_generation,
+    )
+    assert queue.acknowledge_reconciliation(
+        connection_id=cid, message_id=item.message_id,
+    ) is False
+    evidence = "a" * 64
+    assert queue.correlate_delivery_status(
+        connection_id=cid, outbound_reference="PROVIDER-123",
+        status="delivered", evidence_sha256=evidence,
+    )
+    assert not queue.correlate_delivery_status(
+        connection_id=cid, outbound_reference="PROVIDER-123",
+        status="sent", evidence_sha256="b" * 64,
+    )
+    assert not queue.correlate_delivery_status(
+        connection_id=cid, outbound_reference="UNKNOWN",
+        status="read", evidence_sha256="c" * 64,
+    )
+    snapshot = queue.operational_snapshot(connection_id=cid)
+    assert snapshot["lifecycle"][0]["delivery_status"] == "delivered"
+    assert snapshot["lifecycle"][0]["delivery_evidence_sha256"] == evidence
+    assert "Sensitive" not in str(snapshot)
+    assert queue.acknowledge_reconciliation(
+        connection_id=cid, message_id=item.message_id,
+    ) is True
+    assert queue.enqueue(
+        connection_id=cid, message_id=item.message_id,
+        sender="5511999999999", text="Replay",
+    ) is False
+
+
+def test_foreign_connection_delivery_reference_cannot_be_correlated(
+    client, provision_credential,
+):
+    cid, queue = _setup(client, provision_credential)
+    queue.enqueue(
+        connection_id=cid, message_id="scoped-receipt",
+        sender="5511999999999", text="Restricted",
+    )
+    item = queue.claim()
+    assert item is not None
+    operation = queue.begin_outbound(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+    )
+    queue.record_outbound_result(
+        connection_id=cid, message_id=item.message_id,
+        claim_generation=item.claim_generation,
+        operation_id=operation, outbound_reference="SHARED-REF",
+    )
+    assert not queue.correlate_delivery_status(
+        connection_id="other-connection", outbound_reference="SHARED-REF",
+        status="read", evidence_sha256="d" * 64,
+    )
+    assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["delivery_status"] is None
