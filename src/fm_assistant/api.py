@@ -57,8 +57,8 @@ from .plan_license_binding import GovernedPlanLicenseBinding, PlanLicenseBinding
 from .plan_limits import PlanLimitDenied
 from .plan_policy_manifest import authenticated_core_plan_grant
 from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
-from .qr_policy_sync import CommandQrDisplayPolicyService, QrDisplayPolicyDenied
 from .qr_onboarding_page import render_qr_page
+from .qr_policy_sync import CommandQrDisplayPolicyService, QrDisplayPolicyDenied
 from .repositories import (
     ConversationSQLAlchemyRepository,
     CredentialRepository,
