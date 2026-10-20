@@ -25,6 +25,10 @@ from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerif
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
 from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
+from .commercial_license_transition import (
+    CommercialLicenseTransitionDenied,
+    SignedCommercialLicenseTransition,
+)
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
 from .core_client import CoreAIClient, CoreAudioTranscriber
@@ -51,10 +55,6 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
-from .commercial_license_transition import (
-    CommercialLicenseTransitionDenied,
-    SignedCommercialLicenseTransition,
-)
 from .license_security_hold import LicenseSecurityHoldDenied, SignedLicenseSecurityHold
 from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
