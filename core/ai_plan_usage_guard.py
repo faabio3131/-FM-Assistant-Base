@@ -175,24 +175,38 @@ class PlanUsageGuard:
         events: tuple[AIUsageEvent, ...],
     ) -> bool:
         """Return False when any attempt is unmetered; never refund unknowns."""
+        # Cached tokens are INCLUDED in provider input_tokens. A provider
+        # may omit cache breakdown altogether. It is safe to reconcile the
+        # mandatory input/output/total buckets without that OPTIONAL metric;
+        # only a plan that independently enforces ai.cached_tokens must hold
+        # the reservation until an exact cached count is verified.
+        cache_is_metered = any(
+            metric == "ai.cached_tokens" for metric, _ in policy.scopes
+        )
         if not events or any(
             event.tenant_id != request.tenant_id
             or event.unidade_id != request.unidade_id
             or event.request_id != request.request_id
             or event.input_tokens is None
             or event.output_tokens is None
-            or event.cached_tokens is None
-            or any(
-                type(v) is not int or v < 0
-                for v in (event.input_tokens, event.output_tokens, event.cached_tokens)
-            )
-            or event.cached_tokens > event.input_tokens
+            or (cache_is_metered and event.cached_tokens is None)
+            or type(event.input_tokens) is not int
+            or type(event.output_tokens) is not int
+            or event.input_tokens < 0 or event.output_tokens < 0
+            or (event.cached_tokens is not None and (
+                type(event.cached_tokens) is not int
+                or event.cached_tokens < 0
+                or event.cached_tokens > event.input_tokens
+            ))
             for event in events
         ):
             return False
         used_input = sum(int(e.input_tokens) for e in events)
         used_output = sum(int(e.output_tokens) for e in events)
-        used_cached = sum(int(e.cached_tokens) for e in events)
+        # 0 is used strictly as the nonexistent ai.cached_tokens BUCKET.
+        # No provider receipt, monetary cost, or actual cache count is
+        # manufactured; the original event retains cached_tokens=None.
+        used_cached = sum(int(e.cached_tokens or 0) for e in events)
         if (
             len(events) > policy.attempt_budget
             or used_input > policy.input_bound * policy.attempt_budget
