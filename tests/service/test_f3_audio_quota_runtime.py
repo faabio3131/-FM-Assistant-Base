@@ -172,11 +172,10 @@ def test_audio_oversize_and_revoked_license_never_resolve_secret(
     with pytest.raises(QuotaDenied,match="license_unavailable"):
         transcribe(runtime(active=False),request_id="revoked")
     assert creds.calls==0 and sends==[]
-    snapshot=ledger.usage_snapshot(
-        tenant_id="tenant-a",unit_id="__tenant__",capability="ai.total_tokens",
-        at=datetime.now(UTC),
-    ) if False else None
-    assert snapshot is None  # No signed entitlement was published.
+    with ledger._sessions() as db:
+        from sqlalchemy import select
+        from core.ai_quota_store import AIQuotaReservationRecord
+        assert db.scalars(select(AIQuotaReservationRecord)).all() == []
 
 
 def test_audio_fallback_budget_retained_after_uncertain_first_attempt(
