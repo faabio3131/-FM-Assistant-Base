@@ -178,6 +178,7 @@ class PlanBindingStatusPayload(BaseModel):
     tenant_id: str = Field(min_length=1, max_length=128)
     plan_code: str = Field(min_length=2, max_length=120)
     plan_revision: int = Field(gt=0)
+    operation_nonce: str = Field(min_length=22, max_length=96)
 
 
 class CommandPlanProjectionPayload(BaseModel):
