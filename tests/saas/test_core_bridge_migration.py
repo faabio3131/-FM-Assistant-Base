@@ -31,7 +31,12 @@ def test_bridge_migration_preserves_existing_integrations_and_has_no_active_iden
         ))
     _upgrade(url, "head")
     with engine.connect() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261019_0016"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261020_0017"
+        # The new QR display projection is additive and never backfills
+        # corporate authority or changes existing Core grants.
+        assert db.scalar(text(
+            "SELECT COUNT(*) FROM assistant_whatsapp_qr_display_policy"
+        )) == 0
         assert db.scalar(text(
             "SELECT COUNT(*) FROM assistant_integration_providers "
             "WHERE provider_key='test-ai'"
