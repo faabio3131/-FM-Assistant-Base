@@ -79,10 +79,9 @@ def test_recovery_route_requires_signed_human_and_verified_receipt():
 
 
 def test_default_core_app_does_not_mount_unverified_recovery_route():
-    from core.ai_service_api import create_app
-    from core.ai_service_settings import CoreEnvironment, CoreSettings
     from core.ai_router import CapabilityIA
-    from core.ai_service_settings import ProviderRouteSettings
+    from core.ai_service_api import create_app
+    from core.ai_service_settings import CoreEnvironment, CoreSettings, ProviderRouteSettings
 
     cfg = CoreSettings(
         environment=CoreEnvironment.TEST,
