@@ -70,6 +70,11 @@ class EvolutionRuntime:
             now=at or datetime.now(UTC),
         )
         payload = json.loads(raw)
+        if (
+            connection.status is IntegrationStatus.DISABLED
+            and payload.get("event") != "messages.update"
+        ):
+            raise PermissionError("evolution_connection_inactive")
         context = TenantContext(
             tenant_id=connection.tenant_id, unit_id=connection.unit_id,
             credential_id="channel:" + connection_id,
