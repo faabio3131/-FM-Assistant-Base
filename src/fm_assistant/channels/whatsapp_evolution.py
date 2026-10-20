@@ -153,6 +153,45 @@ class EvolutionClient:
             raise EvolutionUnavailable("evolution_delivery_uncertain")
         return reference
 
+    def find_outbound_evidence(
+        self, instance: str, *, instance_token: str, provider_reference: str,
+    ) -> str | None:
+        """Read-only provider lookup; returns evidence digest, not delivery proof.
+
+        Exact Evolution v2.3.7 response compatibility still needs external
+        homologation. Never infer ownership from recipient/text/timestamps.
+        """
+        if (
+            not isinstance(provider_reference, str)
+            or re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", provider_reference) is None
+        ):
+            raise ValueError("evolution_provider_reference_invalid")
+        data = self._request(
+            "POST", "/chat/findMessages/" + self._instance(instance),
+            payload={"where": {"key": {"id": provider_reference}}},
+            instance_token=instance_token,
+        )
+        page = data.get("messages")
+        records = page.get("records") if isinstance(page, dict) else None
+        if not isinstance(records, list) or len(records) > 100:
+            raise EvolutionUnavailable("evolution_evidence_unverifiable")
+        matches = [
+            item for item in records
+            if isinstance(item, dict)
+            and isinstance(item.get("key"), dict)
+            and item["key"].get("id") == provider_reference
+            and item["key"].get("fromMe") is True
+        ]
+        if len(matches) != 1:
+            return None
+        import hashlib
+        import json
+
+        sanitized = {"id": provider_reference, "fromMe": True}
+        return hashlib.sha256(
+            json.dumps(sanitized, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
     def connection_state(self, instance: str, *, instance_token: str) -> str:
         """Read current remote state on the Evolution v2-compatible adapter."""
         data = self._request(
