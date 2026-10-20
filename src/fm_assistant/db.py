@@ -517,6 +517,9 @@ class EvolutionInboundJobORM(Base):
     delivery_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     delivery_evidence_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     delivery_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidence_candidate_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    evidence_candidate_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    evidence_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     send_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
