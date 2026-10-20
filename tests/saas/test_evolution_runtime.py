@@ -235,7 +235,7 @@ def test_uncertain_outbound_is_quarantined_without_resend(client, provision_cred
     assert len(attempts) == 1
 
 
-def test_signed_webhook_queues_without_sending_until_worker(client, provision_credential):
+def test_signed_webhook_queues_without_sending_until_worker(client, provision_credential, monkeypatch):
     """Verify HTTP acknowledgment cannot trigger AI/provider on its own."""
     from fm_assistant.evolution_queue import EvolutionInboundQueue
 
@@ -305,6 +305,40 @@ def test_signed_webhook_queues_without_sending_until_worker(client, provision_cr
     assert runtime.process_pending(limit=5).processed == 0
     assert len(sent) == 1
 
+
+
+    # Pause wins after durable intent, before HTTP: no provider attempt.
+    from fm_assistant.domain import TenantContext
+    from fm_assistant.integration import IntegrationStatus
+
+    body, headers = _signed(
+        cid, {"event": "messages.upsert", "instance": instance,
+              "data": [{"key": {"id": "PAUSE-RACE-1", "fromMe": False,
+                               "remoteJid": "5511999999999@s.whatsapp.net"},
+                        "message": {"conversation": "Race with pause"}}]},
+    )
+    assert client.post(endpoint, content=body, headers=headers).status_code == 204
+    original_begin = queue.begin_outbound
+    scoped = TenantContext(
+        tenant_id="tenant-asynchronous", unit_id="unit-asynchronous",
+        credential_id=key,
+    )
+
+    def pause_after_intent(**kwargs):
+        attempt_id = original_begin(**kwargs)
+        repository.update_connection(
+            scoped, cid, status=IntegrationStatus.DISABLED, bump_revision=True,
+        )
+        return attempt_id
+
+    monkeypatch.setattr(queue, "begin_outbound", pause_after_intent)
+    result = runtime.process_pending(limit=1)
+    assert result.reconcile_required == 1
+    assert len(sent) == 1
+    assert queue.state(connection_id=cid, message_id="PAUSE-RACE-1") == "reconcile_required"
+    assert queue.acknowledge_reconciliation(
+        connection_id=cid, message_id="PAUSE-RACE-1",
+    ) is False
 
 
 def test_signed_delivery_updates_match_only_existing_scoped_receipts(
@@ -396,3 +430,4 @@ def test_signed_delivery_updates_match_only_existing_scoped_receipts(
         timestamp=headers["X-FM-Evolution-Timestamp"],
     )
     assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["delivery_status"] == "delivered"
+
