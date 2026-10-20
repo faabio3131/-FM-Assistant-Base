@@ -65,9 +65,10 @@ def signed(doc, *, nonce=None):
 def test_default_qr_cap_and_monotonic_fm_projection(policy):
     service, sessions = policy
     assert service.read() == (45, 0)
-    assert service.apply(**signed(policy_doc(revision=2, display_seconds=20))) == "projected"
+    first = policy_doc(revision=2, display_seconds=20)
+    assert service.apply(**signed(first)) == "projected"
     assert service.read() == (20, 2)
-    assert service.apply(**signed(policy_doc(revision=2, display_seconds=20))) == "already_projected"
+    assert service.apply(**signed(first)) == "already_projected"
     assert service.apply(**signed(policy_doc(revision=5, display_seconds=60))) == "projected"
     assert service.read() == (60, 5)
     with sessions() as db:
