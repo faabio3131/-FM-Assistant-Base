@@ -188,9 +188,9 @@ class CommandQrDisplayPolicyPayload(BaseModel):
     product_code: str = Field(pattern=r"^VENDEATENDEIA$")
     organization_id: str = Field(min_length=1, max_length=128)
     actor_user_id: str = Field(min_length=1, max_length=128)
-    approved_at: int
-    revision: int = Field(gt=0)
-    display_seconds: int = Field(ge=15, le=120)
+    approved_at: int = Field(strict=True)
+    revision: int = Field(gt=0, strict=True)
+    display_seconds: int = Field(ge=15, le=120, strict=True)
 
 
 class CommandPlanProjectionPayload(BaseModel):
