@@ -154,3 +154,79 @@ def test_revoked_trial_or_missing_tenant_cannot_bind(binding):
         license_row.trial_ends_at = datetime.now(UTC) - timedelta(minutes=1)
     with pytest.raises(PlanLicenseBindingDenied):
         service.bind(**signed(payload()))
+
+
+def test_signed_binding_status_reports_persisted_match_without_reissuing_license(binding):
+    from fm_assistant.plan_license_binding import STATUS_PATH
+
+    service, sessions = binding
+    req = payload()
+    raw = json.dumps(req, sort_keys=True, separators=(",", ":")).encode()
+    nonce = uuid4().hex
+    ts = str(int(datetime.now(UTC).timestamp()))
+    headers = {
+        "key_id": "fm-key", "timestamp": ts, "nonce": nonce,
+        "signature": sign_command_control(
+            key=KEY, key_id="fm-key", timestamp=ts, nonce=nonce,
+            body=raw, path=BIND_PATH,
+        ),
+    }
+    assert service.bind(headers=headers, raw_body=raw, **req) == "bound"
+    status_body = {
+        k: req[k] for k in (
+            "product_code", "organization_id", "tenant_id",
+            "plan_code", "plan_revision",
+        )
+    }
+    status_raw = json.dumps(status_body, sort_keys=True, separators=(",", ":")).encode()
+    status_nonce = uuid4().hex
+    status_headers = {
+        "key_id": "fm-key", "timestamp": ts, "nonce": status_nonce,
+        "signature": sign_command_control(
+            key=KEY, key_id="fm-key", timestamp=ts,
+            nonce=status_nonce, body=status_raw, path=STATUS_PATH,
+        ),
+    }
+    assert service.binding_status(
+        headers=status_headers, raw_body=status_raw, **status_body,
+    ) == "bound_confirmed"
+    with pytest.raises(PlanLicenseBindingDenied):
+        service.binding_status(
+            headers=status_headers, raw_body=status_raw, **status_body,
+        )
+    unknown = dict(status_body, plan_revision=2)
+    missing_raw = json.dumps(unknown, sort_keys=True, separators=(",", ":")).encode()
+    missing_nonce = uuid4().hex
+    missing_headers = {
+        "key_id": "fm-key", "timestamp": ts, "nonce": missing_nonce,
+        "signature": sign_command_control(
+            key=KEY, key_id="fm-key", timestamp=ts,
+            nonce=missing_nonce, body=missing_raw, path=STATUS_PATH,
+        ),
+    }
+    assert service.binding_status(
+        headers=missing_headers, raw_body=missing_raw, **unknown,
+    ) == "not_confirmed"
+    with sessions() as session:
+        events = session.scalars(select(PlanBindingAuditORM)).all()
+        assert len(events) == 1
+
+
+def test_binding_status_refuses_unsigned_foreign_scope(binding):
+    from fm_assistant.plan_license_binding import STATUS_PATH
+
+    service, _ = binding
+    scope = {
+        "product_code": "VENDEATENDEIA",
+        "organization_id": "fm-corporate", "tenant_id": "tenant-a",
+        "plan_code": "PLAN_FULL", "plan_revision": 1,
+    }
+    raw = json.dumps(scope).encode()
+    ts = str(int(datetime.now(UTC).timestamp()))
+    headers = {
+        "key_id": "fm-key", "timestamp": ts, "nonce": uuid4().hex,
+        "signature": "0" * 64,
+    }
+    with pytest.raises(PlanLicenseBindingDenied):
+        service.binding_status(headers=headers, raw_body=raw, **scope)
+    assert STATUS_PATH.endswith("/binding-status")
