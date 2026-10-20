@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerifier
-from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings
+from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
 from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
@@ -338,6 +338,13 @@ class IntegrationSecretMetadataResponse(BaseModel):
     active: bool
     expires_at: str | None
     revoked_at: str | None
+
+
+class EvolutionEvidenceInvestigationRequest(BaseModel):
+    operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    provider_reference: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9._:-]+$",
+    )
 
 
 class QRConnectionResponse(BaseModel):
@@ -1768,6 +1775,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             resource_type="integration", resource_id=connection_id, outcome="success",
         )
         return JSONResponse({"status": "reviewed"}, headers={"Cache-Control": "no-store"})
+
+    @app.post(
+        "/v1/channels/whatsapp/qr/{connection_id}/operations/{message_id}/investigate"
+    )
+    def whatsapp_investigate_uncertain(
+        connection_id: str,
+        message_id: str,
+        payload: EvolutionEvidenceInvestigationRequest,
+        context: TenantContext = Depends(
+            tenant_with_permission(Permission.INTEGRATION_MANAGE)
+        ),
+    ) -> Response:
+        """Read-only provider evidence candidate. Never clears quarantine."""
+        connection = integration_repository.get(context, connection_id)
+        if connection is None or connection.provider_key != "whatsapp_evolution":
+            raise HTTPException(status_code=404, detail="evolution_connection_not_found")
+        queue = EvolutionInboundQueue(session_factory, vault)
+        if not queue.can_investigate_missing_reference(
+            connection_id=connection_id, message_id=message_id,
+            operation_id=payload.operation_id,
+        ):
+            raise HTTPException(status_code=409, detail="evolution_evidence_not_pending")
+        onboarding = evolution_onboarding
+        if onboarding is None:
+            raise HTTPException(status_code=503, detail="evolution_evidence_provider_unavailable")
+        secret = integration_repository.active_secret_ciphertexts(connection_id).get(
+            "instance_token"
+        )
+        if secret is None:
+            raise HTTPException(status_code=409, detail="evolution_evidence_provider_unavailable")
+        try:
+            digest = onboarding._transport.find_outbound_evidence(
+                str(connection.config["instance_name"]),
+                instance_token=vault.decrypt(secret),
+                provider_reference=payload.provider_reference,
+            )
+        except EvolutionUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="evolution_evidence_provider_unavailable",
+            ) from exc
+        if digest is None:
+            raise HTTPException(status_code=404, detail="evolution_evidence_not_found")
+        if not queue.stage_provider_evidence_candidate(
+            connection_id=connection_id, message_id=message_id,
+            operation_id=payload.operation_id,
+            provider_reference=payload.provider_reference, evidence_digest=digest,
+        ):
+            raise HTTPException(status_code=409, detail="evolution_evidence_conflict")
+        audit.record(
+            context=context, action="assistant.channel.whatsapp.evidence_candidate_staged",
+            resource_type="integration", resource_id=connection_id, outcome="success",
+        )
+        return JSONResponse(
+            {"status": "candidate_only", "reconciled": False, "automatic_resend": False},
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.post("/webhooks/evolution-native/{connection_id}", status_code=204)
     async def receive_native_evolution(
