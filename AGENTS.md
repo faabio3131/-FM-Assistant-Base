@@ -478,3 +478,10 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - Evidência do HEAD funcional `7154020f45da7b82f847b7644ebaeb73f0565b76`: CI Core AI Service `39470220955` SUCCESS e F3 Quota PostgreSQL `39470220934` SUCCESS. Documentação posterior exige conferir novo HEAD; **F3 global continua BUILD_IN_PROGRESS**.
 - Companion Assistant `419bc942cc9dc02d9125288ec5200a76aaa52bc9` garante `binding_status` com tenant e licença atualmente válidos; Command PR #119 executa signatário real em Node + receiver Assistant + Core quotas em banco descartável. Provedor real/infra/credencial continuam EXTERNAL_HOMOLOGATION_DEFERRED.
 - PENDÊNCIAS DE CONSTRUÇÃO: revogação governada Command→Assistant, reconciliação por tentativa assinada/imutável para fornecedores sem receipt verificável, roteamento/admissão multimodal por modelos, governança de vigência C06, revisão independente e gates E2E finais. Não promover produção ou alegar F3 encerrada.
+
+
+### F3 — 20/10/2026: cache breakdown optional vs quota obrigatória
+- `ai.input_tokens` e `ai.output_tokens` são requisitos absolutos para liquidar uma reserva. A parcela `cached_tokens` já está incluída no total de tokens de entrada; provedores podem não informar o breakdown de cache.
+- Se o plano licenciado NÃO possui a capability métrica `ai.cached_tokens`, é permitido liquidar SOMENTE os buckets existentes com o total exato input+output verificado, mesmo que `AIUsageEvent.cached_tokens is None`. Não criar métrica de cache nem registrar custo 0; o receipt original permanece com cache desconhecido.
+- Se `ai.cached_tokens` está no escopo de quotas do plano, `cached_tokens=None` DEVE manter a reserva bloqueada para reconciliação governada. Qualquer `input_tokens=None`, `output_tokens=None`, falha de tentativa de fallback, bool, float ou custo incerto continua no regime fail-closed.
+- Regressão em `tests/service/test_ai_plan_usage_guard.py` cobre ambos os planos (cache opcional e cache monitorado) e liquidação somente após contagem verificada. O status CI no novo HEAD deve ser observado antes de declarar este incremento verde.
