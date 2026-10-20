@@ -106,3 +106,39 @@ def test_core_api_serves_text_and_audio():
         )
         assert audio.status_code == 200
         assert audio.json()["content"] == "texto transcrito"
+
+
+def test_audio_quota_denial_is_controlled_and_unauthenticated_calls_never_run():
+    from core.ai_quota_store import QuotaDenied
+
+    class DeniedAudio(FakeRuntime):
+        attempts = 0
+
+        def transcribe_audio(self, **kwargs):
+            self.attempts += 1
+            raise QuotaDenied("core_plan.license_unavailable")
+
+    runtime = DeniedAudio()
+    app = create_app(_settings(), runtime=runtime)
+    body = {
+        "tenant_id": "tenant-a", "unit_id": "unit-a",
+        "request_id": "deny-audio", "correlation_id": "deny-audio",
+        "mime_type": "audio/ogg",
+        "audio_base64": base64.b64encode(b"audio").decode(),
+        "instruction": "Transcreva em pt-BR.",
+    }
+    with TestClient(app) as client:
+        denied = client.post("/v1/ai/transcribe", json=body)
+        assert denied.status_code == 401
+        assert runtime.attempts == 0
+
+        blocked = client.post(
+            "/v1/ai/transcribe",
+            headers={"X-Core-Service-Key": "core-test-key"},
+            json=body,
+        )
+        assert blocked.status_code == 503
+        assert blocked.json() == {
+            "detail": "core_control_plane_dependency_unavailable",
+        }
+        assert runtime.attempts == 1
