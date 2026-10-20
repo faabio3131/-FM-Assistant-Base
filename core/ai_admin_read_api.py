@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
 from sqlalchemy import select
@@ -20,6 +21,7 @@ from core.ai_control_plane import (
     AIProviderHealth,
     ControlPlaneError,
 )
+from core.ai_finops_alerts import evaluate_request_cost_alert
 from core.ai_router import CapabilityIA
 from core.ai_usage_ledger import PersistentAIFinOps
 
@@ -133,5 +135,43 @@ def register_admin_read_routes(app: FastAPI) -> None:
             }
             for item in buckets
         ]
+
+    @router.get("/usage/request")
+    def request_finops_alert(
+        request: Request,
+        tenant_id: str = Query(min_length=1, max_length=128),
+        unit_id: str = Query(min_length=1, max_length=128),
+        request_id: str = Query(min_length=1, max_length=128),
+        maximum_known_cost: Decimal | None = Query(default=None, gt=0),
+        currency: str | None = Query(default=None, min_length=3, max_length=3),
+    ) -> dict[str, object]:
+        """Pure operator read: unknown cost remains UNKNOWN, not accounting zero."""
+        try:
+            summary = PersistentAIFinOps(_sessions(request)).reconcile_request(
+                tenant_id=tenant_id, unit_id=unit_id, request_id=request_id,
+            )
+            alert = evaluate_request_cost_alert(
+                summary, maximum_known_cost=maximum_known_cost,
+                currency=currency,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="core_operator_alert_policy_invalid",
+            ) from exc
+        except (ControlPlaneError, SQLAlchemyError) as exc:
+            raise HTTPException(
+                status_code=503, detail="core_operator_usage_unavailable",
+            ) from exc
+        return {
+            "tenant_id": tenant_id, "unit_id": unit_id,
+            "request_id": request_id,
+            "status": alert.status,
+            "reasons": list(alert.reasons),
+            "known_cost_subtotal": str(alert.known_cost),
+            "currency": alert.cost_currency,
+            "unknown_attempts": alert.unknown_attempts,
+            "observed_attempts": alert.observed_attempts,
+            "all_costs_known": alert.all_costs_known,
+        }
 
     app.include_router(router)
