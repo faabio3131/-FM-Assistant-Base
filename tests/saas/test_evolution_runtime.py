@@ -235,7 +235,10 @@ def test_uncertain_outbound_is_quarantined_without_resend(client, provision_cred
     assert len(attempts) == 1
 
 
-def test_signed_webhook_queues_without_sending_until_worker(client, provision_credential, monkeypatch):
+@pytest.mark.parametrize("terminal_status", ["DISABLED", "REVOKED"])
+def test_signed_webhook_queues_without_sending_until_worker(
+    client, provision_credential, monkeypatch, terminal_status,
+):
     """Verify HTTP acknowledgment cannot trigger AI/provider on its own."""
     from fm_assistant.evolution_queue import EvolutionInboundQueue
 
@@ -327,7 +330,7 @@ def test_signed_webhook_queues_without_sending_until_worker(client, provision_cr
     def pause_after_intent(**kwargs):
         attempt_id = original_begin(**kwargs)
         repository.update_connection(
-            scoped, cid, status=IntegrationStatus.DISABLED, bump_revision=True,
+            scoped, cid, status=IntegrationStatus[terminal_status], bump_revision=True,
         )
         return attempt_id
 
