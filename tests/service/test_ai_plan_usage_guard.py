@@ -326,7 +326,7 @@ def test_known_total_usage_settles_without_unconfigured_cache_metric(guarded):
 def test_missing_cache_breakdown_holds_reservation_when_cache_quota_exists(guarded):
     from dataclasses import replace
 
-    guard, store = guarded
+    _, store = guarded
     with store._sessions.begin() as db:
         db.add(AIQuotaPolicyRecord(
             tenant_id="a", unit_id="__tenant__",
