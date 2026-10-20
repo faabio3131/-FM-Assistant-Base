@@ -15,7 +15,7 @@ def _receipt(*, no_charge=False, tokens=200, cost="0.02", tenant="tenant-A"):
         provider="gemini", model="gemini-model",
         request_id="request-1", tenant_id=tenant, unit_id="unit-1",
         input_tokens=0 if no_charge else tokens,
-        output_tokens=0 if no_charge else 50,
+        output_tokens=0 if no_charge or tokens == 0 else 50,
         provider_cost_usd=Decimal(cost),
         evidence_digest="a" * 64, no_charge=no_charge,
     )
