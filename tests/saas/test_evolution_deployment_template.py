@@ -1,6 +1,6 @@
 """Offline deployment-template guardrails: never starts or accesses real providers."""
-from pathlib import Path
 import re
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "deploy" / "evolution" / "docker-compose.yml"
