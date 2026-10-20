@@ -57,6 +57,7 @@ from .plan_license_binding import GovernedPlanLicenseBinding, PlanLicenseBinding
 from .plan_limits import PlanLimitDenied
 from .plan_policy_manifest import authenticated_core_plan_grant
 from .plan_sync_service import CommandPlanProjectionService, PlanSyncDenied
+from .qr_policy_sync import CommandQrDisplayPolicyService, QrDisplayPolicyDenied
 from .qr_onboarding_page import render_qr_page
 from .repositories import (
     ConversationSQLAlchemyRepository,
@@ -179,6 +180,17 @@ class PlanBindingStatusPayload(BaseModel):
     plan_code: str = Field(min_length=2, max_length=120)
     plan_revision: int = Field(gt=0)
     operation_nonce: str = Field(min_length=22, max_length=96)
+
+
+class CommandQrDisplayPolicyPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    product_code: str = Field(pattern=r"^VENDEATENDEIA$")
+    organization_id: str = Field(min_length=1, max_length=128)
+    actor_user_id: str = Field(min_length=1, max_length=128)
+    approved_at: int
+    revision: int = Field(gt=0)
+    display_seconds: int = Field(ge=15, le=120)
 
 
 class CommandPlanProjectionPayload(BaseModel):
@@ -539,6 +551,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         core_key_id=cfg.core_bridge_key_id,
     )
     plan_projection = CommandPlanProjectionService(
+        sessions=session_factory,
+        key_id=cfg.command_control_key_id,
+        signing_key=cfg.command_control_signing_key,
+        trusted_organization=cfg.trusted_command_organization_id,
+    )
+    qr_display_policy = CommandQrDisplayPolicyService(
         sessions=session_factory,
         key_id=cfg.command_control_key_id,
         signing_key=cfg.command_control_signing_key,
@@ -1456,6 +1474,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"status": status}, headers={"Cache-Control": "no-store"},
         )
 
+    @app.post("/internal/v1/command/whatsapp-qr/policy", include_in_schema=False)
+    async def internal_command_whatsapp_qr_policy(request: Request) -> JSONResponse:
+        raw = await request.body()
+        if len(raw) > 2048:
+            raise HTTPException(status_code=401, detail="qr_policy_denied")
+        try:
+            payload = CommandQrDisplayPolicyPayload.model_validate_json(raw)
+            result = qr_display_policy.apply(
+                raw_body=raw,
+                headers={
+                    "key_id": request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Command-Nonce"),
+                    "signature": request.headers.get("X-FM-Command-Signature"),
+                },
+                **payload.model_dump(),
+            )
+        except (QrDisplayPolicyDenied, ValidationError) as exc:
+            raise HTTPException(status_code=401, detail="qr_policy_denied") from exc
+        return JSONResponse({"status": result}, headers={"Cache-Control": "no-store"})
+
     @app.post("/internal/v1/command/assistant-plans/project", include_in_schema=False)
     async def internal_command_plan_projection(request: Request) -> JSONResponse:
         raw = await request.body()
@@ -1736,9 +1775,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if onboarding is None:
             raise HTTPException(status_code=503, detail="evolution_gateway_unavailable")
         connection = onboarding.current(context)
+        try:
+            display_seconds, policy_revision = qr_display_policy.read()
+        except Exception as exc:
+            # Missing policy read-model is not an authorization to show stale
+            # or excessive QR codes. Remain unavailable rather than widen cap.
+            raise HTTPException(status_code=503, detail="qr_policy_unavailable") from exc
         return JSONResponse(
             {"connection_id": connection.connection_id if connection else None,
-             "status": connection.status.value if connection else "disconnected"},
+             "status": connection.status.value if connection else "disconnected",
+             "qr_display_seconds": display_seconds,
+             "qr_policy_revision": policy_revision},
             headers={"Cache-Control": "no-store"},
         )
 
