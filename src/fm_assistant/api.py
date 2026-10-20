@@ -53,6 +53,7 @@ from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
 from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
+from .license_security_hold import SignedLicenseSecurityHold, LicenseSecurityHoldDenied
 from .plan_license_binding import GovernedPlanLicenseBinding, PlanLicenseBindingDenied
 from .plan_limits import PlanLimitDenied
 from .plan_policy_manifest import authenticated_core_plan_grant
@@ -180,6 +181,23 @@ class PlanBindingStatusPayload(BaseModel):
     plan_code: str = Field(min_length=2, max_length=120)
     plan_revision: int = Field(gt=0)
     operation_nonce: str = Field(min_length=22, max_length=96)
+
+
+class CommandLicenseSecurityHoldPayload(BaseModel):
+    """Strict server-only revocation; never accepts financial changes."""
+    model_config = {"extra": "forbid"}
+
+    product_code: str = Field(pattern=r"^VENDEATENDEIA$")
+    organization_id: str = Field(min_length=1, max_length=128)
+    tenant_id: str = Field(min_length=1, max_length=128)
+    actor_user_id: str = Field(min_length=1, max_length=128)
+    command_request_id: str = Field(min_length=1, max_length=128)
+    approved_at: int = Field(strict=True)
+    step_up_at: int = Field(strict=True)
+    plan_code: str = Field(min_length=1, max_length=120)
+    plan_revision: int = Field(strict=True, ge=1)
+    expected_valid_until: int = Field(strict=True, ge=1)
+    reason: str = Field(pattern=r"^security_hold$")
 
 
 class CommandQrDisplayPolicyPayload(BaseModel):
@@ -557,6 +575,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         trusted_organization=cfg.trusted_command_organization_id,
     )
     qr_display_policy = CommandQrDisplayPolicyService(
+        sessions=session_factory,
+        key_id=cfg.command_control_key_id,
+        signing_key=cfg.command_control_signing_key,
+        trusted_organization=cfg.trusted_command_organization_id,
+    )
+    license_security_hold = SignedLicenseSecurityHold(
         sessions=session_factory,
         key_id=cfg.command_control_key_id,
         signing_key=cfg.command_control_signing_key,
@@ -1424,6 +1448,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for row in rows
         ]
 
+
+    @app.post(
+        "/internal/v1/command/assistant-plans/security-hold",
+        include_in_schema=False,
+    )
+    async def internal_command_license_security_hold(request: Request) -> JSONResponse:
+        raw = await request.body()
+        if len(raw) > 2048:
+            raise HTTPException(status_code=401, detail="license.security_hold_denied")
+        try:
+            payload = CommandLicenseSecurityHoldPayload.model_validate_json(raw)
+            outcome = license_security_hold.suspend(
+                raw_body=raw,
+                headers={
+                    "key_id": request.headers.get("X-FM-Command-Key-ID"),
+                    "timestamp": request.headers.get("X-FM-Command-Timestamp"),
+                    "nonce": request.headers.get("X-FM-Command-Nonce"),
+                    "signature": request.headers.get("X-FM-Command-Signature"),
+                },
+                **payload.model_dump(),
+            )
+        except (LicenseSecurityHoldDenied, ValidationError) as exc:
+            raise HTTPException(
+                status_code=401, detail="license.security_hold_denied",
+            ) from exc
+        return JSONResponse(
+            {"status": outcome}, headers={"Cache-Control": "no-store"},
+        )
 
     @app.post("/internal/v1/command/assistant-plans/bind", include_in_schema=False)
     async def internal_command_plan_bind(request: Request) -> JSONResponse:
