@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import time
 
 from .credential_vault import CredentialVault
@@ -43,7 +44,7 @@ class EvolutionNativeIngress:
         connection = self._repository.get_unscoped(connection_id)
         if (
             connection is None or connection.provider_key != "whatsapp_evolution"
-            or connection.status in {IntegrationStatus.REVOKED, IntegrationStatus.DISABLED}
+            or connection.status is IntegrationStatus.REVOKED
         ):
             raise NativeEvolutionDenied("evolution_native_denied")
         encrypted = self._repository.active_secret_ciphertexts(
@@ -57,6 +58,15 @@ class EvolutionNativeIngress:
             hashlib.sha256(credential.encode()).digest(),
         ):
             raise NativeEvolutionDenied("evolution_native_denied")
+        # A paused channel may accept provider status receipts solely for
+        # reconciliation; never accept inbound messages or reopen events.
+        if connection.status is IntegrationStatus.DISABLED:
+            try:
+                event = json.loads(raw)
+            except (TypeError, ValueError) as exc:
+                raise NativeEvolutionDenied("evolution_native_denied") from exc
+            if not isinstance(event, dict) or event.get("event") != "messages.update":
+                raise NativeEvolutionDenied("evolution_native_denied")
         # Forward the exact bytes through the EXISTING signed FM internal
         # contract after native authentication. Untrusted caller-controlled
         # HMAC/timestamp headers are never accepted as forwarding inputs.
