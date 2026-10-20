@@ -304,3 +304,66 @@ def test_audio_upload_ceiling_denies_before_any_quota_reservation(guarded):
     ).reserved_units == 0
     with pytest.raises(ValueError, match="audio_upload_ceiling_invalid"):
         PlanUsageGuard(quota=store, authority=Authority(), max_audio_bytes=True)
+
+
+def test_known_total_usage_settles_without_unconfigured_cache_metric(guarded):
+    """No fake cache measurement: only existing quotas are settled."""
+    guard, store = guarded
+    req = request("provider-without-cache-breakdown")
+    policy = guard.admit(request=req, at=NOW)
+    provider_event = event(req, inp=20, out=10, cached=None)
+    assert provider_event.cached_tokens is None
+    assert guard.reconcile(request=req, policy=policy, events=(provider_event,))
+    total = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert total.reserved_units == 0
+    assert total.consumed_units == 30
+    assert provider_event.cached_tokens is None  # no fabricated receipt
+
+
+def test_missing_cache_breakdown_holds_reservation_when_cache_quota_exists(guarded):
+    from dataclasses import replace
+
+    guard, store = guarded
+    with store._sessions.begin() as db:
+        db.add(AIQuotaPolicyRecord(
+            tenant_id="a", unit_id="__tenant__",
+            capability="ai.cached_tokens", limit_units=300,
+            window_seconds=86400, revision=1,
+        ))
+
+    class CacheAuthority(Authority):
+        def resolve(self, *, tenant_id, unit_id, capability, now):
+            current = super().resolve(
+                tenant_id=tenant_id, unit_id=unit_id,
+                capability=capability, now=now,
+            )
+            return replace(current, scopes=(
+                *current.scopes, ("ai.cached_tokens", "tenant"),
+            ))
+
+    cache_guard = PlanUsageGuard(quota=store, authority=CacheAuthority())
+    req = request("provider-cache-enforced")
+    policy = cache_guard.admit(request=req, at=NOW)
+    assert not cache_guard.reconcile(
+        request=req, policy=policy,
+        events=(event(req, inp=20, out=10, cached=None),),
+    )
+    total = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert total.reserved_units == 180
+    assert total.consumed_units == 0
+    assert cache_guard.reconcile(
+        request=req, policy=policy,
+        events=(event(req, inp=20, out=10, cached=2),),
+    )
+    total = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert total.reserved_units == 0
+    assert total.consumed_units == 30
