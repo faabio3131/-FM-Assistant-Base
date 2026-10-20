@@ -456,8 +456,10 @@ def test_postgres_send_lock_serializes_pause_and_revoke(
         release.set()
         assert running_send.result(timeout=10) == "released"
         assert running_mutation.result(timeout=10) == terminal_state
-    with pytest.raises(PermissionError, match="evolution_connection_changed_before_send"):
-        with queue.outbound_connection_guard(
+    with (
+        pytest.raises(PermissionError, match="evolution_connection_changed_before_send"),
+        queue.outbound_connection_guard(
             connection_id=CONNECTION_ID, expected_revision=1,
-        ):
-            pass
+        ),
+    ):
+        pass
