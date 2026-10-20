@@ -335,6 +335,54 @@ class EvolutionInboundQueue:
                 raise RuntimeError("evolution_outbound_result_conflict")
             session.commit()
 
+    def correlate_delivery_status(
+        self, *, connection_id: str, outbound_reference: str,
+        status: str, evidence_sha256: str,
+    ) -> bool:
+        """Only an authenticated upstream callback may supply evidence_sha256.
+
+        Match an existing provider receipt within this exact connection. Do not
+        create a mapping for unknown receipts or mistake a sent ACK for delivery.
+        Monotonic rank prevents late updates from undoing a confirmed state.
+        """
+        import re
+
+        ranks = {"sent": 1, "delivered": 2, "read": 3}
+        if status not in ranks:
+            raise ValueError("evolution_delivery_status_invalid")
+        if (
+            not isinstance(outbound_reference, str)
+            or not 1 <= len(outbound_reference) <= 160
+            or not isinstance(evidence_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is None
+        ):
+            raise ValueError("evolution_delivery_evidence_invalid")
+        with self._sessions() as session:
+            matches = session.scalars(
+                select(EvolutionInboundJobORM).where(
+                    EvolutionInboundJobORM.connection_id == connection_id,
+                    EvolutionInboundJobORM.outbound_reference == outbound_reference,
+                    EvolutionInboundJobORM.outbound_status == "provider_acknowledged",
+                    EvolutionInboundJobORM.state.in_((
+                        "complete", "reconcile_required", "reviewed", "sending",
+                    )),
+                ).with_for_update()
+            ).all()
+            # Unmatched or ambiguous references fail closed; never link by
+            # phone, message text, time proximity or another tenant's ID.
+            if len(matches) != 1:
+                return False
+            job = matches[0]
+            prior_rank = ranks.get(job.delivery_status, 0)
+            if ranks[status] <= prior_rank:
+                return False
+            job.delivery_status = status
+            job.delivery_evidence_sha256 = evidence_sha256
+            job.delivery_observed_at = datetime.now(UTC)
+            job.updated_at = datetime.now(UTC)
+            session.commit()
+            return True
+
     def state(self, *, connection_id: str, message_id: str) -> str | None:
         with self._sessions() as session:
             row = session.get(EvolutionInboundJobORM, (connection_id, message_id))
@@ -404,6 +452,12 @@ class EvolutionInboundQueue:
                         "outbound_status": row.outbound_status,
                         "outbound_operation_id": row.outbound_operation_id,
                         "outbound_reference": row.outbound_reference,
+                        "delivery_status": row.delivery_status,
+                        "delivery_evidence_sha256": row.delivery_evidence_sha256,
+                        "delivery_observed_at": (
+                            row.delivery_observed_at.isoformat()
+                            if row.delivery_observed_at else None
+                        ),
                         "requires_review": row.state == "reconcile_required",
                         "provider_delivery_confirmed": False,
                     }
@@ -417,6 +471,12 @@ class EvolutionInboundQueue:
                         "outbound_status": row.outbound_status,
                         "outbound_operation_id": row.outbound_operation_id,
                         "outbound_reference": row.outbound_reference,
+                        "delivery_status": row.delivery_status,
+                        "delivery_evidence_sha256": row.delivery_evidence_sha256,
+                        "delivery_observed_at": (
+                            row.delivery_observed_at.isoformat()
+                            if row.delivery_observed_at else None
+                        ),
                         "updated_at": row.updated_at.isoformat(),
                     }
                     for row in jobs
