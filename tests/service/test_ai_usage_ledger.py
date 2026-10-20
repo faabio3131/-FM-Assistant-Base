@@ -209,3 +209,60 @@ def test_distinct_fallback_routes_using_same_provider_model_are_not_deduped(ledg
     assert summary.fallback_attempts == 2
     assert summary.known_total == Decimal("0.15")
     assert summary.all_recorded_costs_known is True
+
+
+def test_finops_alert_marks_unknown_provider_attempt_as_manual_reconciliation(ledger):
+    from core.ai_finops_alerts import evaluate_request_cost_alert
+
+    store, _ = ledger
+    store.add_price_snapshot(price())
+    store.registrar(event(request="needs-reconcile"))
+    store.registrar(replace(
+        event(request="needs-reconcile", price_id="no-evidence"),
+        fallback_used=True, fallback_reason="timeout",
+        input_tokens=None, output_tokens=None,
+    ))
+    summary = store.reconcile_request(
+        tenant_id="a", unit_id="u", request_id="needs-reconcile",
+    )
+    alert = evaluate_request_cost_alert(
+        summary, maximum_known_cost=Decimal("0.04"), currency="USD",
+    )
+    assert alert.status == "needs_attention"
+    assert set(alert.reasons) == {
+        "provider_cost_unverified", "known_subtotal_above_limit",
+    }
+    assert alert.known_cost == Decimal("0.05")
+    assert alert.unknown_attempts == 1
+    assert alert.all_costs_known is False
+
+
+def test_finops_alert_requires_evidence_and_exact_currency(ledger):
+    from core.ai_finops_alerts import evaluate_request_cost_alert
+
+    store, _ = ledger
+    unknown = store.reconcile_request(
+        tenant_id="a", unit_id="u", request_id="not-observed",
+    )
+    absent = evaluate_request_cost_alert(unknown)
+    assert absent.status == "needs_attention"
+    assert absent.reasons == ("usage_evidence_unavailable",)
+    assert not absent.all_costs_known
+    store.add_price_snapshot(price())
+    store.registrar(event(request="known"))
+    summary = store.reconcile_request(
+        tenant_id="a", unit_id="u", request_id="known",
+    )
+    clean = evaluate_request_cost_alert(
+        summary, maximum_known_cost=Decimal("0.10"), currency="USD",
+    )
+    assert clean.status == "reconciled"
+    assert clean.known_cost == Decimal("0.05")
+    with pytest.raises(ValueError, match="alert_policy_invalid"):
+        evaluate_request_cost_alert(
+            summary, maximum_known_cost=Decimal("0.10"), currency="BRL",
+        )
+    with pytest.raises(ValueError, match="alert_policy_invalid"):
+        evaluate_request_cost_alert(
+            summary, maximum_known_cost=Decimal("NaN"), currency="USD",
+        )
