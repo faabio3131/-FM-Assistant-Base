@@ -228,13 +228,22 @@ class CompositeAIExecutor(ExecutorModeloIA):
 
 
 def _int_or_none(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
+    """Only exact, nonnegative provider usage counts are auditable.
+
+    int(True), int(1.9), whitespace and scientific notation previously
+    truncated/coerced inconsistent provider receipts. Unknown metering must
+    retain the Core reservation; it can never silently become billable 0/1.
+    """
+    if type(value) is int:
+        return value if 0 <= value <= 2_000_000_000 else None
+    if (
+        isinstance(value, str)
+        and 1 <= len(value) <= 10 and value.isascii()
+        and value.isdecimal()
+    ):
         parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed >= 0 else None
+        return parsed if parsed <= 2_000_000_000 else None
+    return None
 
 
 def _cached_tokens(usage: Mapping[str, Any]) -> int | None:
