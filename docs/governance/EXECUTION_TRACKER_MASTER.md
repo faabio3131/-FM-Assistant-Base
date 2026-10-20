@@ -1064,3 +1064,10 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 - HEAD functional `419bc942cc9dc02d9125288ec5200a76aaa52bc9`: SaaS Foundation `39470488809` SUCCESS, Core↔Assistant `39470489181` SUCCESS, F3 PostgreSQL `39470489116` SUCCESS.
 - Companion Core `7154020f45da7b82f847b7644ebaeb73f0565b76` (2/2 green) fixes guarded audio and exact provider-token integer parsing. Command PR #119 pins both to test signed corporate license status → Assistant current-state denial → Core quota denial in disposable integration.
 - This is not native lifecycle C06 nor Command→Assistant automatic suspend/revoke, external provider attestation or whole-F3 closure. Keep F3 BUILD_IN_PROGRESS, external VPS/keys/Evolution/provider trials deferred, never change Kordena.
+
+
+2026-10-20 — F3 / SIGNED SECURITY HOLD RECEIVER
+- Novo `POST /internal/v1/command/assistant-plans/security-hold` aceita somente pacote FM assinado dentro de janela curta, inclui tenant/ator/request ID/plan revision/lease cutoff, step-up corporativo, nonce consumido atomicamente, transição ativa/trial → suspended e evidência append-only. Reusa HMAC/Command trust já existente e a proteção `PlanSyncNonceORM`; nenhum token de cliente pode invocar o método por si só.
+- Migration aditiva `20261020_0018_license_security_hold_audit.py`: somente esquema para evidência de suspensão, sem backfill ou alteração financeira. Testes offline provam alteração, anti-replay, forja/escopo cruzado e política estritamente de segurança. `tests/saas/test_core_bridge_migration.py` atualizado para Alembic head 0018.
+- Companion FMCC PR #121: produtor do envelope assinado e integração testada contra receptor real, **sem rota pública de envio**. Para concluir revogação E2E real ainda precisa prova da licença corrente/autorização FM e reconciliação de ACK, aprovações humanas quando financeiras e certificação conjunta. F3 geral BUILD_IN_PROGRESS; não afirmar live de ERP, IA, Evolution, VPS, gateway ou provider.
+- Gates do HEAD desta atualização e review independente devem ser certificados antes de merge. Ambiente real sem deploy, migration, secret ou cliente afetado.
