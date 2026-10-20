@@ -178,6 +178,7 @@ def test_signed_binding_status_reports_persisted_match_without_reissuing_license
             "plan_code", "plan_revision",
         )
     }
+    status_body["operation_nonce"] = nonce
     status_raw = json.dumps(status_body, sort_keys=True, separators=(",", ":")).encode()
     status_nonce = uuid4().hex
     status_headers = {
@@ -220,6 +221,7 @@ def test_binding_status_refuses_unsigned_foreign_scope(binding):
         "product_code": "VENDEATENDEIA",
         "organization_id": "fm-corporate", "tenant_id": "tenant-a",
         "plan_code": "PLAN_FULL", "plan_revision": 1,
+        "operation_nonce": uuid4().hex,
     }
     raw = json.dumps(scope).encode()
     ts = str(int(datetime.now(UTC).timestamp()))
