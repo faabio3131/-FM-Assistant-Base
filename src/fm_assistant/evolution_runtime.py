@@ -106,6 +106,46 @@ class EvolutionRuntime:
                     context, connection_id, event_type="evolution.disconnected",
                 )
             return EvolutionDeliveryResult()
+        if payload.get("event") == "messages.update":
+            # Verified by the existing signed FM broker before parsing payload.
+            # Authenticated native ingress already checks its per-instance secret.
+            # Status must describe our own outbound reference, never inbound.
+            if self._queue is None or connection.status is not IntegrationStatus.ACTIVE:
+                raise PermissionError("evolution_delivery_correlation_unavailable")
+            updates = payload.get("data")
+            updates = updates if isinstance(updates, list) else [updates]
+            if len(updates) > 32:
+                raise PermissionError("evolution_delivery_batch_invalid")
+            for update in updates:
+                if not isinstance(update, dict):
+                    continue
+                key = update.get("key")
+                if not isinstance(key, dict) or key.get("fromMe") is not True:
+                    continue
+                outbound_reference = key.get("id")
+                state = update.get("update")
+                state = state.get("status") if isinstance(state, dict) else update.get("status")
+                states = {1: "sent", 2: "sent", 3: "delivered", 4: "read",
+                          "SENT": "sent", "DELIVERY_ACK": "delivered",
+                          "DELIVERED": "delivered", "READ": "read"}
+                try:
+                    normalized = states.get(state)
+                except TypeError:
+                    continue
+                if not isinstance(outbound_reference, str) or normalized is None:
+                    continue
+                if not 1 <= len(outbound_reference) <= 160:
+                    continue
+                # Hash the authenticated raw bytes; retain proof of source
+                # authentication from the per-connection broker contract,
+                # never the private payload or sender JID.
+                evidence = hashlib.sha256(raw).hexdigest()
+                self._queue.correlate_delivery_status(
+                    connection_id=connection_id,
+                    outbound_reference=outbound_reference,
+                    status=normalized, evidence_sha256=evidence,
+                )
+            return EvolutionDeliveryResult()
         if connection.status is not IntegrationStatus.ACTIVE:
             raise PermissionError("evolution_connection_inactive")
         secret = self._integrations.active_secret_ciphertexts(connection_id).get(
