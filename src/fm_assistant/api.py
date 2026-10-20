@@ -51,9 +51,9 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .license_security_hold import LicenseSecurityHoldDenied, SignedLicenseSecurityHold
 from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
-from .license_security_hold import SignedLicenseSecurityHold, LicenseSecurityHoldDenied
 from .plan_license_binding import GovernedPlanLicenseBinding, PlanLicenseBindingDenied
 from .plan_limits import PlanLimitDenied
 from .plan_policy_manifest import authenticated_core_plan_grant
