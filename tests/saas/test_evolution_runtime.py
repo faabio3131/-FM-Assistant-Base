@@ -431,3 +431,28 @@ def test_signed_delivery_updates_match_only_existing_scoped_receipts(
     )
     assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["delivery_status"] == "delivered"
 
+
+    # Paused channels still reconcile already sent operations but cannot
+    # reactivate themselves from a delayed signed connection-open callback.
+    repo.update_connection(ctx, cid, status=IntegrationStatus.DISABLED, bump_revision=True)
+    read_raw, read_headers = _signed(cid, {
+        **event, "data": [{"key": {"id": "PROVIDER-RECEIPT-ID", "fromMe": True},
+                          "update": {"status": "READ"}}],
+    })
+    runtime.receive(
+        connection_id=cid, raw=read_raw,
+        signature=read_headers["X-FM-Evolution-Signature"],
+        timestamp=read_headers["X-FM-Evolution-Timestamp"],
+    )
+    assert queue.operational_snapshot(connection_id=cid)["lifecycle"][0]["delivery_status"] == "read"
+    open_raw, open_headers = _signed(cid, {
+        "event": "connection.update",
+        "instance": connection.config["instance_name"],
+        "data": {"state": "open"},
+    })
+    with pytest.raises(PermissionError):
+        runtime.receive(
+            connection_id=cid, raw=open_raw,
+            signature=open_headers["X-FM-Evolution-Signature"],
+            timestamp=open_headers["X-FM-Evolution-Timestamp"],
+        )
