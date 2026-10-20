@@ -94,7 +94,7 @@ class EvolutionClient:
 
     API_FAMILY = "evolution_v2_whatsapp_baileys"
     CONTRACT_BASELINE = "v2.3.7"
-    WEBHOOK_EVENTS = ("MESSAGES_UPSERT", "CONNECTION_UPDATE")
+    WEBHOOK_EVENTS = ("MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE")
 
     def set_native_webhook(
         self, instance: str, *, instance_token: str,
