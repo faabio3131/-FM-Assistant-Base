@@ -154,13 +154,13 @@ def register_admin_read_routes(app: FastAPI) -> None:
                 summary, maximum_known_cost=maximum_known_cost,
                 currency=currency,
             )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=422, detail="core_operator_alert_policy_invalid",
-            ) from exc
         except (ControlPlaneError, SQLAlchemyError) as exc:
             raise HTTPException(
                 status_code=503, detail="core_operator_usage_unavailable",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="core_operator_alert_policy_invalid",
             ) from exc
         return {
             "tenant_id": tenant_id, "unit_id": unit_id,
