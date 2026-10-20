@@ -6,8 +6,8 @@ quarantine instead of replay to prevent duplicate model charges and messages.
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
