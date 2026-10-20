@@ -124,3 +124,46 @@ def apply_authenticated_license_grant(
         revision=d["revision"], grants=tuple(grants),
     )
     return d["revision"], d["input_bound"], d["output_bound"]
+
+
+def reserve_licensed_ai_attempt(
+    *, payload: bytes, signature: str, key: bytes,
+    expected: ExpectedLicensedScope, ledger: QuotaReservations,
+    at: datetime, request_id: str, input_budget: int, output_budget: int,
+) -> None:
+    """Authorize *this* execution only with a fresh Assistant grant.
+
+    Never authorize from a previously projected policy alone; an expired
+    license, absent signature, replayed request or exceeded budget fails
+    before any provider call. The existing ledger reserves atomically.
+    """
+    from core.ai_quota_store import QuotaRequirement
+
+    if (
+        type(input_budget) is not int or type(output_budget) is not int
+        or input_budget <= 0 or output_budget <= 0
+    ):
+        raise QuotaDenied("core_license_budget_invalid")
+    # Authentication precedes all side effects.
+    revision, input_limit, output_limit = apply_authenticated_license_grant(
+        payload=payload, signature=signature, key=key,
+        expected=expected, ledger=ledger, at=at,
+    )
+    if input_budget > input_limit or output_budget > output_limit:
+        raise QuotaDenied("core_license_budget_exceeded")
+    body = json.loads(payload)
+    scopes = {g[0]: g[1] for g in body["grants"]}
+    required = []
+    for metric, units in (
+        ("ai.requests", 1),
+        ("ai.total_tokens", input_budget + output_budget),
+        ("ai.input_tokens", input_budget),
+        ("ai.output_tokens", output_budget),
+    ):
+        if metric in scopes:
+            required.append(QuotaRequirement(
+                tenant_id=expected.tenant_id,
+                unit_id="__tenant__" if scopes[metric] == "tenant" else expected.unit_id,
+                capability=metric, units=units, policy_revision=revision,
+            ))
+    ledger.reserve_bundle(needs=tuple(required), request_id=request_id, at=at)
