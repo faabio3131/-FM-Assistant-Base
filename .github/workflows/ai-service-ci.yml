@@ -31,6 +31,11 @@ jobs:
           core/ai_control_plane_bootstrap.py
           core/ai_admin_read_api.py
           core/ai_command_authority.py
+          core/ai_governed_recovery.py
+          core/ai_governed_recovery_api.py
+          core/ai_provider_evidence_store.py
+          core/ai_provider_source_verifier.py
+          core/ai_verified_usage_receipt.py
           core/ai_tenant_credential_resolver.py
           core/ai_assistant_credential_gateway.py
           core/ai_admin_audit.py
@@ -40,6 +45,7 @@ jobs:
           alembic/versions/0002_f3_command_admin_audit.py
           alembic/versions/0003_f3_quota_reservations.py
           alembic/versions/0004_f3_circuit_state.py
+          alembic/versions/0005_f3_provider_evidence.py
           core/ai_service_contracts.py
           core/ai_service_settings.py
           core/ai_providers.py

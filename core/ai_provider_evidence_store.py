@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, Integer, String, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Mapped, mapped_column, sessionmaker, Session
+from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
 from core.ai_control_plane import ControlPlaneBase
 from core.ai_quota_store import QuotaDenied
@@ -105,7 +105,8 @@ class TrustedProviderEvidenceStore:
         silently use a synthetic statement.
         """
         from core.ai_provider_source_verifier import (
-            ProviderSigningPolicy, verified_signed_usage_source,
+            ProviderSigningPolicy,
+            verified_signed_usage_source,
         )
 
         if not isinstance(source_policy, ProviderSigningPolicy):

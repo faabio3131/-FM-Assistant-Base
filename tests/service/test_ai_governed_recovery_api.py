@@ -81,6 +81,26 @@ def test_recovery_route_requires_signed_human_and_verified_receipt():
     assert ledger.calls == 0
     claims["role"] = "platform_admin"
     valid_token = jwt.encode(claims, private, algorithm="RS256")
+    authenticated = {
+        "Authorization": "Bearer " + valid_token,
+        "X-FM-Recovery-Service-Key": transport_key,
+    }
+    # Financial mutation input must not silently coerce revisions or discard
+    # caller-supplied usage/cost. Rejection happens before evidence retrieval.
+    for field in ("requests_revision", "tokens_revision"):
+        for invalid in (True, False, "1", 1.0, 1.5, 0, -1, None):
+            assert http.post(
+                path, json={**body, field: invalid}, headers=authenticated,
+            ).status_code == 422
+    for field, value in (
+        ("input_tokens", 0), ("output_tokens", 0),
+        ("provider_cost_usd", "0"), ("no_charge", True),
+        ("request_scope", "other-tenant"), ("principal", {"role": "platform_admin"}),
+    ):
+        assert http.post(
+            path, json={**body, field: value}, headers=authenticated,
+        ).status_code == 422
+    assert ledger.calls == 0
     assert http.post(
         path, json=body, headers={"Authorization": "Bearer " + valid_token},
     ).status_code == 401  # JWT alone must never mutate finance.

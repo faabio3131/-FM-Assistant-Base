@@ -11,10 +11,10 @@ from typing import Protocol
 
 from core.ai_command_authority import (
     CommandTrustPolicy,
+    VerifiedCommandAdmin,
     verify_command_platform_admin,
 )
 from core.ai_quota_store import QuotaDenied
-from core.ai_command_authority import VerifiedCommandAdmin
 from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
 
 

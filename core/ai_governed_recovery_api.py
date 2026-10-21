@@ -10,20 +10,24 @@ import hmac
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.ai_command_authority import (
-    CommandAuthorityDenied, CommandTrustPolicy,
+    CommandAuthorityDenied,
+    CommandTrustPolicy,
 )
 from core.ai_governed_recovery import (
     GovernedRecoveryCommand,
-    ProviderEvidenceVerifier, RecoveryQuotaLedger,
+    ProviderEvidenceVerifier,
+    RecoveryQuotaLedger,
     execute_governed_recovery,
 )
 from core.ai_quota_store import QuotaDenied
 
 
 class GovernedRecoveryPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     request_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
     tenant_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
     unit_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
