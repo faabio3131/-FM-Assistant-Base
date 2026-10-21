@@ -849,3 +849,49 @@ Esta instrução posterior e expressa do proprietário **altera a ordem de execu
 7. **Autonomia integral:** implementar, corrigir e prosseguir pelo cronograma sem pedir confirmação para tarefas internas; interromper apenas por risco crítico ou ação real irreversível que exija consentimento específico.
 
 Referência canônica: `docs/governance/F3_BUILD_FIRST_EXTERNAL_HOMOLOGATION_LAST_2026-10-18.md`. Nenhum requisito funcional, proteção de dados, autoridade humana ou controle de segurança foi removido; somente a dependência temporal de provas externas foi adiada.
+
+---
+
+# 26. DECISÃO EXECUTIVA — EXECUÇÃO CONTÍNUA POR BLOCO, CORREÇÃO E MERGE AUTÔNOMOS (20/10/2026)
+
+**Autoridade:** autorização expressa do proprietário da FM Tecnologia. Esta decisão detalha a autonomia prevista nas seções 5, 21 e 25 e prevalece sobre interpretações anteriores que exigiam confirmação a cada bloco ou impediram merge de um bloco concluído apenas porque a fase global ainda contém outros blocos. **Não** reduz gates técnicos, segurança ou obrigações de revisão.
+
+## 26.1 Fluxo contínuo obrigatório (bloco/WP)
+
+```text
+CURRENT verificado em GitHub + AGENTS + tracker
+→ escolher o próximo bloco de software internamente desbloqueado
+→ reaproveitar implementação existente (Kordena/Assistant/Core/Command), sem duplicar
+→ codificar / corrigir / adicionar regressões
+→ lint + types + testes + banco descartável + segurança + CI no HEAD exato
+→ RED? investigar raiz → corrigir → repetir até GREEN
+→ 100% GREEN para O BLOCO, revisão exigida, PR mergeable e sem STOP?
+   SIM → merge automaticamente, verificar main + CI pós-merge, registrar SHA
+   NÃO → NÃO mergear; corrigir, ou registrar bloqueio preciso e avançar APENAS em
+          bloco de construção independente que não dependa do bloqueado
+→ começar imediatamente o próximo bloco desbloqueado
+```
+
+Não solicitar sucessivas aprovações para código, correções, testes, refactor estritamente necessário, commits, push, PR e **merge elegível**. A autorização deste item é permanente para o escopo de construção aprovado até revogação pelo proprietário. A execução é feita em cada sessão/ferramenta disponível; este documento **não afirma execução em background** ou sem executor ativo.
+
+## 26.2 Gate de merge por entrega, sem falso fechamento de fase
+
+A unidade normal de integração é um **bloco/WP concluído e testado**, não a fase global inteira. É permitido integrar um bloco internamente GREEN mesmo quando a fase F3/F4/... permanece IN_PROGRESS, **desde que** o bloco seja autossuficiente, as suas dependências estejam presentes na base, o merge não habilite operação real insegura e todos os gates aplicáveis ao bloco e às integrações tocadas estejam GREEN no SHA exato. O tracker registra separadamente `WP=GREEN/MERGED` e `FASE=IN_PROGRESS`. Não declarar a fase concluída por ter integrado apenas um WP.
+
+Antes do merge exigir: diff revisado, segurança/RBAC/tenant, testes negativos, lint/typecheck/build, CI real com jobs executados, migrations apenas em banco descartável quando aplicável, contratos entre repositórios versionados, ausência de regressão/STOP, PR atualizada/mergeable, check de proteção de branch e autorização material preexistente. Revisão realizada pelo próprio executor NÃO será apresentada como revisão independente; se um gate exigir responsável diferente, ele deverá estar efetivamente satisfeito. `BLOCKED_EXTERNAL`, `RED`, `UNKNOWN` e CI sem execução NÃO contam como GREEN.
+
+**Não fazer merge** se o merge acionar deploy automático não autorizado, migration produtiva, uso de segredo real, cobrança, mutação irreversível ou cutover. Reconfiguração real de auto-deploy, release, contratação de serviços, uso de credenciais reais, deploy/migration persistente e mudança de política/escopo comercial dependem da decisão específica do proprietário.
+
+## 26.3 Sem PRs empilhadas desnecessárias e sem retrabalho
+
+Para novas unidades regulares, partir da `main` verificada, criar uma PR de escopo pequeno, corrigir e certificar, integrar, confirmar `main`, então iniciar a dependente seguinte. Evitar novas cadeias de PRs Draft empilhadas. PRs antigas (inclusive #1 Assistant, Core #1 e pendências comerciais Command) precisam de reconciliação por commits/arquivos/ancestralidade antes de qualquer merge, para não aplicar código duas vezes nem apagar proteção posterior. Uma PR monolítica **não** fica elegível automaticamente por haver subgates verdes; revisar o conjunto integral efetivamente incluído na integração.
+
+## 26.4 Não confundir bloco construído com homologação
+
+Primeiro concluir internamente F0–F12 e as partes de software de F14, mantendo F13/homologações reais adiadas até `BUILD_COMPLETE_INTERNAL_GREEN`. Provas de Evolution/Meta, WhatsApp real, provedores de IA, Asaas/PSP, Contabo/Render, chaves e TLS de produção são `EXTERNAL_HOMOLOGATION_DEFERRED` e **não bloqueiam trabalho interno independente**. Testes de contrato com stubs/serviços isolados e PostgreSQL descartável continuam obrigatórios; tais testes não constituem homologação externa. Gates internos dependentes de fonte autoritativa precisam ser construídos com portas/adaptadores seguros, sem inventar evidência externa.
+
+## 26.5 Aceleração com controle de evidências
+
+Para cada WP, registrar no `EXECUTION_TRACKER_MASTER.md`: situação antes/depois, função existente reaproveitada, mudança, PR/HEAD, comandos e testes/gates, riscos, merge SHA, verificação pós-merge e próximo WP. `AGENTS.md` deve refletir este fluxo. Nunca reiniciar uma fase já concluída, remover testes para produzir verde, renomear produto sem aprovação ou modificar `faabio3131/fm-ai-platform` (Kordena, read-only).
+
+**Marco de conclusão:** construção interna 100% certificada é estado distinto de homologação real e de lançamento. A autorização de merge aqui não autoriza deploy de produção.
