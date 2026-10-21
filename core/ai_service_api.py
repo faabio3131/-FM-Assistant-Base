@@ -192,6 +192,7 @@ def create_app(
 
         recovery_router = governed_recovery_router(
             trust=recovery_trust, evidence=_BoundEvidence(), ledger=_BoundQuota(),
+            transport_key=cfg.governed_recovery_transport_key or "",
         )
         # Register the already-constructed APIRoute directly. This does not
         # alter its explicit HMAC/RS256 authorization or evidence dependencies.
