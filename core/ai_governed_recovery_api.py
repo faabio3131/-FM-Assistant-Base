@@ -6,6 +6,7 @@ provider proof a hard construction gate, not a path to free quota.
 """
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, HTTPException
@@ -34,14 +35,26 @@ class GovernedRecoveryPayload(BaseModel):
 def governed_recovery_router(
     *, trust: CommandTrustPolicy,
     evidence: ProviderEvidenceVerifier, ledger: RecoveryQuotaLedger,
+    transport_key: str,
 ) -> APIRouter:
+    # Service identity is independent from Command's human RS256 step-up.
+    if not isinstance(transport_key, str) or len(transport_key.encode()) < 32:
+        raise ValueError("core_recovery_transport_key_invalid")
     router = APIRouter(prefix="/internal/v1/command", tags=["command-recovery"])
 
     @router.post("/ai/usage/reconcile", status_code=204)
     def reconcile(
         payload: GovernedRecoveryPayload,
         authorization: str | None = Header(default=None),
+        x_fm_recovery_service_key: str | None = Header(
+            default=None, alias="X-FM-Recovery-Service-Key",
+        ),
     ) -> None:
+        if (
+            not x_fm_recovery_service_key
+            or not hmac.compare_digest(transport_key, x_fm_recovery_service_key)
+        ):
+            raise HTTPException(status_code=401, detail="command_recovery_denied")
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="command_recovery_denied")
         token = authorization.removeprefix("Bearer ")
