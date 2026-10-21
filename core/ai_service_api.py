@@ -18,16 +18,16 @@ from core.ai_admin_read_api import register_admin_read_routes
 from core.ai_assistant_credential_gateway import AssistantSignedCredentialGateway
 from core.ai_command_authority import CommandTrustPolicy, VerifiedCommandAdmin
 from core.ai_control_plane import ControlPlaneError
+from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_governed_recovery_api import governed_recovery_router
 from core.ai_provider_evidence_store import TrustedProviderEvidenceStore
-from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
-from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_quota_store import QuotaDenied, QuotaReservations
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
 from core.ai_service_contracts import CoreAIResult, TextMessage
 from core.ai_service_runtime import CoreAIRuntime
 from core.ai_service_settings import CoreSettings, load_settings
 from core.ai_signed_plan_authority import AssistantPlanHTTPSFetch, SignedAssistantPlanAuthority
+from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
 from core.seguranca.erros import ReferenciaSegredoInvalida, SegredoAusente
 
 
