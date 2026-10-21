@@ -288,3 +288,136 @@ def test_pg_ambiguous_recovery_is_atomic_across_concurrent_workers(postgres_quot
             CommandAdminAuditRecord.resource_id == "tenant-a:recovery-contended",
         )).all()
         assert len(audits) == 1
+
+
+def test_pg_signed_command_recovery_exactly_once_with_service_fence(postgres_quota):
+    """Two workers, one provider proof, protected by transport + human authority."""
+    from decimal import Decimal
+
+    import jwt
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from fastapi.testclient import TestClient
+
+    from core.ai_admin_audit import CommandAdminAuditRecord
+    from core.ai_provider_evidence_store import (
+        TrustedProviderEvidenceStore,
+        sign_verified_gateway_attestation,
+    )
+    from core.ai_service_api import create_app
+    from core.ai_service_settings import CoreEnvironment, CoreSettings
+    from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
+
+    store, sessions = postgres_quota
+    url = os.environ["FM_CORE_F3_POSTGRES_TEST_URL"]
+    tenant = "tenant-recovery-pg"
+    request_id = "pg-recovery-command-v1"
+    at = datetime.now(UTC)
+    with sessions.begin() as db:
+        for cap in ("ai.requests", "ai.total_tokens"):
+            db.add(AIQuotaPolicyRecord(
+                tenant_id=tenant, unit_id="__tenant__", capability=cap,
+                limit_units=200, window_seconds=3600, revision=1,
+            ))
+    store.reserve_bundle(
+        request_id=request_id, at=at,
+        needs=(
+            QuotaRequirement(
+                tenant_id=tenant, unit_id="__tenant__",
+                capability="ai.requests", units=1, policy_revision=1,
+            ),
+            QuotaRequirement(
+                tenant_id=tenant, unit_id="__tenant__",
+                capability="ai.total_tokens", units=100, policy_revision=1,
+            ),
+        ),
+    )
+    provider_secret = b"synthetic-fm-pg-evidence-gateway-secret"
+    recovery_service_key = "synthetic-fm-command-to-core-transport-12345"
+    source_id = "fm-ci-gateway"
+    evidence_id = "provider-evidence-pg-1"
+    receipt = VerifiedProviderUsageReceipt(
+        provider="gemini", model="fixture", request_id=request_id,
+        tenant_id=tenant, unit_id="unit-1", input_tokens=9, output_tokens=6,
+        provider_cost_usd=Decimal("0.0015"), evidence_digest="c" * 64,
+    )
+    evidence_store = TrustedProviderEvidenceStore(
+        sessions, gateway_secret=provider_secret, source_id=source_id,
+    )
+    # The FM gateway proof is SYNTHETIC, not a claim about live Gemini source.
+    assert evidence_store.record_attested(
+        evidence_id=evidence_id, receipt=receipt,
+        gateway_signature=sign_verified_gateway_attestation(
+            evidence_id=evidence_id, source_id=source_id,
+            receipt=receipt, secret=provider_secret,
+        ),
+    )
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public = private.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+    cfg = CoreSettings(
+        environment=CoreEnvironment.TEST, service_key="service-ci-key",
+        routes=(), control_plane_database_url=url,
+        governed_recovery_enabled=True, governed_recovery_issuer="fm-command",
+        governed_recovery_audience="fm-core-recovery",
+        governed_recovery_public_key_pem=public,
+        governed_recovery_gateway_secret=provider_secret.decode(),
+        governed_recovery_source_id=source_id,
+        governed_recovery_transport_key=recovery_service_key,
+    )
+    path = "/internal/v1/command/ai/usage/reconcile"
+    body = {
+        "request_id": request_id, "tenant_id": tenant, "unit_id": "unit-1",
+        "evidence_id": evidence_id,
+        "requests_revision": 1, "tokens_revision": 1,
+    }
+    now = int(at.timestamp())
+
+    def signed_request(seq: int) -> tuple[dict[str, str], dict[str, str]]:
+        claims = {
+            "iss": "fm-command", "aud": "fm-core-recovery",
+            "sub": "platform-human", "session_id": "fm-session",
+            "jti": f"pg-unique-recovery-jti-{seq}",
+            "iat": now, "nbf": now, "exp": now + 120, "step_up_at": now,
+            "actor_type": "human", "role": "platform_admin",
+            "scope": "fm_core_platform", "permissions": ["core.ai.admin.mutate"],
+        }
+        return body, {
+            "Authorization": "Bearer " + jwt.encode(claims, private, algorithm="RS256"),
+            "X-FM-Recovery-Service-Key": recovery_service_key,
+        }
+
+    with TestClient(create_app(settings=cfg)) as client:
+        payload, headers = signed_request(0)
+        assert client.post(path, json=payload, headers={
+            "Authorization": headers["Authorization"],
+        }).status_code == 401
+        assert client.post(path, json={**payload, "tenant_id": "wrong-tenant"},
+                           headers=headers).status_code == 409
+
+        barrier = Barrier(2)
+
+        def worker(seq: int) -> int:
+            body2, headers2 = signed_request(seq + 1)
+            barrier.wait(timeout=8)
+            return client.post(path, json=body2, headers=headers2).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            a, b = pool.submit(worker, 1), pool.submit(worker, 2)
+            assert sorted((a.result(timeout=20), b.result(timeout=20))) == [204, 409]
+
+    with sessions() as db:
+        settled = db.scalars(select(AIQuotaReservationRecord).where(
+            AIQuotaReservationRecord.tenant_id == tenant,
+            AIQuotaReservationRecord.request_id == request_id,
+        )).all()
+        assert len(settled) == 2
+        assert {row.capability: row.consumed_units for row in settled} == {
+            "ai.requests": 1, "ai.total_tokens": 15,
+        }
+        assert all(row.state == "settled" for row in settled)
+        audits = db.scalars(select(CommandAdminAuditRecord).where(
+            CommandAdminAuditRecord.resource_id == f"{tenant}:{request_id}",
+        )).all()
+        assert len(audits) == 1
