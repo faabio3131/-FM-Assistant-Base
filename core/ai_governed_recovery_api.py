@@ -16,10 +16,10 @@ from core.ai_command_authority import (
 )
 from core.ai_governed_recovery import (
     GovernedRecoveryCommand,
-    ProviderEvidenceVerifier,
+    ProviderEvidenceVerifier, RecoveryQuotaLedger,
     execute_governed_recovery,
 )
-from core.ai_quota_store import QuotaDenied, QuotaReservations
+from core.ai_quota_store import QuotaDenied
 
 
 class GovernedRecoveryPayload(BaseModel):
@@ -33,7 +33,7 @@ class GovernedRecoveryPayload(BaseModel):
 
 def governed_recovery_router(
     *, trust: CommandTrustPolicy,
-    evidence: ProviderEvidenceVerifier, ledger: QuotaReservations,
+    evidence: ProviderEvidenceVerifier, ledger: RecoveryQuotaLedger,
 ) -> APIRouter:
     router = APIRouter(prefix="/internal/v1/command", tags=["command-recovery"])
 
