@@ -13,7 +13,8 @@ from core.ai_command_authority import (
     CommandTrustPolicy,
     verify_command_platform_admin,
 )
-from core.ai_quota_store import QuotaDenied, QuotaReservations
+from core.ai_quota_store import QuotaDenied
+from core.ai_command_authority import VerifiedCommandAdmin
 from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
 
 
@@ -23,6 +24,17 @@ class ProviderEvidenceVerifier(Protocol):
         tenant_id: str, unit_id: str,
     ) -> VerifiedProviderUsageReceipt:
         """Fetch independently authenticated provider receipt; no caller values."""
+
+
+class RecoveryQuotaLedger(Protocol):
+    """Minimal quota-reconciliation port; Core ledger remains authoritative."""
+
+    def reconcile_verified_provider_receipt(
+        self, *, receipt: VerifiedProviderUsageReceipt,
+        request_policy_revision: int, tokens_policy_revision: int,
+        principal: VerifiedCommandAdmin, at: datetime,
+        request_scope: str = "__tenant__", tokens_scope: str = "__tenant__",
+    ) -> None: ...
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -38,7 +50,7 @@ class GovernedRecoveryCommand:
 def execute_governed_recovery(
     *, command: GovernedRecoveryCommand, bearer_token: str,
     trust: CommandTrustPolicy, evidence: ProviderEvidenceVerifier,
-    ledger: QuotaReservations, at: datetime,
+    ledger: RecoveryQuotaLedger, at: datetime,
 ) -> None:
     """Verify human Command token and evidence independently before settlement.
 
