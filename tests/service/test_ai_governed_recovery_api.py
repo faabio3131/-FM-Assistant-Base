@@ -215,7 +215,7 @@ def test_opt_in_recovery_uses_only_immutable_scoped_evidence(tmp_path):
         settings.governed_recovery_enabled,
         getattr(app.state, "recovery_route_wiring_debug", "unset"),
         getattr(app.state, "recovery_router_paths", "unset"),
-        getattr(app.state, "recovery_installed_paths", "unset"),
+        [p for p in getattr(app.state, "recovery_installed_paths", []) if "command" in p or "reconcil" in p],
         create_app.__module__,
         __import__("inspect").getsource(create_app)[-600:],
         [getattr(route, "path", "") for route in app.routes
