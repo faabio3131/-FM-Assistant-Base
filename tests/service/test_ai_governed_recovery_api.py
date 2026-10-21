@@ -213,7 +213,8 @@ def test_opt_in_recovery_uses_only_immutable_scoped_evidence(tmp_path):
     path = "/internal/v1/command/ai/usage/reconcile"
     assert any(getattr(route, "path", "") == path for route in app.routes), (
         settings.governed_recovery_enabled,
-        [getattr(route, "path", "") for route in app.routes],
+        [getattr(route, "path", "") for route in app.routes
+         if "usage" in getattr(route, "path", "") or "command" in getattr(route, "path", "")],
     )
     body = {
         "tenant_id": "tenant-1", "unit_id": "unit-1",
