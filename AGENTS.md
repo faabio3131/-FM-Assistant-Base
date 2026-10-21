@@ -10,6 +10,11 @@
 
 Executar o Prompt Mestre até a conclusão comercial com máxima autonomia operacional, sem perder sequência, governança, evidência ou segurança.
 
+Para a execução iniciada em 20/10/2026, o cronograma canônico de construção é
+`docs/governance/CRONOGRAMA_MESTRE_CONSTRUCAO_100_INTERNA.md`. Ele substitui classificações
+genéricas do tracker quando a auditoria de código comprovar trabalho parcial já existente, sem
+apagar o histórico. O tracker continua sendo o diário de evidências.
+
 O agente deve trabalhar como executor disciplinado, não como improvisador.
 
 Objetivos deste arquivo:
@@ -240,6 +245,11 @@ Exigem autorização humana explícita:
 Preparação, código, testes, staging, documentação e merge podem avançar conforme gates.
 
 Nunca interpretar "merge autorizado" como "deploy autorizado".
+
+Homologação externa também é posterior a `BUILD_COMPLETE_INTERNAL_GREEN`. Até esse marco, o
+executor deve concluir adapters, configuração, contratos, fakes, migrations e testes internos, mas
+não usar credenciais, contas, infraestrutura ou usuários reais. Ausência de terceiro não bloqueia
+construção interna independente.
 
 ---
 
@@ -823,3 +833,13 @@ Autoridade: decisão humana mais recente, formalizada no Prompt Mestre, seção 
 - **Registro obrigatório:** tracker por WP com HEAD exato, gates, revisão (não rotular autoauditoria de independente), merge SHA, CI pós-merge, regressões e próximo bloco. Não refazer fases encerradas. Preservar Kordena como read-only.
 
 **Aplicação:** seção 26 do `docs/governance/PROMPT_MESTRE_EXECUCAO_INTEGRAL_V1.md` e checkpoint mais recente do `EXECUTION_TRACKER_MASTER.md`. Esta regra não autoriza execução assíncrona sem sessão/execução ativa.
+
+## 2026-10-20 — CONSTRUÇÃO 100% ANTES DA HOMOLOGAÇÃO EXTERNA
+
+- A avaliação e a sequência oficial passam a ser `docs/governance/CRONOGRAMA_MESTRE_CONSTRUCAO_100_INTERNA.md`.
+- Executar B0→B11 até `BUILD_COMPLETE_INTERNAL_GREEN`. B12/F13 é homologação externa e só pode começar depois desse marco.
+- Todo ponto externo deve possuir configuração governada, validação fail-closed, secret reference, adapter/port, fake determinístico e testes de sucesso/falha durante a construção.
+- Não cadastrar tenant, unidade, preço, limite, plano, credencial ou instância de provider por código.
+- O executor tem autonomia contínua para corrigir, commit/push, abrir/atualizar PR, reconciliar branches, executar auditoria interna em passe separado, fazer merge de WP 100% verde, validar a main e seguir ao próximo bloco sem novo pedido.
+- Uma pergunta de status não suspende o trabalho. Parar apenas em STOP real, decisão material ainda não aprovada ou ação externa/real que exija autorização.
+- Permanecem proibidos sem autorização específica: deploy/cutover, migration em banco real, credencial real, cobrança/envio real, gasto, homologação externa antecipada e operação destrutiva.

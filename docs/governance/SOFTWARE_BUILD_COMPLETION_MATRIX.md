@@ -1,24 +1,25 @@
-# Matriz de construção integral — FM Assistant + Sales AI V1
+# Matriz de construção integral — VendeAtendeIA
 
 **Autoridade:** Prompt Mestre V1 + decisão executiva de 18/10/2026  
-**Objetivo:** finalizar a implementação de todo o produto antes da homologação real.
+**Objetivo:** visão resumida da auditoria. O plano executável e os critérios vinculantes estão em
+`CRONOGRAMA_MESTRE_CONSTRUCAO_100_INTERNA.md`.
 
 | Fase | Construção de software | Configuração/teste externo |
 |---|---|---|
 | F0 — arquitetura e reconciliação | GREEN no tracker | Não aplicável à construção |
 | F1 — Identity/RBAC/Tenant/License | GREEN no tracker | Verificações reais finais diferidas |
 | F2 — integrações e credenciais (contratos) | GREEN no tracker | Credenciais e conectores vivos diferidos |
-| F3 — FM Core Production Control Plane | IN_PROGRESS: F3.8 FinOps/entitlement em desenvolvimento | Provedores, Vault, TLS e rede diferidos |
-| F4 — Knowledge & Retrieval | NOT_STARTED | Serviços externos diferidos |
-| F5 — Human Inbox | NOT_STARTED | Canal Meta/WhatsApp real diferido |
-| F6 — Sales/CRM Pack | NOT_STARTED | Integrações CRM reais diferidas |
-| F7 — Follow-up/Cadences/Agenda | NOT_STARTED | Integrações de agenda/mensageria reais diferidas |
-| F8 — Frontend web comercial | NOT_STARTED | Domínio/publicação real diferidos |
-| F9 — Billing/Plans/Quotas/Usage | NOT_STARTED | Gateway financeiro e cobrança reais diferidos |
-| F10 — Observability/SRE | NOT_STARTED | Endpoints externos e contas reais diferidos |
-| F11 — Security hardening | NOT_STARTED | Auditoria final externa diferida |
-| F12 — Backup/Restore/Incidents | NOT_STARTED | Restore real de infraestrutura diferido |
-| F14 — Commercial Readiness, parte de software | NOT_STARTED | Verificação real de lançamento diferida |
+| F3 — FM Core Production Control Plane | IN_PROGRESS: base avançada; integração/reconciliação final pendente | Provedores, Vault, TLS e rede diferidos |
+| F4 — Knowledge & Retrieval | NOT_BUILT na linha SaaS canônica | Serviços externos diferidos |
+| F5 — Human Inbox | NOT_BUILT; fila Evolution não substitui inbox humana | Canal Meta/WhatsApp real diferido |
+| F6 — Sales/CRM Pack | PARCIAL_REUTILIZÁVEL no legado; domínio comercial incompleto | Integrações CRM reais diferidas |
+| F7 — Follow-up/Cadences/Agenda | NOT_BUILT | Integrações de agenda/mensageria reais diferidas |
+| F8 — Frontend web comercial | PARCIAL_REUTILIZÁVEL; páginas pontuais, sem app definitivo | Domínio/publicação real diferidos |
+| F9 — Billing/Plans/Quotas/Usage | IN_PROGRESS nos três repositórios; lifecycle ainda aberto | Gateway financeiro e cobrança reais diferidos |
+| F10 — Observability/SRE | PARCIAL_REUTILIZÁVEL | Endpoints externos e contas reais diferidos |
+| F11 — Security hardening | IN_PROGRESS por blocos; auditoria final ausente | Auditoria externa opcional diferida |
+| F12 — Backup/Restore/Incidents | NOT_BUILT como gate comprovado | Infraestrutura real diferida; restore descartável é interno |
+| F14 — Commercial Readiness, parte de software | PARCIAL_REUTILIZÁVEL | Verificação real de lançamento diferida |
 | F13 — Staging/homologação real | `EXTERNAL_HOMOLOGATION_DEFERRED` | Executar apenas depois de Build 100% |
 | F15 — Release/produção | NOT_STARTED | Separado e sujeito à aprovação |
 
@@ -36,4 +37,4 @@
 
 Após `BUILD_COMPLETE_INTERNAL_GREEN`: configurar contas e segredos, executar staging/homologação externa F13, revisar evidências, finalizar aspectos reais de F14 e obter consentimento específico para F15. Somente essa fase pode confirmar `REAL_HOMOLOGATION_APPROVED`.
 
-**Checkpoint corrente:** F3 IN_PROGRESS. Não antecipar certificação interna de F4–F12/F14 que ainda não foram construídas.
+**Checkpoint corrente:** executar B0 e B1 do cronograma mestre; F3/F9 permanecem IN_PROGRESS.

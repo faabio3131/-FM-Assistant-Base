@@ -354,7 +354,11 @@ Transformar o Core multimodelo atual em serviço comercial governado.
 
 Assistant comercial deve recusar backend cognitivo diferente de `core`, salvo exceção explícita.
 
-## Homologar
+## Homologação externa posterior ao build
+
+Os itens abaixo não bloqueiam o encerramento da construção interna de F3. Antes deles, o software
+deve possuir adapters configuráveis, contratos, simuladores e testes determinísticos. A execução real
+fica em F13, somente após `BUILD_COMPLETE_INTERNAL_GREEN`:
 
 Pelo menos:
 
@@ -363,14 +367,18 @@ Pelo menos:
 
 NVIDIA/Nemotron e Anthropic entram somente com capability/adapter e teste real aprovado.
 
-## Gate F3
+## Gate F3 interno
 
-- provider real homologado;
-- fallback real ou sandbox representativo aprovado;
-- usage/cost persistido;
-- secrets externos seguros;
-- health/circuit breaker testados;
-- CI green.
+- adapters/configuração de providers completos e fail-closed;
+- fallback por transporte simulado e cenários de falha aprovados;
+- usage/cost persistido por tentativa, preservando desconhecido;
+- secret references e lifecycle testados sem segredo real;
+- health/circuit breaker/quotas/plan revocation testados;
+- contratos Command↔Assistant↔Core e E2E em processos/bancos descartáveis;
+- CI green no HEAD exato.
+
+Provider real, rede/TLS/Vault hospedado e credencial real permanecem
+`EXTERNAL_HOMOLOGATION_DEFERRED` para F13.
 
 ---
 
