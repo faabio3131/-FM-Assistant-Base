@@ -155,6 +155,46 @@ def create_app(
         lifespan=lifespan,
     )
 
+    register_admin_read_routes(app)
+    # The mutation route does not exist unless an FM-owned explicit opt-in,
+    # distinct trusted evidence gateway key and Command RS256 issuer are
+    # configured. No client can pass a provider receipt to this endpoint.
+    if recovery_trust is not None:
+        class _BoundEvidence:
+            def verify(
+                self, *, evidence_id: str, request_id: str,
+                tenant_id: str, unit_id: str,
+            ) -> VerifiedProviderUsageReceipt:
+                evidence = getattr(app.state, "governed_recovery_evidence", None)
+                if evidence is None:
+                    raise QuotaDenied("core_recovery_unavailable")
+                return evidence.verify(
+                    evidence_id=evidence_id, request_id=request_id,
+                    tenant_id=tenant_id, unit_id=unit_id,
+                )
+
+        class _BoundQuota:
+            def reconcile_verified_provider_receipt(
+                self, *, receipt: VerifiedProviderUsageReceipt,
+                request_policy_revision: int, tokens_policy_revision: int,
+                principal: VerifiedCommandAdmin, at: datetime,
+                request_scope: str = "__tenant__", tokens_scope: str = "__tenant__",
+            ) -> None:
+                ledger = getattr(app.state, "governed_recovery_ledger", None)
+                if ledger is None:
+                    raise QuotaDenied("core_recovery_unavailable")
+                ledger.reconcile_verified_provider_receipt(
+                    receipt=receipt, request_policy_revision=request_policy_revision,
+                    tokens_policy_revision=tokens_policy_revision,
+                    principal=principal, at=at, request_scope=request_scope,
+                    tokens_scope=tokens_scope,
+                )
+
+        recovery_router = governed_recovery_router(
+            trust=recovery_trust, evidence=_BoundEvidence(), ledger=_BoundQuota(),
+        )
+        app.include_router(recovery_router)
+
     def require_service_key(
         request: Request,
         x_core_service_key: str | None = Header(default=None, alias="X-Core-Service-Key"),
@@ -306,53 +346,4 @@ def create_app(
             "observed_at": datetime.now(UTC).isoformat(),
         }
 
-    register_admin_read_routes(app)
-    app.state.recovery_route_wiring_debug = (
-        cfg.governed_recovery_enabled, recovery_trust is not None
-    )
-
-    # The mutation route does not exist unless an FM-owned explicit opt-in,
-    # distinct trusted evidence gateway key and Command RS256 issuer are
-    # configured. No client can pass a provider receipt to this endpoint.
-    if recovery_trust is not None:
-        class _BoundEvidence:
-            def verify(
-                self, *, evidence_id: str, request_id: str,
-                tenant_id: str, unit_id: str,
-            ) -> VerifiedProviderUsageReceipt:
-                evidence = getattr(app.state, "governed_recovery_evidence", None)
-                if evidence is None:
-                    raise QuotaDenied("core_recovery_unavailable")
-                return evidence.verify(
-                    evidence_id=evidence_id, request_id=request_id,
-                    tenant_id=tenant_id, unit_id=unit_id,
-                )
-
-        class _BoundQuota:
-            def reconcile_verified_provider_receipt(
-                self, *, receipt: VerifiedProviderUsageReceipt,
-                request_policy_revision: int, tokens_policy_revision: int,
-                principal: VerifiedCommandAdmin, at: datetime,
-                request_scope: str = "__tenant__", tokens_scope: str = "__tenant__",
-            ) -> None:
-                ledger = getattr(app.state, "governed_recovery_ledger", None)
-                if ledger is None:
-                    raise QuotaDenied("core_recovery_unavailable")
-                ledger.reconcile_verified_provider_receipt(
-                    receipt=receipt, request_policy_revision=request_policy_revision,
-                    tokens_policy_revision=tokens_policy_revision,
-                    principal=principal, at=at, request_scope=request_scope,
-                    tokens_scope=tokens_scope,
-                )
-
-        recovery_router = governed_recovery_router(
-            trust=recovery_trust, evidence=_BoundEvidence(), ledger=_BoundQuota(),
-        )
-        app.state.recovery_router_paths = [
-            getattr(route, "path", "") for route in recovery_router.routes
-        ]
-        app.include_router(recovery_router)
-        app.state.recovery_installed_paths = [
-            getattr(route, "path", "") for route in app.routes
-        ]
     return app
