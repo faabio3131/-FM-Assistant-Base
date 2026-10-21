@@ -16,7 +16,11 @@ from sqlalchemy.orm import sessionmaker
 
 from core.ai_admin_read_api import register_admin_read_routes
 from core.ai_assistant_credential_gateway import AssistantSignedCredentialGateway
+from core.ai_command_authority import CommandTrustPolicy, VerifiedCommandAdmin
 from core.ai_control_plane import ControlPlaneError
+from core.ai_governed_recovery_api import governed_recovery_router
+from core.ai_provider_evidence_store import TrustedProviderEvidenceStore
+from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
 from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_quota_store import QuotaDenied, QuotaReservations
 from core.ai_router import FalhaRotaDefinitiva, FalhaRotaTransitoria, SemRotaCompativel
@@ -76,6 +80,13 @@ def create_app(
     runtime: CoreAIRuntime | None = None,
 ) -> FastAPI:
     cfg = (settings or load_settings()).validate()
+    recovery_trust = (
+        CommandTrustPolicy(
+            issuer=cfg.governed_recovery_issuer or "",
+            audience=cfg.governed_recovery_audience or "",
+            public_key_pem=cfg.governed_recovery_public_key_pem or "",
+        ) if cfg.governed_recovery_enabled else None
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -115,6 +126,18 @@ def create_app(
             )
         else:
             ai_runtime = runtime or CoreAIRuntime.from_settings(cfg)
+        if recovery_trust is not None:
+            if db_engine is None:
+                raise RuntimeError("core_recovery_requires_persistent_database")
+            recovery_sessions = sessionmaker(db_engine, expire_on_commit=False)
+            app.state.governed_recovery_evidence = TrustedProviderEvidenceStore(
+                recovery_sessions,
+                gateway_secret=(
+                    cfg.governed_recovery_gateway_secret or ""
+                ).encode(),
+                source_id=cfg.governed_recovery_source_id or "",
+            )
+            app.state.governed_recovery_ledger = QuotaReservations(recovery_sessions)
         app.state.ai_runtime = ai_runtime
         app.state.control_plane_engine = db_engine
         try:
@@ -284,4 +307,42 @@ def create_app(
         }
 
     register_admin_read_routes(app)
+
+    # The mutation route does not exist unless an FM-owned explicit opt-in,
+    # distinct trusted evidence gateway key and Command RS256 issuer are
+    # configured. No client can pass a provider receipt to this endpoint.
+    if recovery_trust is not None:
+        class _BoundEvidence:
+            def verify(
+                self, *, evidence_id: str, request_id: str,
+                tenant_id: str, unit_id: str,
+            ) -> VerifiedProviderUsageReceipt:
+                evidence = getattr(app.state, "governed_recovery_evidence", None)
+                if evidence is None:
+                    raise QuotaDenied("core_recovery_unavailable")
+                return evidence.verify(
+                    evidence_id=evidence_id, request_id=request_id,
+                    tenant_id=tenant_id, unit_id=unit_id,
+                )
+
+        class _BoundQuota:
+            def reconcile_verified_provider_receipt(
+                self, *, receipt: VerifiedProviderUsageReceipt,
+                request_policy_revision: int, tokens_policy_revision: int,
+                principal: VerifiedCommandAdmin, at: datetime,
+                request_scope: str = "__tenant__", tokens_scope: str = "__tenant__",
+            ) -> None:
+                ledger = getattr(app.state, "governed_recovery_ledger", None)
+                if ledger is None:
+                    raise QuotaDenied("core_recovery_unavailable")
+                ledger.reconcile_verified_provider_receipt(
+                    receipt=receipt, request_policy_revision=request_policy_revision,
+                    tokens_policy_revision=tokens_policy_revision,
+                    principal=principal, at=at, request_scope=request_scope,
+                    tokens_scope=tokens_scope,
+                )
+
+        app.include_router(governed_recovery_router(
+            trust=recovery_trust, evidence=_BoundEvidence(), ledger=_BoundQuota(),
+        ))
     return app
