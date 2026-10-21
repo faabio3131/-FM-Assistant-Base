@@ -181,12 +181,15 @@ class CoreSettings:
         if self.governed_recovery_enabled:
             if not self.persistent_control_plane or not all(recovery_parts):
                 raise RuntimeError("core_recovery_configuration_incomplete")
-            from core.ai_command_authority import CommandTrustPolicy
+            import re
+
+            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
             from cryptography.hazmat.primitives.serialization import (
                 load_pem_public_key,
             )
-            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
-            import re
+
+            from core.ai_command_authority import CommandTrustPolicy
+
 
             try:
                 CommandTrustPolicy(
