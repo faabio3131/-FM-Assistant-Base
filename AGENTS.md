@@ -514,3 +514,18 @@ O Core não deverá considerar F3 global aprovada enquanto o Command corporativo
 - `GovernedRecoveryPayload` rejeita campos extras e coerção de tipos: revisões precisam ser inteiros positivos JSON; bool, string e float não podem virar revisão válida. Contadores, custos, no_charge, principal e scope enviados pelo chamador geram 422, sem liquidação.
 - CI Ruff passa a cobrir explicitamente os módulos de recuperação, evidence store, source verifier, receipt e migration f3_0005; corrigida organização de imports sem alterar autoridade ou prova de fornecedor.
 - Regressões ASGI usam identidade dupla sintética e verificam payloads adversariais antes da mutação. Certificação depende dos dois workflows no novo HEAD; resultados de SHAs anteriores não são herdados. F3 global permanece BUILD_IN_PROGRESS e PR #1 Draft; sem deploy, credenciais reais ou migrations permanentes.
+
+## 2026-10-20 — CRONOGRAMA VINCULANTE DE CONSTRUÇÃO 100% INTERNA
+
+- A execução do VendeAtendeIA segue o cronograma canônico do Assistant:
+  `docs/governance/CRONOGRAMA_MESTRE_CONSTRUCAO_100_INTERNA.md` no repositório
+  `faabio3131/-FM-Assistant-Base`.
+- Core executa B0/B1 e os gates cognitivos posteriores sem aguardar credenciais, provider real,
+  Vault hospedado, TLS público ou deploy. Deve construir adapters, configuração, fakes, evidência,
+  falha segura e testes internos completos.
+- Provider/model/route/price/limit/credential/tenant são data-driven; não criar hardcode ou deploy por
+  cliente. Fonte externa desconhecida permanece desconhecida, nunca zero ou comprovada por HMAC FM.
+- O executor pode corrigir, commit/push, atualizar PR, reconciliar branches, executar auditoria em
+  passe separado e fazer merge de WP 100% verde, validando CI pós-merge e avançando sem nova consulta.
+- Homologação externa começa somente após `BUILD_COMPLETE_INTERNAL_GREEN`. Deploy, migration real,
+  segredos reais, gasto e tráfego real continuam dependentes de autorização humana específica.
