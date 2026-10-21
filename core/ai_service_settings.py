@@ -80,6 +80,7 @@ class CoreSettings:
     governed_recovery_public_key_pem: str | None = field(default=None, repr=False)
     governed_recovery_gateway_secret: str | None = field(default=None, repr=False)
     governed_recovery_source_id: str | None = None
+    governed_recovery_transport_key: str | None = field(default=None, repr=False)
     assistant_max_audio_bytes: int = 10 * 1024 * 1024
     assistant_plan_bounds: tuple[tuple[str, int, int], ...] = (
         ("atendimento_interpretacao", 4096, 2048),
@@ -173,6 +174,7 @@ class CoreSettings:
             self.governed_recovery_public_key_pem,
             self.governed_recovery_gateway_secret,
             self.governed_recovery_source_id,
+            self.governed_recovery_transport_key,
         )
         if type(self.governed_recovery_enabled) is not bool or (
             any(recovery_parts) and not self.governed_recovery_enabled
@@ -205,6 +207,7 @@ class CoreSettings:
             except (ValueError, TypeError) as exc:
                 raise RuntimeError("core_recovery_command_trust_invalid") from exc
             secret = self.governed_recovery_gateway_secret or ""
+            transport = self.governed_recovery_transport_key or ""
             if (
                 len(secret.encode()) < 32
                 or secret in (
@@ -212,10 +215,20 @@ class CoreSettings:
                     self.assistant_bridge_signing_key,
                     self.assistant_plan_signing_key,
                 )
+                or transport == secret
                 or re.fullmatch(r"[A-Za-z0-9_.-]{1,128}",
                                 self.governed_recovery_source_id or "") is None
             ):
                 raise RuntimeError("core_recovery_gateway_config_invalid")
+            if (
+                len(transport.encode()) < 32
+                or transport in (
+                    self.service_key, self.admin_key,
+                    self.assistant_bridge_signing_key,
+                    self.assistant_plan_signing_key,
+                )
+            ):
+                raise RuntimeError("core_recovery_transport_key_invalid")
         if not self.service_key.strip():
             raise RuntimeError("FM_CORE_SERVICE_KEY obrigatorio")
         if self.persistent_control_plane:
@@ -367,5 +380,8 @@ def load_settings() -> CoreSettings:
         ),
         governed_recovery_source_id=(
             os.getenv("FM_CORE_RECOVERY_EVIDENCE_SOURCE_ID") or None
+        ),
+        governed_recovery_transport_key=(
+            os.getenv("FM_CORE_RECOVERY_SERVICE_KEY") or None
         ),
     ).validate()
