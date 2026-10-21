@@ -42,9 +42,11 @@ def test_recovery_route_requires_signed_human_and_verified_receipt():
         issuer="fm-command", audience="fm-core-recovery", public_key_pem=public,
     )
     ledger = StubLedger()
+    transport_key = "synthetic-command-transport-credential-12345678"
     app = FastAPI()
     app.include_router(governed_recovery_router(
         trust=trust, evidence=StubEvidence(), ledger=ledger,
+        transport_key=transport_key,
     ))
     http = TestClient(app)
     path = "/internal/v1/command/ai/usage/reconcile"
@@ -64,16 +66,29 @@ def test_recovery_route_requires_signed_human_and_verified_receipt():
         "actor_type": "human", "role": "platform_admin",
         "scope": "fm_core_platform", "permissions": ["core.ai.admin.mutate"],
     }
+    assert http.post(
+        path, json=body,
+        headers={"X-FM-Recovery-Service-Key": "incorrect"},
+    ).status_code == 401
     claims["role"] = "tenant_owner"
     invalid_token = jwt.encode(claims, private, algorithm="RS256")
     assert http.post(
-        path, json=body, headers={"Authorization": "Bearer " + invalid_token},
+        path, json=body, headers={
+            "Authorization": "Bearer " + invalid_token,
+            "X-FM-Recovery-Service-Key": transport_key,
+        },
     ).status_code == 403
     assert ledger.calls == 0
     claims["role"] = "platform_admin"
     valid_token = jwt.encode(claims, private, algorithm="RS256")
     assert http.post(
         path, json=body, headers={"Authorization": "Bearer " + valid_token},
+    ).status_code == 401  # JWT alone must never mutate finance.
+    assert http.post(
+        path, json=body, headers={
+            "Authorization": "Bearer " + valid_token,
+            "X-FM-Recovery-Service-Key": transport_key,
+        },
     ).status_code == 204
     assert ledger.calls == 1
 
@@ -122,6 +137,7 @@ def test_opt_in_recovery_config_fails_closed_for_partial_or_weak_trust(tmp_path)
         governed_recovery_public_key_pem=public,
         governed_recovery_gateway_secret="FM-test-only-gateway-secret-long-enough-123",
         governed_recovery_source_id="fm-verified-gateway",
+        governed_recovery_transport_key="synthetic-command-transport-key-long-enough-123",
     )
     assert baseline.validate().governed_recovery_enabled
     for changed in (
@@ -130,6 +146,10 @@ def test_opt_in_recovery_config_fails_closed_for_partial_or_weak_trust(tmp_path)
         {"governed_recovery_public_key_pem": "forged-key"},
         {"governed_recovery_gateway_secret": "too-short"},
         {"governed_recovery_gateway_secret": baseline.service_key},
+        {"governed_recovery_transport_key": None},
+        {"governed_recovery_transport_key": "short"},
+        {"governed_recovery_transport_key": baseline.service_key},
+        {"governed_recovery_transport_key": baseline.governed_recovery_gateway_secret},
         {"governed_recovery_source_id": "wrong source"},
         {"control_plane_database_url": None},
     ):
@@ -208,6 +228,7 @@ def test_opt_in_recovery_uses_only_immutable_scoped_evidence(tmp_path):
         governed_recovery_public_key_pem=public,
         governed_recovery_gateway_secret=secret.decode(),
         governed_recovery_source_id=source,
+        governed_recovery_transport_key="fm-recovery-service-transport-key-synthetic",
     )
     app = create_app(settings=settings)
     path = "/internal/v1/command/ai/usage/reconcile"
@@ -227,18 +248,30 @@ def test_opt_in_recovery_uses_only_immutable_scoped_evidence(tmp_path):
         "scope": "fm_core_platform", "permissions": ["core.ai.admin.mutate"],
     }
     token = jwt.encode(claims, private, algorithm="RS256")
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-FM-Recovery-Service-Key": settings.governed_recovery_transport_key or "",
+    }
     with TestClient(app) as client:
         assert client.post(path, json=body).status_code == 401
+        assert client.post(
+            path, json=body, headers={"Authorization": "Bearer " + token},
+        ).status_code == 401
+        assert client.post(
+            path, json=body, headers={
+                **headers, "X-FM-Recovery-Service-Key": "wrong-key",
+            },
+        ).status_code == 401
         assert client.post(path, json={**body, "evidence_id": "wrong-id"},
-                           headers={"Authorization": "Bearer " + token}).status_code == 409
+                           headers=headers).status_code == 409
         assert client.post(path, json={**body, "tenant_id": "other-tenant"},
-                           headers={"Authorization": "Bearer " + token}).status_code == 409
+                           headers=headers).status_code == 409
         assert client.post(path, json=body,
-                           headers={"Authorization": "Bearer " + token}).status_code == 204
+                           headers=headers).status_code == 204
         # A second request cannot settle the same reserved bundle, even with
         # the same valid evidence.
         assert client.post(path, json=body,
-                           headers={"Authorization": "Bearer " + token}).status_code == 409
+                           headers=headers).status_code == 409
 
     with sessions() as db:
         rows = db.scalars(select(AIQuotaReservationRecord).where(
