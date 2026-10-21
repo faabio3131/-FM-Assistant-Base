@@ -1071,3 +1071,34 @@ SOURCE: src/fm_assistant/plan_consumption_view.py, plan_consumption_dashboard.py
 - Migration aditiva `20261020_0018_license_security_hold_audit.py`: somente esquema para evidência de suspensão, sem backfill ou alteração financeira. Testes offline provam alteração, anti-replay, forja/escopo cruzado e política estritamente de segurança. `tests/saas/test_core_bridge_migration.py` atualizado para Alembic head 0018.
 - Companion FMCC PR #121: produtor do envelope assinado e integração testada contra receptor real, **sem rota pública de envio**. Para concluir revogação E2E real ainda precisa prova da licença corrente/autorização FM e reconciliação de ACK, aprovações humanas quando financeiras e certificação conjunta. F3 geral BUILD_IN_PROGRESS; não afirmar live de ERP, IA, Evolution, VPS, gateway ou provider.
 - Gates do HEAD desta atualização e review independente devem ser certificados antes de merge. Ambiente real sem deploy, migration, secret ou cliente afetado.
+
+---
+
+## 2026-10-20 — DECISÃO EXECUTIVA: AUTONOMIA POR BLOCO + MERGE AUTOMÁTICO COM GATE
+
+**Fonte de autoridade:** proprietário da FM Tecnologia; seção 26 do Prompt Mestre, nova regra ao final de `AGENTS.md`. Substitui exigência de perguntar a cada tarefa e o bloqueio artificial de integração de um WP isolado só porque uma fase maior está IN_PROGRESS. **Não substitui** testes, revisão aplicável, proteção de branches ou autorização para produção.
+
+### CURRENT apurado antes desta atualização documental
+
+| Repositório / candidato | HEAD anterior verificado | CI no HEAD anterior | Gate para merge |
+|---|---|---|---|
+| Assistant PR #1 Draft | `2af123ab3f4df69d4573da0dc533e99c019b19ab` | SaaS CI, PostgreSQL F3, Core Bridge **3/3 SUCCESS** | F3 global ainda `IN_PROGRESS`; PR #1 monolítica com entregas incompletas, NÃO elegível só por 3/3 |
+| FM Core PR #1 Draft | `6596b8aa338d960ba72c02fc09f99d0b81662d77` | AI Service e Quota PostgreSQL **2/2 SUCCESS** | Gate do conjunto ainda deve ser revisado; sem merge/deploy automático |
+| FM Command PR #124 | `c0083aa8acb9fe2c668e9c078a0792ca78296f1b` | Billing PG, Cognitive, F21, Foundation **4/4 SUCCESS** | PR comercial tem ressalvas de conciliação/execução e PRs correlatas; sem merge prematuro |
+
+Estes resultados pertencem aos **SHAs anteriores**, não validam automaticamente o novo HEAD documental do Assistant. A atualização aqui **não** afirma que F3 ou F4–F12 tenham encerrado.
+
+### Motor de execução obrigatório
+
+1. Reconciliar CURRENT de cada WP, consultar arquivo real, dependências, PRs atuais, `AGENTS.md` e evidência de CI. Reusar código do Kordena/Assistant/Core/Command quando compatível; não classificar uma funcionalidade como ausente só porque a fase formal não foi fechada.
+2. Trabalhar no WP técnico mais próximo desbloqueado, com branch/PR pequena a partir de `main` atual sempre que possível. **Não** iniciar outra cadeia de dezenas de PRs dependentes sem reconciliação/integração.
+3. Implementar → testar → revisar. Se RED: preservar prova, diagnosticar, corrigir, repetir. Quando o WP completo estiver 100% GREEN em HEAD exato, sem STOP, com revisão obrigatória e PR mergeable, **MERGE AUTORIZADO SEM NOVA CONSULTA**. Checar CI e SHA da `main` pós-merge; registrar `WP=MERGED`; iniciar o seguinte.
+4. Se o WP tem `BLOCKED_EXTERNAL`, CI não executado, revisão realmente independente pendente, erro de segurança ou falta de prova interna, **NÃO MERGEAR**. Só avançar para construção independente ainda desbloqueada, mantendo a fase como `IN_PROGRESS`; não inventar aprovação.
+5. Se integração/merge disparar deploy ou migration real, desligar gatilho via mudança governada e validada **antes** de qualquer merge; na impossibilidade, pedir autorização humana específica. Merge não equivale a release; homologações externas só após build 100% pronto.
+6. Em cada avanço registrar WP, HEAD, PR, testes, CI, segurança, auditoria, merge e rollback. Na conclusão da fase, revalidar a matriz inteira e somente então promover `BUILD_COMPLETE_INTERNAL_GREEN`.
+
+### Próxima unidade de trabalho interna, sem recomeçar fase
+
+Continuar **F3** pelos gaps confirmados no `F3_INTERNAL_GATE_RECONCILIATION_2026-10-19.md`: vinculação billing→licença→quotas, reconciliação de consumo/custo/fallback por provider, regras de recuperação e testes adversariais entre Command/Assistant/Core. Considerar a evolução já presente nas PRs do Command antes de codificar, preservar correções existentes e separar código de verificação real de Asaas/Evolution. O primeiro WP escolhido deve ter critérios de aceite explícitos e gates proporcionais. F4–F12 seguem formalmente não encerradas, mas partes implementadas devem ser aproveitadas; sua extensão real será reavaliada por artefatos/testes antes de gerar trabalho novo.
+
+**Autorização contínua:** código, correções, CI, commits, PRs e **merge de WPs internos elegíveis**. **Não autorizados implicitamente:** deploy, cutover, migrations em dados permanentes, credenciais reais, cobranças reais, gasto novo, alteração da política comercial/arquitetura nem homologação externa.
