@@ -143,11 +143,15 @@ def test_opt_in_recovery_uses_only_immutable_scoped_evidence(tmp_path):
     from sqlalchemy.orm import sessionmaker
 
     from core.ai_provider_evidence_store import (
-        TrustedProviderEvidenceStore, sign_verified_gateway_attestation,
+        TrustedProviderEvidenceStore,
+        sign_verified_gateway_attestation,
     )
     from core.ai_quota_store import (
-        AIQuotaPolicyRecord, AIQuotaReservationRecord, QuotaRequirement,
-        QuotaReservations, ReservationState,
+        AIQuotaPolicyRecord,
+        AIQuotaReservationRecord,
+        QuotaRequirement,
+        QuotaReservations,
+        ReservationState,
     )
     from core.ai_service_api import create_app
     from core.ai_service_settings import CoreEnvironment, CoreSettings
@@ -178,7 +182,7 @@ def test_opt_in_recovery_uses_only_immutable_scoped_evidence(tmp_path):
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode()
     source = "fm-verified-gateway"
-    secret = "synthetic-independent-evidence-key-123456".encode()
+    secret = b"synthetic-independent-evidence-key-123456"
     evidence = TrustedProviderEvidenceStore(
         sessions, gateway_secret=secret, source_id=source,
     )
