@@ -307,6 +307,9 @@ def create_app(
         }
 
     register_admin_read_routes(app)
+    app.state.recovery_route_wiring_debug = (
+        cfg.governed_recovery_enabled, recovery_trust is not None
+    )
 
     # The mutation route does not exist unless an FM-owned explicit opt-in,
     # distinct trusted evidence gateway key and Command RS256 issuer are
