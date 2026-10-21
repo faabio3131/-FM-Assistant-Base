@@ -807,3 +807,19 @@ Este checkpoint é parte do cronograma F3, não aprovação de F4 nem homologaç
 
 ## F3 — suspensão operacional assinada e independente de billing (20/10/2026)
 O receptor `SignedLicenseSecurityHold` processa APENAS `security_hold` de FM Command, com assinatura HMAC estrita, chave corporativa já governada, scope VendeAtendeIA, ator FM, `step_up_at` e `approved_at` recentes (300 s), nonce único, command_request_id único, revisão do plano e corte `expected_valid_until` verificado sob lock. Suspende `TenantLicenseORM.status` atomicamente e cria evidência imutável em `assistant_license_security_hold_audit` (migration aditiva 0018). A política comercial (estorno, reembolso, inadimplência, renovação, prorrata, mudança de plano) continua NÃO definida: proibido usar o endpoint para mudanças comerciais ou invocação automática por webhook. Segurança e revogação de quota local devem permanecer fail-closed e passíveis de investigação. Endpoint real não ativado nem migrado, Command sender público ainda não construído. CI e revisão independente obrigatórios.
+
+---
+
+## 2026-10-20 — DIRETRIZ VINCULANTE DE AGILIDADE POR BLOCO (AUTORIZAÇÃO DO PROPRIETÁRIO)
+
+Autoridade: decisão humana mais recente, formalizada no Prompt Mestre, seção 26. Esta é a interpretação executável das regras de autonomia, sequência e merge deste AGENTS.md, **sem afrouxar** quaisquer gates de segurança, CI ou revisão.
+
+- **Ciclo sem pedir permissão a cada bloco:** ler CURRENT GitHub+tracker; implementar ou corrigir próximo WP desbloqueado; revisar diffs, executar testes/CI do SHA real; consertar automaticamente qualquer gate RED e repetir; certificar `WP=GREEN`; fazer merge da **PR daquele WP** quando 100% dos critérios aplicáveis forem comprovados e a PR for mergeable; verificar CI de `main`, documentar SHA e prosseguir imediatamente ao próximo WP.
+- **Critério de merge é por WP autocontido, não por toda a fase:** WP `GREEN/MERGED` pode coexistir com fase `BUILD_IN_PROGRESS`. A fase só vira `BUILD_COMPLETE_INTERNAL_GREEN` após **todos** os seus WPs/gates internos. Nunca fundir PR com alterações ainda incompletas só porque alguns testes passaram; em PR monolítica, avaliar o conjunto inteiro.
+- **Evitar pilha de PRs:** preferir `main` atual e uma única PR por WP. Reconciliar PRs legadas acumuladas antes de promover commits; identificar overlap, independência e ordenação. Não reaplicar mudanças incorporadas, inclusive correções comerciais do Command.
+- **STOP sem merge:** gates falhos/não executados ou `BLOCKED_EXTERNAL` que afete o próprio WP; review obrigatória ausente; CI em SHA velho; incompatibilidade entre repositórios; erro RBAC/tenant/PII/segredo; perda de idempotência ou rollback; PR conflitante; ou merge que cause deploy/migration/uso de credencial real não autorizado. Corrigir o que for interno. Se bloqueio for realmente externo, registrar evidência e trabalhar só em WP **independente**, sem falsificar GREEN.
+- **Provas externas depois:** versões/rede reais Evolution/Meta/IA/Asaas, credenciais, Contabo/Render, TLS/PSP são `EXTERNAL_HOMOLOGATION_DEFERRED` e não impedem terminar código, testes internos e merge seguro. Não usar este rótulo para esconder defeito de código ou teste obrigatório interno.
+- **Reserva humana:** deploy/cutover, migrations permanentes de produção, segredos/credenciais verdadeiros com efeito real, mudanças materiais de arquitetura/política comercial, gastos e ações irreversíveis continuam dependendo da aprovação específica do proprietário. `merge != deploy`.
+- **Registro obrigatório:** tracker por WP com HEAD exato, gates, revisão (não rotular autoauditoria de independente), merge SHA, CI pós-merge, regressões e próximo bloco. Não refazer fases encerradas. Preservar Kordena como read-only.
+
+**Aplicação:** seção 26 do `docs/governance/PROMPT_MESTRE_EXECUCAO_INTEGRAL_V1.md` e checkpoint mais recente do `EXECUTION_TRACKER_MASTER.md`. Esta regra não autoriza execução assíncrona sem sessão/execução ativa.
