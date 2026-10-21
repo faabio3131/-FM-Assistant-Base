@@ -193,7 +193,17 @@ def create_app(
         recovery_router = governed_recovery_router(
             trust=recovery_trust, evidence=_BoundEvidence(), ledger=_BoundQuota(),
         )
-        app.include_router(recovery_router)
+        # Register the already-constructed APIRoute directly. This does not
+        # alter its explicit HMAC/RS256 authorization or evidence dependencies.
+        # Verify the exact installed path before exposing any mutation.
+        expected_path = "/internal/v1/command/ai/usage/reconcile"
+        if len(recovery_router.routes) != 1 or (
+            getattr(recovery_router.routes[0], "path", None) != expected_path
+        ):
+            raise RuntimeError("core_recovery_route_invalid")
+        if any(getattr(r, "path", None) == expected_path for r in app.router.routes):
+            raise RuntimeError("core_recovery_route_duplicate")
+        app.router.routes.extend(recovery_router.routes)
 
     def require_service_key(
         request: Request,
