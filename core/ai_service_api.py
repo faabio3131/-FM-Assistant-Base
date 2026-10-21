@@ -345,7 +345,14 @@ def create_app(
                     tokens_scope=tokens_scope,
                 )
 
-        app.include_router(governed_recovery_router(
+        recovery_router = governed_recovery_router(
             trust=recovery_trust, evidence=_BoundEvidence(), ledger=_BoundQuota(),
-        ))
+        )
+        app.state.recovery_router_paths = [
+            getattr(route, "path", "") for route in recovery_router.routes
+        ]
+        app.include_router(recovery_router)
+        app.state.recovery_installed_paths = [
+            getattr(route, "path", "") for route in app.routes
+        ]
     return app
