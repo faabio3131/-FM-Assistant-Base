@@ -73,6 +73,13 @@ class CoreSettings:
     assistant_bridge_signing_key: str | None = field(default=None, repr=False)
     assistant_plan_url: str | None = None
     assistant_plan_signing_key: str | None = field(default=None, repr=False)
+    # Opt-in Command recovery: never enabled by a tenant or by default.
+    governed_recovery_enabled: bool = False
+    governed_recovery_issuer: str | None = None
+    governed_recovery_audience: str | None = None
+    governed_recovery_public_key_pem: str | None = field(default=None, repr=False)
+    governed_recovery_gateway_secret: str | None = field(default=None, repr=False)
+    governed_recovery_source_id: str | None = None
     assistant_max_audio_bytes: int = 10 * 1024 * 1024
     assistant_plan_bounds: tuple[tuple[str, int, int], ...] = (
         ("atendimento_interpretacao", 4096, 2048),
@@ -158,6 +165,54 @@ class CoreSettings:
                     )
                 except ValueError as exc:
                     raise RuntimeError("core_plan_authority_url_invalid") from exc
+        # An opt-in recovery mutation requires an independently trusted FM
+        # evidence ledger and an RS256 Command human identity. Merely setting
+        # a key without opting in is rejected to avoid silent activation drift.
+        recovery_parts = (
+            self.governed_recovery_issuer, self.governed_recovery_audience,
+            self.governed_recovery_public_key_pem,
+            self.governed_recovery_gateway_secret,
+            self.governed_recovery_source_id,
+        )
+        if type(self.governed_recovery_enabled) is not bool or (
+            any(recovery_parts) and not self.governed_recovery_enabled
+        ):
+            raise RuntimeError("core_recovery_configuration_disabled")
+        if self.governed_recovery_enabled:
+            if not self.persistent_control_plane or not all(recovery_parts):
+                raise RuntimeError("core_recovery_configuration_incomplete")
+            from core.ai_command_authority import CommandTrustPolicy
+            from cryptography.hazmat.primitives.serialization import (
+                load_pem_public_key,
+            )
+            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+            import re
+
+            try:
+                CommandTrustPolicy(
+                    issuer=self.governed_recovery_issuer or "",
+                    audience=self.governed_recovery_audience or "",
+                    public_key_pem=self.governed_recovery_public_key_pem or "",
+                )
+                key = load_pem_public_key(
+                    (self.governed_recovery_public_key_pem or "").encode()
+                )
+                if not isinstance(key, RSAPublicKey) or key.key_size < 2048:
+                    raise ValueError("rsa_key_invalid")
+            except (ValueError, TypeError) as exc:
+                raise RuntimeError("core_recovery_command_trust_invalid") from exc
+            secret = self.governed_recovery_gateway_secret or ""
+            if (
+                len(secret.encode()) < 32
+                or secret in (
+                    self.service_key, self.admin_key,
+                    self.assistant_bridge_signing_key,
+                    self.assistant_plan_signing_key,
+                )
+                or re.fullmatch(r"[A-Za-z0-9_.-]{1,128}",
+                                self.governed_recovery_source_id or "") is None
+            ):
+                raise RuntimeError("core_recovery_gateway_config_invalid")
         if not self.service_key.strip():
             raise RuntimeError("FM_CORE_SERVICE_KEY obrigatorio")
         if self.persistent_control_plane:
@@ -262,6 +317,9 @@ def _load_audio_upload_ceiling() -> int:
 
 def load_settings() -> CoreSettings:
     load_dotenv(override=False)
+    recovery_flag = os.getenv("FM_CORE_GOVERNED_RECOVERY_ENABLED", "false").strip().lower()
+    if recovery_flag not in {"true", "false"}:
+        raise RuntimeError("core_recovery_enabled_invalid")
     raw_env = os.getenv("FM_CORE_ENV", "development").strip().casefold()
     try:
         environment = CoreEnvironment(raw_env)
@@ -295,4 +353,16 @@ def load_settings() -> CoreSettings:
         assistant_plan_signing_key=os.getenv("FM_CORE_ASSISTANT_PLAN_SIGNING_KEY") or None,
         assistant_plan_bounds=_load_assistant_plan_bounds(),
         assistant_max_audio_bytes=_load_audio_upload_ceiling(),
+        governed_recovery_enabled=recovery_flag == "true",
+        governed_recovery_issuer=os.getenv("FM_CORE_RECOVERY_COMMAND_ISSUER") or None,
+        governed_recovery_audience=os.getenv("FM_CORE_RECOVERY_COMMAND_AUDIENCE") or None,
+        governed_recovery_public_key_pem=(
+            os.getenv("FM_CORE_RECOVERY_COMMAND_PUBLIC_KEY_PEM") or None
+        ),
+        governed_recovery_gateway_secret=(
+            os.getenv("FM_CORE_RECOVERY_EVIDENCE_GATEWAY_SECRET") or None
+        ),
+        governed_recovery_source_id=(
+            os.getenv("FM_CORE_RECOVERY_EVIDENCE_SOURCE_ID") or None
+        ),
     ).validate()
