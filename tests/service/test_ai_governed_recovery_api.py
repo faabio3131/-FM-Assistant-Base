@@ -211,16 +211,7 @@ def test_opt_in_recovery_uses_only_immutable_scoped_evidence(tmp_path):
     )
     app = create_app(settings=settings)
     path = "/internal/v1/command/ai/usage/reconcile"
-    assert any(getattr(route, "path", "") == path for route in app.routes), (
-        settings.governed_recovery_enabled,
-        getattr(app.state, "recovery_route_wiring_debug", "unset"),
-        getattr(app.state, "recovery_router_paths", "unset"),
-        [p for p in getattr(app.state, "recovery_installed_paths", []) if "command" in p or "reconcil" in p],
-        create_app.__module__,
-        __import__("inspect").getsource(create_app)[-600:],
-        [getattr(route, "path", "") for route in app.routes
-         if "usage" in getattr(route, "path", "") or "command" in getattr(route, "path", "")],
-    )
+    assert any(getattr(route, "path", "") == path for route in app.routes)
     body = {
         "tenant_id": "tenant-1", "unit_id": "unit-1",
         "request_id": "request-1", "evidence_id": "evidence-1",
