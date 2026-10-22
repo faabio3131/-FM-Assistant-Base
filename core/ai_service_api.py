@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from core.ai_admin_read_api import register_admin_read_routes
 from core.ai_assistant_credential_gateway import AssistantSignedCredentialGateway
 from core.ai_command_authority import CommandTrustPolicy, VerifiedCommandAdmin
+from core.ai_command_quota_readback import command_core_quota_readback_router
 from core.ai_control_plane import ControlPlaneError
 from core.ai_control_plane_bootstrap import build_persistent_core, control_plane_is_ready
 from core.ai_governed_recovery_api import governed_recovery_router
@@ -124,6 +125,13 @@ def create_app(
                 plan_authority=plan_authority,
                 max_audio_bytes=cfg.assistant_max_audio_bytes,
             )
+            if cfg.command_quota_readback_enabled:
+                if plan_authority is None or db_engine is None:
+                    raise RuntimeError("core_command_quota_readback_unavailable")
+                app.state.command_quota_authority = plan_authority
+                app.state.command_quota_ledger = QuotaReservations(
+                    sessionmaker(db_engine, expire_on_commit=False)
+                )
         else:
             ai_runtime = runtime or CoreAIRuntime.from_settings(cfg)
         if recovery_trust is not None:
@@ -154,6 +162,35 @@ def create_app(
         description="Roteamento multimodelo e capacidades de IA da FM Tecnologia.",
         lifespan=lifespan,
     )
+
+    # Do not even register the corporate quota read port unless FM explicitly
+    # enables it with a dedicated key. Delegates are resolved at request time
+    # from lifespan state, not a stale or client-supplied quota source.
+    if cfg.command_quota_readback_enabled:
+        class _LivePlan:
+            def resolve(self, *, tenant_id, unit_id, capability, now):
+                authority = getattr(app.state, "command_quota_authority", None)
+                if authority is None:
+                    raise QuotaDenied("core_quota_readback.authority_unavailable")
+                return authority.resolve(
+                    tenant_id=tenant_id, unit_id=unit_id,
+                    capability=capability, now=now,
+                )
+
+        class _LiveQuota:
+            def usage_snapshot(self, *, tenant_id, unit_id, capability, at):
+                ledger = getattr(app.state, "command_quota_ledger", None)
+                if ledger is None:
+                    raise QuotaDenied("core_quota_readback.ledger_unavailable")
+                return ledger.usage_snapshot(
+                    tenant_id=tenant_id, unit_id=unit_id,
+                    capability=capability, at=at,
+                )
+
+        app.include_router(command_core_quota_readback_router(
+            authority=_LivePlan(), quota=_LiveQuota(),
+            shared_secret=(cfg.command_quota_readback_secret or "").encode(),
+        ))
 
     register_admin_read_routes(app)
     # The mutation route does not exist unless an FM-owned explicit opt-in,
