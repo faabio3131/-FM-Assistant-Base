@@ -24,6 +24,9 @@ def test_f3_versioned_migration_upgrade_downgrade(tmp_path):
         assert "core_ai_quota_policies" in inspect(engine).get_table_names()
         assert "core_ai_quota_reservations" in inspect(engine).get_table_names()
         assert "core_ai_provider_circuit_state" in inspect(engine).get_table_names()
+        indexes = inspect(engine).get_indexes("core_ai_usage_events")
+        assert any(idx["name"] == "uq_core_ai_usage_physical_attempt"
+                   and idx["unique"] for idx in indexes)
         command.downgrade(cfg, "base")
         assert not (set(ControlPlaneBase.metadata.tables) & set(inspect(engine).get_table_names()))
         assert "core_ai_usage_events" not in inspect(engine).get_table_names()
