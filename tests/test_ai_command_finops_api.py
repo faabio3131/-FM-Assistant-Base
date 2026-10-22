@@ -13,10 +13,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.ai_command_finops_api import (
-    PATH, SCHEMA, command_finops_router, sign_finops_request,
+    PATH,
+    SCHEMA,
+    command_finops_router,
+    sign_finops_request,
 )
-from core.ai_finops import AIFinOpsBucket
 from core.ai_control_plane import ControlPlaneBase
+from core.ai_finops import AIFinOpsBucket
 from core.ai_usage_ledger import AIUsageRecord, PersistentAIFinOps
 
 SECRET = b"synthetic-command-finops-key-isolated-123456789"
@@ -183,11 +186,17 @@ def test_rejects_oversized_and_wrong_media_type():
 
 
 def test_ledger_cross_tenant_or_inconsistent_counts_fail_closed():
+    # Construct valid immutable buckets, then simulate a corrupted upstream
+    # read adapter mutating the object *after* the constructor guard.
+    bad_counts = _bucket()
+    object.__setattr__(bad_counts, "cost_known_events", 300)
+    bad_fallback = _bucket()
+    object.__setattr__(bad_fallback, "fallback_attempts", 300)
     mismatches = [
         replace(_bucket(), tenant_id="tenant-b"),
         replace(_bucket(), unidade_id="unit-b"),
-        replace(_bucket(), cost_known_events=300),
-        replace(_bucket(), fallback_attempts=300),
+        bad_counts,
+        bad_fallback,
         replace(_bucket(), bucket_date=date(2020, 1, 1)),
     ]
     for invalid_bucket in mismatches:
