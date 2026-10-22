@@ -20,7 +20,10 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
+import os
+
 from .capabilities import KnowledgeCapabilityProvider
+from .knowledge_retrieval import BoundedKnowledgeRetrieval
 from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerifier
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
 from .channels.whatsapp_meta import WhatsAppProviderError
@@ -542,7 +545,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         personas=personas,
         conversations=conversations,
         model=model,
-        capabilities=KnowledgeCapabilityProvider(knowledge),
+        capabilities=KnowledgeCapabilityProvider(
+            knowledge,
+            retrieval=BoundedKnowledgeRetrieval(session_factory),
+            retrieval_enabled=os.environ.get(
+                "FM_ASSISTANT_KNOWLEDGE_CONTEXT_PACK_ENABLED", "false"
+            ).casefold() == "true",
+        ),
         audit=audit,
     )
 
