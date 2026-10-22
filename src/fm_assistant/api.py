@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-import os
 from uuid import uuid4
 
 from fastapi import (
