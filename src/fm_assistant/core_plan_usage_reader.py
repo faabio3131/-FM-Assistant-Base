@@ -39,20 +39,36 @@ class CoreQuotaUsageHTTPReader:
             if response.status_code != 200 or len(response.content) > 4096:
                 return None
             data = response.json()
-            if not isinstance(data, dict) or any(
-                data.get(name) != value for name, value in {
-                    "tenant_id": tenant_id, "unit_id": unit_id,
-                    "resource": metric, "scope": scope,
-                    "policy_revision": policy_revision,
-                    "limit_units": limit_units,
-                    "window_seconds": window_seconds,
-                }.items()
-            ):
+            if not isinstance(data, dict):
                 return None
+            for name, expected in (
+                ("tenant_id", tenant_id),
+                ("unit_id", unit_id),
+                ("resource", metric),
+                ("scope", scope),
+            ):
+                if type(data.get(name)) is not str or data[name] != expected:
+                    return None
+            # A JSON boolean or float must not equal an authorized integer
+            # revision/limit by Python coercion (True == 1, 2000.0 == 2000).
+            for name, expected in (
+                ("policy_revision", policy_revision),
+                ("limit_units", limit_units),
+                ("window_seconds", window_seconds),
+            ):
+                if type(data.get(name)) is not int or data[name] != expected:
+                    return None
             for name in ("consumed_units", "reserved_units", "remaining_units"):
                 value = data.get(name)
                 if type(value) is not int or value < 0:
                     return None
+            if (
+                data["consumed_units"] + data["reserved_units"]
+                + data["remaining_units"] != limit_units
+            ):
+                return None
+            if at.tzinfo is None or at.utcoffset() is None:
+                return None
             observed_at = datetime.fromisoformat(data["observed_at"])
             if observed_at.tzinfo is None or observed_at.utcoffset() is None:
                 return None
