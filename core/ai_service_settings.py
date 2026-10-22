@@ -73,6 +73,9 @@ class CoreSettings:
     assistant_bridge_signing_key: str | None = field(default=None, repr=False)
     assistant_plan_url: str | None = None
     assistant_plan_signing_key: str | None = field(default=None, repr=False)
+    # Read-only FM Command -> Core quota proof: disabled unless FM opts in.
+    command_quota_readback_enabled: bool = False
+    command_quota_readback_secret: str | None = field(default=None, repr=False)
     # Opt-in Command recovery: never enabled by a tenant or by default.
     governed_recovery_enabled: bool = False
     governed_recovery_issuer: str | None = None
@@ -166,6 +169,22 @@ class CoreSettings:
                     )
                 except ValueError as exc:
                     raise RuntimeError("core_plan_authority_url_invalid") from exc
+        if type(self.command_quota_readback_enabled) is not bool or (
+            self.command_quota_readback_secret is not None
+            and not self.command_quota_readback_enabled
+        ):
+            raise RuntimeError("core_command_quota_readback_disabled")
+        if self.command_quota_readback_enabled:
+            key = self.command_quota_readback_secret or ""
+            if (not self.persistent_control_plane or not all(plan_fields)
+                or not 32 <= len(key.encode()) <= 256):
+                raise RuntimeError("core_command_quota_readback_incomplete")
+            if key in (self.service_key, self.admin_key,
+                       self.assistant_bridge_signing_key,
+                       self.assistant_plan_signing_key,
+                       self.governed_recovery_gateway_secret,
+                       self.governed_recovery_transport_key):
+                raise RuntimeError("core_command_quota_readback_key_reused")
         # An opt-in recovery mutation requires an independently trusted FM
         # evidence ledger and an RS256 Command human identity. Merely setting
         # a key without opting in is rejected to avoid silent activation drift.
@@ -333,6 +352,9 @@ def _load_audio_upload_ceiling() -> int:
 
 def load_settings() -> CoreSettings:
     load_dotenv(override=False)
+    readback_flag = os.getenv("FM_CORE_COMMAND_QUOTA_READBACK_ENABLED", "false").strip().lower()
+    if readback_flag not in {"true", "false"}:
+        raise RuntimeError("core_command_quota_readback_flag_invalid")
     recovery_flag = os.getenv("FM_CORE_GOVERNED_RECOVERY_ENABLED", "false").strip().lower()
     if recovery_flag not in {"true", "false"}:
         raise RuntimeError("core_recovery_enabled_invalid")
@@ -369,6 +391,10 @@ def load_settings() -> CoreSettings:
         assistant_plan_signing_key=os.getenv("FM_CORE_ASSISTANT_PLAN_SIGNING_KEY") or None,
         assistant_plan_bounds=_load_assistant_plan_bounds(),
         assistant_max_audio_bytes=_load_audio_upload_ceiling(),
+        command_quota_readback_enabled=readback_flag == "true",
+        command_quota_readback_secret=(
+            os.getenv("FM_CORE_COMMAND_QUOTA_READBACK_SECRET") or None
+        ),
         governed_recovery_enabled=recovery_flag == "true",
         governed_recovery_issuer=os.getenv("FM_CORE_RECOVERY_COMMAND_ISSUER") or None,
         governed_recovery_audience=os.getenv("FM_CORE_RECOVERY_COMMAND_AUDIENCE") or None,
