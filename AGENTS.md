@@ -855,3 +855,8 @@ Autoridade: decisão humana mais recente, formalizada no Prompt Mestre, seção 
 ### F4 — WP1 recuperação seletiva de conhecimento (22/10/2026)
 
 Reutilizar KnowledgeDocumentORM e KnowledgeRepository; não criar segundo repositório para knowledge. Novo BoundedKnowledgeRetrieval lê apenas tenant/unidade/active, devolve contexto seletivo limitado com document_id/updated_at e marcadores de fonte não confiável. A opção `FM_ASSISTANT_KNOWLEDGE_CONTEXT_PACK_ENABLED` inicia OFF; sem prova de relevância, jamais despejar todos os documentos quando ligada. Ver docs/governance/F4_WP1_SCOPED_KNOWLEDGE_CONTEXT_PACK_2026-10-22.md. Não confundir este WP com F4 GREEN: versões imutáveis, ingestão por URL/arquivo, chunking persistente, busca híbrida e UI permanecem pendentes. CI Assistant SaaS+Postgres+Core bridge no SHA e nenhuma operação externa antes da construção 100%.
+
+
+### F4/WP2 — versões de conhecimento e chunks (22/10/2026)
+
+A migration 20261022_0020 é aditiva e não reescreve dados legados. Documento ainda sem versão precisa ser indexado com título/conteúdo idênticos antes de qualquer alteração; depois `expected_revision` estrito CAS, lock, chunk+versão append-only e atualização do documento atual na mesma transação. Tenant/unit, permission KNOWLEDGE_MANAGE, SHA-256 e source não verificada são obrigatórios. Feature FM_ASSISTANT_KNOWLEDGE_VERSIONING_ENABLED OFF; sem migration real/deploy. Ver docs/governance/F4_WP2_VERSIONED_KNOWLEDGE_CHUNKS_2026-10-22.md. F4 global continua IN_PROGRESS.
