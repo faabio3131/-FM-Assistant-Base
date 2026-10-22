@@ -65,6 +65,33 @@ def test_invalid_receipts_rejected(bad):
         from_trusted_core_receipt(bad, request_id="r")
 
 
+@pytest.mark.parametrize("bad", [
+    {"usage_status": "confirmed", "input_tokens": None, "output_tokens": 2},
+    {"usage_status": "confirmed", "input_tokens": 1, "output_tokens": None},
+    {"usage_status": "confirmed", "input_tokens": 1, "output_tokens": 2,
+     "cost_usd": 0.5},
+    {"usage_status": "confirmed", "input_tokens": 1, "output_tokens": 2,
+     "cost_usd": True},
+    {"usage_status": "uncertain", "input_tokens": 1, "output_tokens": None},
+    {"usage_status": "uncertain", "cost_usd": "0.00"},
+])
+def test_ambiguous_and_contradictory_provider_usage_fails_closed(bad):
+    receipt = {"request_id": "req-a", "provider": "gemini", "model": "model-a", **bad}
+    with pytest.raises(ValueError):
+        from_trusted_core_receipt(receipt, request_id="req-a")
+
+
+def test_confirmed_tokens_can_retain_unknown_cost_without_claiming_free_usage():
+    reading = from_trusted_core_receipt({
+        "request_id": "req-a", "provider": "gemini", "model": "model-a",
+        "usage_status": "confirmed", "input_tokens": 40,
+        "output_tokens": 12, "cost_usd": None,
+    }, request_id="req-a")
+    assert reading.total_tokens == 52
+    assert reading.cost_usd is None
+    assert reading.status == "confirmed"
+
+
 def test_provider_or_request_switch_never_reconciles():
     old = ProviderUsage(
         provider="gemini", model="m", request_id="req",
