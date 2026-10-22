@@ -11,7 +11,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.ai_command_quota_readback import (
-    PATH, SCHEMA, command_core_quota_readback_router, sign_command_quota_readback,
+    PATH,
+    SCHEMA,
+    command_core_quota_readback_router,
+    sign_command_quota_readback,
 )
 from core.ai_control_plane import ControlPlaneBase
 from core.ai_plan_usage_guard import PlanQuotaPolicy
@@ -193,7 +196,7 @@ def test_schema_clock_duplication_and_payload_size_fail_closed(tmp_path):
 
 
 def test_mismatched_or_revised_policy_never_claims_core_alignment(tmp_path):
-    engine, quota, authority, client = setup(tmp_path)
+    engine, quota, _authority, client = setup(tmp_path)
     try:
         quota.project_signed_grants(tenant_id="tenant-a", unit_id="unit-a",
                                     revision=1, grants=(

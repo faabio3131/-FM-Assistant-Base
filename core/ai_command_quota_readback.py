@@ -10,7 +10,6 @@ import hmac
 import json
 import re
 from datetime import UTC, datetime
-from typing import Protocol
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
