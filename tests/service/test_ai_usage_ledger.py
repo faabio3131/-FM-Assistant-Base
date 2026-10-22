@@ -137,6 +137,32 @@ def test_replayed_attempt_with_changed_provenance_is_rejected(ledger):
         assert db.query(AIUsageRecord).filter_by(request_id=original.request_id).count() == 1
 
 
+def test_single_physical_attempt_rejects_changed_route_outcome_and_cost_key(ledger):
+    store, sessions = ledger
+    store.add_price_snapshot(price())
+    original = replace(event(request="physical-identity"), attempt_id="attempt-v1")
+    store.registrar(original)
+    variants = (
+        replace(original, outcome=OutcomeIA.FALHA_TRANSITORIA),
+        replace(original, provider="different-provider"),
+        replace(original, model="model-2"),
+        replace(original, price_snapshot_id="price-unknown"),
+        replace(original, fallback_used=True),
+    )
+    for changed in variants:
+        with pytest.raises(ControlPlaneError, match="physical_attempt_conflict"):
+            store.registrar(changed)
+    with sessions() as db:
+        persisted = db.scalars(select(AIUsageRecord).where(
+            AIUsageRecord.request_id == original.request_id,
+        )).all()
+        assert len(persisted) == 1
+        assert persisted[0].attempt_id == original.attempt_id
+        assert persisted[0].provider == original.provider
+        assert persisted[0].outcome == original.outcome.value
+    store.registrar(original)  # exact duplicate remains safe
+
+
 def test_missing_prices_and_tokens_are_explicitly_unknown(ledger):
     store, _ = ledger
     store.registrar(event(price_id="missing"))
