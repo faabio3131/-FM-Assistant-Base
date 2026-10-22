@@ -175,6 +175,12 @@ def command_finops_router(*, read_model: FinOpsReadPort,
             raise HTTPException(
                 status_code=409, detail="core_finops.ledger_unavailable",
             ) from exc
+        except Exception as exc:
+            # Database outage, serialization error or unavailable internal
+            # source cannot silently become an empty/zero spend report.
+            raise HTTPException(
+                status_code=503, detail="core_finops.source_unavailable",
+            ) from exc
         # No global sum of differently denominated currencies, and no claim
         # that an empty ledger proves that nothing was charged.
         return JSONResponse(
