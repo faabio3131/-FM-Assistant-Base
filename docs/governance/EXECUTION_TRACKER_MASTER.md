@@ -1134,3 +1134,21 @@ RESULTADO:
 GATE: DOCUMENTAÇÃO/GOVERNANÇA EM VALIDAÇÃO DE CI NO NOVO HEAD.
 PRÓXIMO PASSO:
 - B0: reconciliar PRs/branches Command #114/#118–#124 e candidatas F3, fechar baseline canônica, executar gates cross-repo e integrar WPs verdes antes de construir lacunas F3/F9.
+
+---
+
+## 2026-10-22 — B1/F3 CURRENT reconciliado após integração F3/P01 (fonte: GitHub exato)
+
+**Decisão humana mais recente:** Core + Assistant são UM ÚNICO produto VendeAtendeIA (nome de trabalho); o FM Command é o Control Plane corporativo independente e também SaaS separado. Manter estrutura/repositórios atuais até conclusão; não criar terceiro repositório nem reorganizar ou recriar bases neste ciclo. A matriz original dos repositórios era reutilizável, mas o proprietário determinou preservar o trabalho atual. Não confundir três repositórios técnicos com três SaaS.
+
+**Source of truth:** cronograma B0–B11 aprovado em docs/governance/CRONOGRAMA_MESTRE_CONSTRUCAO_100_INTERNA.md; F3 e subset F9 continuam **IN_PROGRESS**, F4 não se inicia como fase final antes do gate B1. Não inventar BUILD_COMPLETE_INTERNAL_GREEN. Homologações reais de Asaas/Evolution/IA, credenciais, infraestrutura e tráfego externo continuam EXTERNAL_DEFERRED.
+
+**FM Command (faabio3131/FM-CONTROL-CENTER):** depois da baseline P01 #152, PR #153 integrada `0c3c328929b067e1de8dfc0ed79cd1f182365364` (ciclo de licença e quotas compartilhadas); PR #154 integrada `3fc44b2cfac3832cc4c36f48c197a30ec3708e2e` (readback quota HMAC por unidade); PR #155 integrada `f163bf62b07ea61d9224fe1a5c8c40c085ed3db0` (pin Core cross-runtime e teste real); PR #156 integrada `2fb26e5449ad0cb2c00252428638717cdbfad7a9` (classificação de risco e allowlist); PR #157 integrada `a67702007538f5fc71ab683e298912d17d7d1d4b` (histórico de evidência P01); PR #158 integrada `759ffbc529733ed50f2c14fd58624896708664d7` (audit npm com retry fail-closed); PR #159 integrada `0aefac3c587a896366d9a635c31a10ba08d04249` (pin do Core realmente montado e testes end-to-end). PRs antigas #146,#147,#148,#149,#150 fechadas como superseded quando aplicável. A PR #159 teve 3/3 gates **APLICÁVEIS** GREEN em HEAD; Billing PG não foi disparado porque alterou somente workflow/docs. `main` idêntica ao SHA merge; workflows `push` pós-merge não foram retornados pelo conector e não são falsamente declarados verde.
+
+**Core (faabio3131/FM-Core-Base-):** PR #3 integrada à branch candidata F3, seguida da PR #4 integrada em `c03ec3162d0fc55f061ce71cd5df2591c37ad919`, 2/2 gates AI Service + F3 PostgreSQL GREEN em HEAD e após merge no candidato. Foi corrigido bug real: router HMAC já existia isolado mas não estava montado em `create_app`. Agora registrado só com opt-in FM, segredo segregado, Assistant grant fresco, ledger Core transacional read-only e testes de runtime executados explicitamente na CI. A PR principal Core #1 permanece **Draft e não mergeada na main**, não é prova de produção real.
+
+**Assistant (este repositório):** PR principal #1 permanece **Draft**, HEAD anterior `8279f3c10993ace277f713c01688a3412fc3e92a` (3/3 gates verdes no SHA anterior, *não no HEAD deste checkpoint*). Não duplicar lifecycle, licença, fontes de quota nem status que Command/Core já implementaram. O teste de três serviços real usa o Assistant nesse SHA pinado via Command Foundation e bancos descartáveis. Atualizar pin somente com CI cross-repo e análise de compatibilidade; o código de produção atual ainda não foi homologado externamente.
+
+**Pendências internas F3/B1 NÃO eliminadas:** revisão de todo o pacote monolítico Core/Assistant Draft, metering/fallback por tentativa e reconciliação de uso/custo incerto de providers sem recibo criptográfico, ligação completa do consumo às rotas reais sob fault injection, auditoria adversarial end-to-end e CI final nos SHAs integrados. Depois B1 GREEN, iniciar B2/F4 Knowledge, B3/F5 Human Inbox, B4/F6 CRM, B5/F7 Cadências e demais blocos até B11.
+
+**Padrão executor:** conferir primeiro este CURRENT + AGENTS + cronograma + PRs recentes; diferenciar código/testes internos de endpoints realmente ativados; preservar flags OFF e aprovação humana de deploy. Merges WPs sem STOP são autorizados por gate no SHA e revisão interna FM aceita pelo proprietário; não apresentar autoauditoria como independente de terceiro.
