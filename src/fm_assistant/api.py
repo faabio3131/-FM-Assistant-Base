@@ -57,6 +57,7 @@ from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
 from .knowledge_retrieval import BoundedKnowledgeRetrieval
+from .knowledge_versioning import KnowledgeVersionDenied, VersionedKnowledgeIngestion
 from .license_security_hold import LicenseSecurityHoldDenied, SignedLicenseSecurityHold
 from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
@@ -115,6 +116,21 @@ class KnowledgeRequest(BaseModel):
 
 class KnowledgeResponse(BaseModel):
     document_id: str
+
+
+class KnowledgeVersionRequest(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0, le=2_000_000_000)
+    title: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1, max_length=24_000)
+
+
+class KnowledgeVersionResponse(BaseModel):
+    document_id: str
+    revision: int
+    chunks: int
+    content_sha256: str
+    indexed: bool
+    external_source_verified: bool
 
 
 class ConversationRequest(BaseModel):
@@ -515,6 +531,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     personas = PersonaSQLAlchemyRepository(session_factory)
     conversations = ConversationSQLAlchemyRepository(session_factory)
     knowledge = KnowledgeRepository(session_factory)
+    knowledge_versioning = VersionedKnowledgeIngestion(session_factory)
     audit = SQLAuditSink(session_factory)
 
     audio_transcriber = None
@@ -674,6 +691,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.identity_repository = identity_repository
         app.state.identity_service = identity_service
         app.state.knowledge = knowledge
+        app.state.knowledge_versioning = knowledge_versioning
         app.state.assistant_service = service
         app.state.integration_repository = integration_repository
         app.state.integration_service = integration_service
@@ -1172,6 +1190,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content=payload.content,
         )
         return KnowledgeResponse(document_id=document_id)
+
+    @app.put("/v1/knowledge/{document_id}/version", response_model=KnowledgeVersionResponse)
+    def version_knowledge_text(
+        document_id: str,
+        payload: KnowledgeVersionRequest,
+        request: Request,
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_MANAGE)),
+    ) -> KnowledgeVersionResponse:
+        if os.environ.get("FM_ASSISTANT_KNOWLEDGE_VERSIONING_ENABLED", "false").casefold() != "true":
+            raise HTTPException(status_code=503, detail="knowledge_versioning_not_configured")
+        try:
+            result = request.app.state.knowledge_versioning.index_text(
+                context, document_id=document_id,
+                expected_revision=payload.expected_revision,
+                title=payload.title, content=payload.content,
+            )
+        except KnowledgeVersionDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return KnowledgeVersionResponse(
+            document_id=result.document_id, revision=result.revision,
+            chunks=result.chunks, content_sha256=result.content_sha256,
+            indexed=result.indexed,
+            external_source_verified=result.external_source_verified,
+        )
 
     @app.post("/v1/conversations", response_model=ConversationResponse)
     def create_conversation(
