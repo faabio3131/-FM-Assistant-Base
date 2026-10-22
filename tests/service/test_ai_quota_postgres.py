@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from alembic import command
 from core.ai_circuit_breaker import CircuitDenied, CircuitPhase, CircuitPolicy
 from core.ai_circuit_state_store import PersistentCircuit, ProviderCircuitRecord
-from core.ai_control_plane import AIProvider
+from core.ai_control_plane import AIProvider, ControlPlaneError
 from core.ai_quota_store import (
     AIQuotaPolicyRecord,
     AIQuotaReservationRecord,
@@ -23,6 +23,7 @@ from core.ai_quota_store import (
     QuotaRequirement,
     QuotaReservations,
 )
+from core.ai_router import AIUsageEvent, CapabilityIA, OutcomeIA
 from core.ai_usage_ledger import AIUsageRecord, PersistentAIFinOps
 
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
@@ -52,6 +53,83 @@ def postgres_quota():
         yield QuotaReservations(sessions), sessions
     finally:
         engine.dispose()
+
+
+def test_pg_simultaneous_same_physical_attempt_is_idempotent(postgres_quota):
+    """Two workers recording one provider call must leave exactly one row."""
+    _, sessions = postgres_quota
+    item = AIUsageEvent(
+        tenant_id="tenant-atomic-ledger", unidade_id="unit-a",
+        request_id="req-atomic-f3", correlation_id="corr-atomic",
+        capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
+        provider="synthetic-provider", model="model-test",
+        route_reason="primary", fallback_used=False, fallback_reason=None,
+        input_tokens=5, output_tokens=3, cached_tokens=None, latency_ms=2,
+        outcome=OutcomeIA.SUCESSO, custo_real_calculado=None, moeda=None,
+        price_snapshot_id="price-not-provisioned", timestamp=NOW,
+        attempt_id="one-physical-provider-call",
+    )
+    barrier = Barrier(2)
+
+    def record() -> str:
+        barrier.wait(timeout=8)
+        PersistentAIFinOps(sessions).registrar(item)
+        return "accepted"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a, b = pool.submit(record), pool.submit(record)
+        assert a.result(timeout=20) == b.result(timeout=20) == "accepted"
+    with sessions() as db:
+        rows = db.scalars(select(AIUsageRecord).where(
+            AIUsageRecord.tenant_id == item.tenant_id,
+            AIUsageRecord.request_id == item.request_id,
+        )).all()
+        assert len(rows) == 1
+        assert rows[0].attempt_id == item.attempt_id
+        assert rows[0].input_tokens == 5
+
+
+def test_pg_contended_physical_attempt_conflict_never_duplicates(postgres_quota):
+    """A unique constraint stays authoritative even if both pre-reads miss."""
+    from dataclasses import replace
+
+    _, sessions = postgres_quota
+    original = AIUsageEvent(
+        tenant_id="tenant-atomic-ledger", unidade_id="unit-a",
+        request_id="req-conflicting-f3", correlation_id="corr-conflict",
+        capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
+        provider="synthetic-provider", model="model-test",
+        route_reason="primary", fallback_used=False, fallback_reason=None,
+        input_tokens=6, output_tokens=4, cached_tokens=None, latency_ms=2,
+        outcome=OutcomeIA.SUCESSO, custo_real_calculado=None, moeda=None,
+        price_snapshot_id="price-not-provisioned", timestamp=NOW,
+        attempt_id="conflicted-physical-call",
+    )
+    variants = (original, replace(original, provider="forged-provider"))
+    barrier = Barrier(2)
+
+    def record(item: AIUsageEvent) -> str:
+        barrier.wait(timeout=8)
+        try:
+            PersistentAIFinOps(sessions).registrar(item)
+            return "accepted"
+        except ControlPlaneError as exc:
+            assert str(exc) == "core_finops.physical_attempt_conflict"
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(record, variants[0])
+        b = pool.submit(record, variants[1])
+        assert sorted((a.result(timeout=20), b.result(timeout=20))) == [
+            "accepted", "conflict",
+        ]
+    with sessions() as db:
+        rows = db.scalars(select(AIUsageRecord).where(
+            AIUsageRecord.tenant_id == original.tenant_id,
+            AIUsageRecord.request_id == original.request_id,
+        )).all()
+        assert len(rows) == 1
+        assert rows[0].attempt_id == original.attempt_id
 
 
 def test_pg_concurrent_reservation_serializes_budget(postgres_quota):
