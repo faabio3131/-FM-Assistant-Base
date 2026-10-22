@@ -116,6 +116,58 @@ class KnowledgeDocumentORM(Base):
     )
 
 
+class KnowledgeSourceVersionORM(Base):
+    """Immutable content snapshot; current head remains KnowledgeDocumentORM."""
+
+    __tablename__ = "assistant_knowledge_source_versions"
+
+    document_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("assistant_knowledge_documents.document_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    unit_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    actor_credential_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_assistant_knowledge_version_scope", "tenant_id", "unit_id", "document_id"),
+    )
+
+
+class KnowledgeChunkORM(Base):
+    """Deterministic immutable chunks tied to one provenance version."""
+
+    __tablename__ = "assistant_knowledge_chunks"
+
+    document_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    unit_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["document_id", "revision"],
+            ["assistant_knowledge_source_versions.document_id",
+             "assistant_knowledge_source_versions.revision"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_assistant_knowledge_chunk_scope",
+              "tenant_id", "unit_id", "document_id", "revision"),
+    )
+
+
 class AuditEventORM(Base):
     __tablename__ = "assistant_audit_events"
 

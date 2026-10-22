@@ -1170,3 +1170,7 @@ Reutilização canônica KnowledgeDocumentORM/KnowledgeRepository + capability d
 - Contrato, limites e rollback: `docs/governance/F4_WP2A_KNOWLEDGE_REVOCATION_2026-10-22.md`.
 - **Antes de merge:** verificar Ruff, teste SaaS, contrato Core↔Assistant e PostgreSQL-bridge completos no HEAD final, revisar diff/segredos/STOP, conferir `main` candidata e merge sem ativar deploy externo.
 - B1/F3, FinOps F9, ingestão URL/arquivo, versionamento imutável/chunks, UI e certificação B2 continuam explicitamente pendentes. Homologações reais só após `BUILD_COMPLETE_INTERNAL_GREEN`.
+
+### 2026-10-22 — F4/WP2 versionamento de fontes e chunks
+
+Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com versões e chunks imutáveis por tenant/unidade, conteúdo original preservado por bootstrap obrigatório, ingestão textual versionada por CAS, API permissionada e flag OFF, testes Alembic/SQLAlchemy/HTTP negativos. Gate CI no SHA da PR; nenhuma migration real. F4 permanece IN_PROGRESS: retrieval por chunks, ingestão de arquivos/URLs, UI, fontes versionadas externamente e busca híbrida ainda faltam. Não promover PR monolítica #1 indevidamente.
