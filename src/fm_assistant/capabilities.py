@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from .domain import Conversation, Message, TenantContext
-from .repositories import KnowledgeRepository
 from .knowledge_retrieval import BoundedKnowledgeRetrieval
+from .repositories import KnowledgeRepository
 
 
 class KnowledgeCapabilityProvider:
