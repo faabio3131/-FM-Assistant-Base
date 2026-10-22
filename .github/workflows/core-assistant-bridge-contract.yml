@@ -18,7 +18,7 @@ jobs:
         with:
           repository: faabio3131/FM-Core-Base-
           # Pinned to the certified Core HEAD; update only with a green Core CI.
-          ref: 94eb6de8b44f2df5fb10a5669ec3636e88643f66
+          ref: d0b477be538da883a738e3a3071e4165348cedd3
           path: core-source
           persist-credentials: false
       - uses: actions/setup-python@v5
