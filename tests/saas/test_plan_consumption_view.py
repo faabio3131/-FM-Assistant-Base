@@ -1,7 +1,10 @@
 """Customer-facing consumption panel, with authenticated tenant isolation."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -223,3 +226,25 @@ def test_customer_dashboard_never_renders_false_progress_for_unknown_usage():
     assert "&lt;script&gt;" in markup
     assert "<progress" not in markup
     assert "Saldo não verificado" in markup
+
+
+@pytest.mark.parametrize("tamper", [
+    {"consumed_units": True},
+    {"reserved_units": "2"},
+    {"remaining_units": 79},
+    {"policy_revision": True},
+    {"policy_revision": 1.0},
+    {"limit_units": 100.0},
+    {"limit_units": True},
+    {"window_seconds": 86400.0},
+    {"window_seconds": False},
+    {"observed_at": "2026-10-22T00:00:00Z"},
+    {"observed_at": NOW.replace(tzinfo=None)},
+])
+def test_meter_snapshot_rejects_forged_version_types_or_inconsistent_balances(tamper):
+    valid = MeterReading(
+        consumed_units=12, reserved_units=8, remaining_units=80,
+        observed_at=NOW, policy_revision=1, limit_units=100, window_seconds=86400,
+    )
+    with pytest.raises(ValueError, match="plan.meter_reading_invalid"):
+        replace(valid, **tamper)
