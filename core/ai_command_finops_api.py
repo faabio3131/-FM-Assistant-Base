@@ -148,9 +148,18 @@ def command_finops_router(*, read_model: FinOpsReadPort,
                     raise HTTPException(status_code=413, detail="core_finops.body_too_large")
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail="core_finops.invalid_request") from exc
-        body = await request.body()
-        if not body or len(body) > _MAX_BODY:
-            raise HTTPException(status_code=413, detail="core_finops.body_too_large")
+        # Stream with an absolute byte ceiling: Transfer-Encoding: chunked or
+        # missing Content-Length must not cause unbounded memory allocation.
+        total = 0
+        chunks: list[bytes] = []
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > _MAX_BODY:
+                raise HTTPException(status_code=413, detail="core_finops.body_too_large")
+            chunks.append(chunk)
+        body = b"".join(chunks)
+        if not body:
+            raise HTTPException(status_code=400, detail="core_finops.invalid_request")
         if (
             not isinstance(x_fm_command_finops_signature, str)
             or re.fullmatch(r"[a-f0-9]{64}", x_fm_command_finops_signature) is None
