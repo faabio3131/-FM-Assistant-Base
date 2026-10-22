@@ -95,6 +95,48 @@ def test_events_are_idempotent_per_request_and_attempt(ledger):
     assert _list(store)[0].attempts == 1
 
 
+@pytest.mark.parametrize("changed", [
+    {"inp": 2000}, {"out": None},
+])
+def test_replayed_attempt_with_changed_tokens_is_rejected(ledger, changed):
+    store, sessions = ledger
+    store.add_price_snapshot(price())
+    original = replace(event(request="immutable-replay"), attempt_id="attempt-stable")
+    store.registrar(original)
+    tampered = replace(original, input_tokens=changed["inp"]) if "inp" in changed else (
+        replace(original, output_tokens=changed["out"])
+    )
+    with pytest.raises(ControlPlaneError, match="attempt_replay_conflict"):
+        store.registrar(tampered)
+    with sessions() as db:
+        rows = db.scalars(select(AIUsageRecord).where(
+            AIUsageRecord.request_id == original.request_id,
+        )).all()
+        assert len(rows) == 1
+        assert rows[0].input_tokens == original.input_tokens
+        assert rows[0].output_tokens == original.output_tokens
+
+
+def test_replayed_attempt_with_changed_provenance_is_rejected(ledger):
+    store, sessions = ledger
+    original = replace(event(request="immutable-provenance"), attempt_id="stable-physical")
+    store.registrar(original)
+    for tampered in (
+        replace(original, correlation_id="forged-correlation"),
+        replace(original, cached_tokens=10),
+        replace(original, fallback_reason="forged-failure"),
+        replace(original, latency_ms=26),
+        replace(original, timestamp=datetime(2026, 10, 18, 13, tzinfo=UTC)),
+    ):
+        with pytest.raises(ControlPlaneError, match="attempt_replay_conflict"):
+            store.registrar(tampered)
+    # Identical delivery remains idempotent and never changes the canonical
+    # attempt even when replay arrives through another repository instance.
+    PersistentAIFinOps(sessions).registrar(original)
+    with sessions() as db:
+        assert db.query(AIUsageRecord).filter_by(request_id=original.request_id).count() == 1
+
+
 def test_missing_prices_and_tokens_are_explicitly_unknown(ledger):
     store, _ = ledger
     store.registrar(event(price_id="missing"))
