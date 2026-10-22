@@ -32,8 +32,12 @@ class MeterReading:
             any(type(v) is not int or v < 0 for v in (
                 self.consumed_units, self.reserved_units, self.remaining_units,
             ))
-            or self.policy_revision < 1 or self.limit_units < 1
-            or self.window_seconds < 1
+            or any(type(v) is not int or v < 1 for v in (
+                self.policy_revision, self.limit_units, self.window_seconds,
+            ))
+            or self.consumed_units + self.reserved_units
+            + self.remaining_units != self.limit_units
+            or not isinstance(self.observed_at, datetime)
             or self.observed_at.tzinfo is None
             or self.observed_at.utcoffset() is None
         ):
