@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -55,6 +56,7 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .knowledge_retrieval import BoundedKnowledgeRetrieval
 from .license_security_hold import LicenseSecurityHoldDenied, SignedLicenseSecurityHold
 from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
@@ -542,7 +544,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         personas=personas,
         conversations=conversations,
         model=model,
-        capabilities=KnowledgeCapabilityProvider(knowledge),
+        capabilities=KnowledgeCapabilityProvider(
+            knowledge,
+            retrieval=BoundedKnowledgeRetrieval(session_factory),
+            retrieval_enabled=os.environ.get(
+                "FM_ASSISTANT_KNOWLEDGE_CONTEXT_PACK_ENABLED", "false"
+            ).casefold() == "true",
+        ),
         audit=audit,
     )
 

@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from .domain import Conversation, Message, TenantContext
+from .knowledge_retrieval import BoundedKnowledgeRetrieval
 from .repositories import KnowledgeRepository
 
 
 class KnowledgeCapabilityProvider:
-    def __init__(self, repository: KnowledgeRepository) -> None:
+    def __init__(self, repository: KnowledgeRepository, *,
+                 retrieval: BoundedKnowledgeRetrieval | None = None,
+                 retrieval_enabled: bool = False) -> None:
         self._repository = repository
+        self._retrieval = retrieval
+        self._retrieval_enabled = retrieval_enabled
 
     def context_for(
         self,
@@ -17,5 +22,9 @@ class KnowledgeCapabilityProvider:
         conversation: Conversation,
         user_message: Message,
     ) -> str:
-        del conversation, user_message
+        del conversation
+        if self._retrieval_enabled:
+            if self._retrieval is None:
+                raise RuntimeError("f4.retrieval_not_configured")
+            return self._retrieval.query(context, user_message.content[:500]).context
         return self._repository.context(context)
