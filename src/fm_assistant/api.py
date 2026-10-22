@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+import os
 from uuid import uuid4
 
 from fastapi import (
@@ -20,10 +21,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
-import os
-
 from .capabilities import KnowledgeCapabilityProvider
-from .knowledge_retrieval import BoundedKnowledgeRetrieval
 from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerifier
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
 from .channels.whatsapp_meta import WhatsAppProviderError
@@ -58,6 +56,7 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .knowledge_retrieval import BoundedKnowledgeRetrieval
 from .license_security_hold import LicenseSecurityHoldDenied, SignedLicenseSecurityHold
 from .plan_consumption_dashboard import render_consumption_dashboard
 from .plan_consumption_view import PlanConsumptionView
