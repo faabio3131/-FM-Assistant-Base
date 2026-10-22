@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, case, func, or_, select
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, case, func, or_, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
 from core.ai_control_plane import ControlPlaneBase, ControlPlaneError
@@ -56,6 +56,7 @@ class AIUsageRecord(ControlPlaneBase):
     __tablename__ = "core_ai_usage_events"
 
     event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempt_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     unit_id: Mapped[str] = mapped_column(String(128), nullable=False)
     request_id: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -76,6 +77,11 @@ class AIUsageRecord(ControlPlaneBase):
     cost_origin: Mapped[str] = mapped_column(String(40), nullable=False)
     price_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
     event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("uq_core_ai_usage_physical_attempt",
+              "tenant_id", "unit_id", "request_id", "attempt_id", unique=True),
+    )
 
 
 def _utc(value: datetime) -> datetime:
@@ -219,6 +225,15 @@ class PersistentAIFinOps:
     def registrar(self, evento: AIUsageEvent) -> None:
         event_id = self._event_id(evento)
         with self._sessions.begin() as db:
+            if evento.attempt_id is not None:
+                same_physical = db.scalar(select(AIUsageRecord).where(
+                    AIUsageRecord.tenant_id == evento.tenant_id,
+                    AIUsageRecord.unit_id == evento.unidade_id,
+                    AIUsageRecord.request_id == evento.request_id,
+                    AIUsageRecord.attempt_id == evento.attempt_id,
+                ).limit(1))
+                if same_physical is not None and same_physical.event_id != event_id:
+                    raise ControlPlaneError("core_finops.physical_attempt_conflict")
             prior = db.get(AIUsageRecord, event_id)
             if prior is not None:
                 # Same physical attempt may be delivered twice, but it must
@@ -271,6 +286,7 @@ class PersistentAIFinOps:
             db.add(
                 AIUsageRecord(
                     event_id=event_id,
+                    attempt_id=evento.attempt_id,
                     tenant_id=evento.tenant_id,
                     unit_id=evento.unidade_id,
                     request_id=evento.request_id,
