@@ -1173,6 +1173,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return KnowledgeResponse(document_id=document_id)
 
+    @app.delete("/v1/knowledge/{document_id}", status_code=204)
+    def deactivate_knowledge(
+        document_id: str,
+        request: Request,
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_MANAGE)),
+    ) -> Response:
+        # Scope is resolved from the authenticated principal, never an ID/header
+        # provided by the caller. Foreign/missing IDs are indistinguishable.
+        if not request.app.state.knowledge.deactivate(context, document_id):
+            raise HTTPException(status_code=404, detail="knowledge_not_found")
+        return Response(status_code=204)
+
     @app.post("/v1/conversations", response_model=ConversationResponse)
     def create_conversation(
         payload: ConversationRequest,

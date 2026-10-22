@@ -337,6 +337,45 @@ class KnowledgeRepository:
             session.commit()
         return document_id
 
+    def deactivate(self, context: TenantContext, document_id: str) -> bool:
+        """Revoke a source atomically with audit; never reveal foreign documents.
+
+        Repeat revocation is idempotent and does not duplicate the audit event.
+        A PostgreSQL row lock serializes revocation against another manager.
+        """
+        if not isinstance(document_id, str) or not 1 <= len(document_id) <= 64:
+            return False
+        with self._session_factory() as session:
+            row = session.scalar(
+                select(KnowledgeDocumentORM).where(
+                    KnowledgeDocumentORM.document_id == document_id,
+                    KnowledgeDocumentORM.tenant_id == context.tenant_id,
+                    KnowledgeDocumentORM.unit_id == context.unit_id,
+                ).with_for_update()
+            )
+            if row is None:
+                return False
+            if row.active:
+                now = datetime.now(UTC)
+                row.active = False
+                row.updated_at = now
+                session.add(
+                    AuditEventORM(
+                        audit_id=str(uuid4()),
+                        tenant_id=context.tenant_id,
+                        unit_id=context.unit_id,
+                        credential_id=context.credential_id,
+                        action="assistant.knowledge.deactivate",
+                        resource_type="assistant_knowledge",
+                        resource_id=document_id,
+                        outcome="success",
+                        metadata_json="{}",
+                        created_at=now,
+                    )
+                )
+                session.commit()
+            return True
+
     def context(self, context: TenantContext, *, max_chars: int = 12000) -> str:
         with self._session_factory() as session:
             rows = session.scalars(
