@@ -39,14 +39,12 @@ def settings(database: str, **overrides):
     return CoreSettings(**values)
 
 
-def routes(app):
-    return [getattr(r, "path", None) for r in app.router.routes]
-
-
 def test_readback_route_is_not_registered_without_explicit_opt_in(tmp_path):
     config = settings(f"sqlite:///{tmp_path / 'off.db'}")
     app = create_app(config)
-    assert PATH not in routes(app)
+    assert TestClient(app).post(PATH, content=b"{}", headers={
+        "Content-Type": "application/json",
+    }).status_code == 404
     assert config.command_quota_readback_secret is None
     assert config.command_quota_readback_enabled is False
     assert "command_quota_authority" not in app.state._state
@@ -114,7 +112,8 @@ def test_live_runtime_mount_uses_current_authority_and_existing_ledger(tmp_path)
             db, command_quota_readback_enabled=True,
             command_quota_readback_secret=COMMAND_KEY,
         ))
-        assert routes(app).count(PATH) == 1
+        # Exercise HTTP routing directly: FastAPI may wrap routes without
+        # exposing an identical route.path implementation across versions.
         policy = FreshPolicy()
         quota = QuotaReservations(
             sessionmaker(bind=engine, expire_on_commit=False)
