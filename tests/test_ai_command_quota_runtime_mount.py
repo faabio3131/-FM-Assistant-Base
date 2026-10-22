@@ -11,7 +11,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.ai_command_quota_readback import (
-    PATH, SCHEMA, sign_command_quota_readback,
+    PATH,
+    SCHEMA,
+    sign_command_quota_readback,
 )
 from core.ai_control_plane import ControlPlaneBase
 from core.ai_plan_usage_guard import PlanQuotaPolicy
