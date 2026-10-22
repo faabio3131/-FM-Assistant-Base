@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 
@@ -31,7 +33,9 @@ def test_bridge_migration_preserves_existing_integrations_and_has_no_active_iden
         ))
     _upgrade(url, "head")
     with engine.connect() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261020_0019"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == (
+            ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+        )
         # The new QR display projection is additive and never backfills
         # corporate authority or changes existing Core grants.
         assert db.scalar(text(
