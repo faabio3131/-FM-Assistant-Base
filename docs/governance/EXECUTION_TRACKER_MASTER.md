@@ -1152,3 +1152,8 @@ PRÓXIMO PASSO:
 **Pendências internas F3/B1 NÃO eliminadas:** revisão de todo o pacote monolítico Core/Assistant Draft, metering/fallback por tentativa e reconciliação de uso/custo incerto de providers sem recibo criptográfico, ligação completa do consumo às rotas reais sob fault injection, auditoria adversarial end-to-end e CI final nos SHAs integrados. Depois B1 GREEN, iniciar B2/F4 Knowledge, B3/F5 Human Inbox, B4/F6 CRM, B5/F7 Cadências e demais blocos até B11.
 
 **Padrão executor:** conferir primeiro este CURRENT + AGENTS + cronograma + PRs recentes; diferenciar código/testes internos de endpoints realmente ativados; preservar flags OFF e aprovação humana de deploy. Merges WPs sem STOP são autorizados por gate no SHA e revisão interna FM aceita pelo proprietário; não apresentar autoauditoria como independente de terceiro.
+
+
+### 2026-10-22 — F4/WP1 preparação independente enquanto F3/F9 seguem em consolidação
+
+Reutilização canônica KnowledgeDocumentORM/KnowledgeRepository + capability de conversação da própria Assistant. Implementado retriever lexical question-aware por tenant/unidade e active, Context Pack com id/timestamp de fonte, budget e ausência de match fail-closed, ativação opt-in OFF e testes SQLAlchemy de isolamento/ranking. Docs: F4_WP1_SCOPED_KNOWLEDGE_CONTEXT_PACK_2026-10-22.md. WP aguardará CI da branch e posterior merge elegível; F4 global IN_PROGRESS. A base grande Assistant PR #1 ainda Draft, não promover toda a PR só porque um WP novo passou. F13/credenciais/homologação real adiados. 
