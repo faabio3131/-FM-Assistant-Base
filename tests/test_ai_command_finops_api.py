@@ -9,11 +9,15 @@ from decimal import Decimal
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from core.ai_command_finops_api import (
     PATH, SCHEMA, command_finops_router, sign_finops_request,
 )
 from core.ai_finops import AIFinOpsBucket
+from core.ai_control_plane import ControlPlaneBase
+from core.ai_usage_ledger import AIUsageRecord, PersistentAIFinOps
 
 SECRET = b"synthetic-command-finops-key-isolated-123456789"
 
@@ -207,3 +211,50 @@ def test_non_negative_known_only_is_a_priced_internal_subtotal_not_invoice():
     assert data["coverage"] == "priced_internal_observations"
     assert data["buckets"][0]["actual_provider_spend_verified"] is False
     assert data["unknown_attempts"] == 0
+
+
+def test_real_persistent_finops_ledger_keeps_tenant_and_unit_isolated(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'finops.sqlite3'}")
+    ControlPlaneBase.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    at = datetime.now(UTC)
+    try:
+        with sessions.begin() as db:
+            for number, tenant, unit, price in (
+                (1, "tenant-a", "unit-a", "0.0012"),
+                (2, "tenant-a", "unit-a", None),
+                (3, "tenant-b", "unit-a", "999.99"),
+                (4, "tenant-a", "unit-secret", "500.00"),
+            ):
+                db.add(AIUsageRecord(
+                    event_id=f"event-{number}",tenant_id=tenant,unit_id=unit,
+                    request_id=f"request-{number}",correlation_id=f"corr-{number}",
+                    capability="atendimento_interpretacao",provider="gemini",
+                    model="synthetic-model",route_reason="synthetic",
+                    fallback_used=number == 2,fallback_reason=None,
+                    input_tokens=10 if price is not None else None,
+                    output_tokens=5 if price is not None else None,
+                    cached_tokens=None,latency_ms=42,
+                    outcome="success" if price is not None else "transient_failure",
+                    cost_decimal=price,currency="USD" if price is not None else "XXX",
+                    cost_origin="estimated" if price is not None else "unavailable",
+                    price_snapshot_id="synthetic-price",event_time=at,
+                ))
+        client = _app(PersistentAIFinOps(sessions))
+        response = _send(client, _body())
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result["coverage"] == "partial_unknown_costs"
+        assert result["known_attempts"] == 1
+        assert result["unknown_attempts"] == 1
+        assert sum(bucket["attempts"] for bucket in result["buckets"]) == 2
+        assert "999.99" not in response.text
+        assert "500.00" not in response.text
+        assert "tenant-b" not in response.text
+        assert "unit-secret" not in response.text
+        assert any(bucket["known_cost_subtotal"] == "0.0012"
+                   for bucket in result["buckets"])
+        assert all(bucket["actual_provider_spend_verified"] is False
+                   for bucket in result["buckets"])
+    finally:
+        engine.dispose()
