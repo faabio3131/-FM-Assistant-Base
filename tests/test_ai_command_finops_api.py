@@ -277,3 +277,16 @@ def test_invalid_signer_key_cannot_activate_internal_finops_port():
         command_finops_router(read_model=FakeFinOps(), shared_secret=b"short")
     with raises(ValueError):
         sign_finops_request(secret=b"short", raw_body=b"{}")
+
+
+def test_shared_node_python_hmac_interoperability_golden_vector():
+    # Same static vector also asserted by FM Command TypeScript; a changed
+    # route, method, body serialization or signature must fail both projects.
+    key=b"synthetic-finops-contract-key-32-bytes-123"
+    body=(b'{"schema":"fm.core.finops.read.v1","tenant_id":"tenant-a",'
+          b'"unit_id":"unit-a","start_date":"2026-10-21",'
+          b'"end_date":"2026-10-22","issued_at":1792627200,'
+          b'"nonce":"abcdefghijklmnopqrstuvwxABCDEFGH"}')
+    assert sign_finops_request(secret=key,raw_body=body)==(
+        "b3e81412631dcb6de6ea42e8d866e58db84598d70b651db7c68b36bca2270e30"
+    )
