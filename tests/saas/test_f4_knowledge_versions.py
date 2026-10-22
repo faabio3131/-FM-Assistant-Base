@@ -11,11 +11,16 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.db import (
-    Base, KnowledgeChunkORM, KnowledgeDocumentORM, KnowledgeSourceVersionORM,
+    Base,
+    KnowledgeChunkORM,
+    KnowledgeDocumentORM,
+    KnowledgeSourceVersionORM,
 )
 from fm_assistant.domain import TenantContext
 from fm_assistant.knowledge_versioning import (
-    KnowledgeVersionDenied, VersionedKnowledgeIngestion, split_knowledge_chunks,
+    KnowledgeVersionDenied,
+    VersionedKnowledgeIngestion,
+    split_knowledge_chunks,
 )
 from fm_assistant.repositories import KnowledgeRepository
 
