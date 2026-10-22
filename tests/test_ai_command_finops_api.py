@@ -258,3 +258,22 @@ def test_real_persistent_finops_ledger_keeps_tenant_and_unit_isolated(tmp_path):
                    for bucket in result["buckets"])
     finally:
         engine.dispose()
+
+
+def test_finops_database_outage_is_not_reported_as_zero():
+    class Unavailable:
+        def listar(self, **kwargs):
+            raise RuntimeError("INTERNAL_DB_PASSWORD_DO_NOT_LEAK")
+
+    response = _send(_app(Unavailable()), _body())
+    assert response.status_code == 503
+    assert response.json()["detail"] == "core_finops.source_unavailable"
+    assert "INTERNAL_DB_PASSWORD_DO_NOT_LEAK" not in response.text
+
+
+def test_invalid_signer_key_cannot_activate_internal_finops_port():
+    from pytest import raises
+    with raises(ValueError):
+        command_finops_router(read_model=FakeFinOps(), shared_secret=b"short")
+    with raises(ValueError):
+        sign_finops_request(secret=b"short", raw_body=b"{}")
