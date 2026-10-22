@@ -6,6 +6,7 @@ AI text response or FM provider expenditure.
 from datetime import UTC, datetime
 
 import httpx
+import pytest
 
 from fm_assistant.core_client import CoreAIClient
 from fm_assistant.core_plan_usage_reader import CoreQuotaUsageHTTPReader
@@ -82,3 +83,56 @@ def test_broken_core_metering_does_not_advertise_available_credits(monkeypatch):
         policy_revision=4, limit_units=2000, window_seconds=3600,
     )
     assert reading is None
+
+
+@pytest.mark.parametrize("forgery", [
+    {"policy_revision": True},
+    {"policy_revision": 1.0},
+    {"limit_units": 2000.0},
+    {"window_seconds": 3600.0},
+    {"consumed_units": True},
+    {"reserved_units": -1},
+    {"remaining_units": 1699},
+    {"unit_id": "unit-foreign"},
+    {"resource": 1},
+    {"observed_at": "2000-01-01T00:00:00+00:00"},
+])
+def test_signed_core_scope_requires_exact_types_and_balanced_quota(monkeypatch, forgery):
+    now = datetime.now(UTC)
+    legitimate = {
+        "tenant_id": "tenant-one", "unit_id": "unit-one",
+        "resource": "ai.total_tokens", "scope": "tenant",
+        "policy_revision": 1, "limit_units": 2000, "window_seconds": 3600,
+        "consumed_units": 100, "reserved_units": 200,
+        "remaining_units": 1700, "observed_at": now.isoformat(),
+    }
+    payload = {**legitimate, **forgery}
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: httpx.Response(200, json=payload))
+    reader = CoreQuotaUsageHTTPReader(
+        core_origin="https://core.internal.test", service_key="synthetic-key",
+    )
+    assert reader.read(
+        tenant_id="tenant-one", unit_id="unit-one", metric="ai.total_tokens",
+        scope="tenant", at=now, policy_revision=1,
+        limit_units=2000, window_seconds=3600,
+    ) is None
+
+
+def test_core_quota_reader_requires_timezone_aware_clock(monkeypatch):
+    now = datetime.now(UTC)
+    payload = {
+        "tenant_id": "tenant-one", "unit_id": "unit-one",
+        "resource": "ai.total_tokens", "scope": "tenant",
+        "policy_revision": 1, "limit_units": 2000, "window_seconds": 3600,
+        "consumed_units": 100, "reserved_units": 200,
+        "remaining_units": 1700, "observed_at": now.isoformat(),
+    }
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: httpx.Response(200, json=payload))
+    reader = CoreQuotaUsageHTTPReader(
+        core_origin="https://core.internal.test", service_key="synthetic-key",
+    )
+    assert reader.read(
+        tenant_id="tenant-one", unit_id="unit-one", metric="ai.total_tokens",
+        scope="tenant", at=now.replace(tzinfo=None), policy_revision=1,
+        limit_units=2000, window_seconds=3600,
+    ) is None
