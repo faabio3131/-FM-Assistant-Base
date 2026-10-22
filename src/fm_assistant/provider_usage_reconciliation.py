@@ -39,6 +39,10 @@ class ProviderUsage:
             or self.cost_usd is not None
         ):
             raise ValueError("provider_usage_uncertain_requires_unknown_values")
+        if self.status == "confirmed" and (
+            self.input_tokens is None or self.output_tokens is None
+        ):
+            raise ValueError("provider_usage_confirmation_requires_known_tokens")
 
     @property
     def total_tokens(self) -> int | None:
@@ -58,6 +62,10 @@ def from_trusted_core_receipt(receipt: dict, *, request_id: str) -> ProviderUsag
         raise ValueError("provider_usage_identity_invalid")
     state = receipt.get("usage_status")
     if state == "uncertain":
+        if any(receipt.get(key) is not None for key in (
+            "input_tokens", "output_tokens", "cost_usd",
+        )):
+            raise ValueError("provider_usage_uncertain_contradictory_evidence")
         return ProviderUsage(
             provider=receipt["provider"], model=receipt["model"],
             request_id=request_id, input_tokens=None, output_tokens=None,
@@ -66,8 +74,10 @@ def from_trusted_core_receipt(receipt: dict, *, request_id: str) -> ProviderUsag
     if state != "confirmed":
         raise ValueError("provider_usage_status_invalid")
     raw_cost = receipt.get("cost_usd")
+    if raw_cost is not None and (type(raw_cost) is not str or not 1 <= len(raw_cost) <= 80):
+        raise ValueError("provider_usage_cost_invalid")
     try:
-        cost = Decimal(str(raw_cost)) if raw_cost is not None else None
+        cost = Decimal(raw_cost) if raw_cost is not None else None
     except InvalidOperation as exc:
         raise ValueError("provider_usage_cost_invalid") from exc
     return ProviderUsage(
