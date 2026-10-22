@@ -1157,3 +1157,8 @@ PRÓXIMO PASSO:
 ### 2026-10-22 — F4/WP1 preparação independente enquanto F3/F9 seguem em consolidação
 
 Reutilização canônica KnowledgeDocumentORM/KnowledgeRepository + capability de conversação da própria Assistant. Implementado retriever lexical question-aware por tenant/unidade e active, Context Pack com id/timestamp de fonte, budget e ausência de match fail-closed, ativação opt-in OFF e testes SQLAlchemy de isolamento/ranking. Docs: F4_WP1_SCOPED_KNOWLEDGE_CONTEXT_PACK_2026-10-22.md. WP aguardará CI da branch e posterior merge elegível; F4 global IN_PROGRESS. A base grande Assistant PR #1 ainda Draft, não promover toda a PR só porque um WP novo passou. F13/credenciais/homologação real adiados. 
+
+
+### 2026-10-22 — F4/WP2 versionamento de fontes e chunks
+
+Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com versões e chunks imutáveis por tenant/unidade, conteúdo original preservado por bootstrap obrigatório, ingestão textual versionada por CAS, API permissionada e flag OFF, testes Alembic/SQLAlchemy/HTTP negativos. Gate CI no SHA da PR; nenhuma migration real. F4 permanece IN_PROGRESS: retrieval por chunks, ingestão de arquivos/URLs, UI, fontes versionadas externamente e busca híbrida ainda faltam. Não promover PR monolítica #1 indevidamente.
