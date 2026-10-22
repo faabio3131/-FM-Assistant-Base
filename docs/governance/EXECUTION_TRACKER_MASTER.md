@@ -1157,3 +1157,16 @@ PRÓXIMO PASSO:
 ### 2026-10-22 — F4/WP1 preparação independente enquanto F3/F9 seguem em consolidação
 
 Reutilização canônica KnowledgeDocumentORM/KnowledgeRepository + capability de conversação da própria Assistant. Implementado retriever lexical question-aware por tenant/unidade e active, Context Pack com id/timestamp de fonte, budget e ausência de match fail-closed, ativação opt-in OFF e testes SQLAlchemy de isolamento/ranking. Docs: F4_WP1_SCOPED_KNOWLEDGE_CONTEXT_PACK_2026-10-22.md. WP aguardará CI da branch e posterior merge elegível; F4 global IN_PROGRESS. A base grande Assistant PR #1 ainda Draft, não promover toda a PR só porque um WP novo passou. F13/credenciais/homologação real adiados. 
+
+
+---
+
+## 2026-10-22 — F4/WP2a: governança de revogação de fontes de conhecimento (candidata)
+
+- **Status:** `IN_PROGRESS / PENDING_CI`; não promover F4 global nem B2 e não confundir com produção.
+- Base da candidata Assistant F3/F4: `9ad92d0508911782bd4029a1ff94b4d2ede63682`, PR #1 ainda Draft e `main` não integrada.
+- O WP preenche lacuna do ciclo de vida das fontes locais: revogação `knowledge.manage` por tenant/unidade, marcação `active=false`, auditoria append-only transacional e 204 idempotente; escopo estrangeiro 404. Sem migration adicional, sem credenciais nem providers.
+- Teste adicional `tests/saas/test_f4_knowledge_revocation.py`: SQLAlchemy real descartável e HTTP autenticado; falha fechada, auditoria única, visibilidade revogada e negativos cross-tenant/unit.
+- Contrato, limites e rollback: `docs/governance/F4_WP2A_KNOWLEDGE_REVOCATION_2026-10-22.md`.
+- **Antes de merge:** verificar Ruff, teste SaaS, contrato Core↔Assistant e PostgreSQL-bridge completos no HEAD final, revisar diff/segredos/STOP, conferir `main` candidata e merge sem ativar deploy externo.
+- B1/F3, FinOps F9, ingestão URL/arquivo, versionamento imutável/chunks, UI e certificação B2 continuam explicitamente pendentes. Homologações reais só após `BUILD_COMPLETE_INTERNAL_GREEN`.
