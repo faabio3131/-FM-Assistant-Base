@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
 from core.ai_control_plane import ControlPlaneBase, ControlPlaneError
@@ -222,6 +223,28 @@ class PersistentAIFinOps:
             fields = (*fields, "physical_attempt", event.attempt_id)
         return sha256("\x1f".join(fields).encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _verify_replay(prior: AIUsageRecord, evento: AIUsageEvent) -> None:
+        """Identical physical event is idempotent; changed evidence is forbidden."""
+        original = (
+            prior.tenant_id, prior.unit_id, prior.request_id,
+            prior.correlation_id, prior.capability, prior.provider,
+            prior.model, prior.route_reason, prior.fallback_used,
+            prior.fallback_reason, prior.input_tokens, prior.output_tokens,
+            prior.cached_tokens, prior.latency_ms, prior.outcome,
+            prior.price_snapshot_id, _utc(prior.event_time),
+        )
+        replayed = (
+            evento.tenant_id, evento.unidade_id, evento.request_id,
+            evento.correlation_id, evento.capability.value, evento.provider,
+            evento.model, evento.route_reason, evento.fallback_used,
+            evento.fallback_reason, evento.input_tokens, evento.output_tokens,
+            evento.cached_tokens, evento.latency_ms, evento.outcome.value,
+            evento.price_snapshot_id, _utc(evento.timestamp),
+        )
+        if original != replayed or prior.attempt_id != evento.attempt_id:
+            raise ControlPlaneError("core_finops.attempt_replay_conflict")
+
     def registrar(self, evento: AIUsageEvent) -> None:
         event_id = self._event_id(evento)
         with self._sessions.begin() as db:
@@ -236,27 +259,7 @@ class PersistentAIFinOps:
                     raise ControlPlaneError("core_finops.physical_attempt_conflict")
             prior = db.get(AIUsageRecord, event_id)
             if prior is not None:
-                # Same physical attempt may be delivered twice, but it must
-                # never silently accept different usage, outcome or provenance.
-                original = (
-                    prior.tenant_id, prior.unit_id, prior.request_id,
-                    prior.correlation_id, prior.capability, prior.provider,
-                    prior.model, prior.route_reason, prior.fallback_used,
-                    prior.fallback_reason, prior.input_tokens, prior.output_tokens,
-                    prior.cached_tokens, prior.latency_ms, prior.outcome,
-                    prior.price_snapshot_id, _utc(prior.event_time),
-                )
-                replayed = (
-                    evento.tenant_id, evento.unidade_id, evento.request_id,
-                    evento.correlation_id, evento.capability.value, evento.provider,
-                    evento.model, evento.route_reason, evento.fallback_used,
-                    evento.fallback_reason, evento.input_tokens,
-                    evento.output_tokens, evento.cached_tokens,
-                    evento.latency_ms, evento.outcome.value,
-                    evento.price_snapshot_id, _utc(evento.timestamp),
-                )
-                if original != replayed:
-                    raise ControlPlaneError("core_finops.attempt_replay_conflict")
+                self._verify_replay(prior, evento)
                 return
             snapshot: PriceSnapshotIA | None = None
             try:
@@ -283,8 +286,7 @@ class PersistentAIFinOps:
                 value = None
                 currency = "XXX"  # ISO 4217: sem moeda conhecida
                 origin = OrigemCustoIA.INDISPONIVEL.value
-            db.add(
-                AIUsageRecord(
+            record = AIUsageRecord(
                     event_id=event_id,
                     attempt_id=evento.attempt_id,
                     tenant_id=evento.tenant_id,
@@ -308,7 +310,29 @@ class PersistentAIFinOps:
                     price_snapshot_id=evento.price_snapshot_id,
                     event_time=evento.timestamp,
                 )
-            )
+            try:
+                # A savepoint contains a concurrent unique-key collision.
+                # The outer transaction stays usable to verify the winner.
+                with db.begin_nested():
+                    db.add(record)
+                    db.flush()
+            except IntegrityError as exc:
+                persisted = db.get(AIUsageRecord, event_id)
+                if persisted is not None:
+                    self._verify_replay(persisted, evento)
+                    return
+                if evento.attempt_id is not None:
+                    other = db.scalar(select(AIUsageRecord).where(
+                        AIUsageRecord.tenant_id == evento.tenant_id,
+                        AIUsageRecord.unit_id == evento.unidade_id,
+                        AIUsageRecord.request_id == evento.request_id,
+                        AIUsageRecord.attempt_id == evento.attempt_id,
+                    ).limit(1))
+                    if other is not None:
+                        raise ControlPlaneError(
+                            "core_finops.physical_attempt_conflict"
+                        ) from exc
+                raise ControlPlaneError("core_finops.attempt_write_conflict") from exc
 
     def listar_pendencias(
         self, *, tenant_id: str, unit_id: str,
