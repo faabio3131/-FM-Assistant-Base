@@ -86,7 +86,7 @@ def test_valid_signature_cannot_impersonate_another_provider():
     swapped = json.dumps(
         attacker_payload, sort_keys=True, separators=(",", ":"),
     ).encode()
-    valid_for_same_issuer = private.sign(b"FM_PROVIDER_USAGE_SOURCE_V1\\n" + swapped)
+    valid_for_same_issuer = private.sign(b"FM_PROVIDER_USAGE_SOURCE_V1\n" + swapped)
     with pytest.raises(QuotaDenied, match="provider_source_statement_invalid"):
         _verify(policy, swapped, valid_for_same_issuer, now)
     # Adding the provider to an explicitly approved policy is the only valid
