@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-import fm_assistant.core_bridge_models  # noqa: F401 - bind migration metadata
-import fm_assistant.command_bridge_control_models  # noqa: F401 - bind audit metadata
-import fm_assistant.human_inbox  # noqa: F401 - bind human inbox metadata
+import fm_assistant.command_bridge_control_models
+import fm_assistant.core_bridge_models
+import fm_assistant.human_inbox
+import fm_assistant.human_whatsapp_outbox  # noqa: F401 - bind human outbox metadata
+from alembic import context
 from fm_assistant.db import Base
 
 config = context.config

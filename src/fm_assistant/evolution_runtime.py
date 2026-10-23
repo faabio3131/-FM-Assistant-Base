@@ -39,6 +39,7 @@ class EvolutionRuntime:
         vault: CredentialVault, transport: EvolutionClient,
         verifier: EvolutionEventVerifier, sender_pepper: str,
         queue: EvolutionInboundQueue | None = None,
+        human_whatsapp_outbox=None,
     ) -> None:
         if not sender_pepper:
             raise ValueError("evolution_sender_pepper_required")
@@ -50,6 +51,7 @@ class EvolutionRuntime:
         self._verifier = verifier
         self._pepper = sender_pepper.encode()
         self._queue = queue
+        self._human_whatsapp_outbox = human_whatsapp_outbox
 
     def receive(
         self, *, connection_id: str, raw: bytes,
@@ -191,6 +193,13 @@ class EvolutionRuntime:
                     context=context, channel=Channel.WHATSAPP,
                     external_ref=f"wae:{connection_id}:{sender_hash}",
                 )
+                if self._human_whatsapp_outbox is not None:
+                    self._human_whatsapp_outbox.bind_verified_inbound(
+                        tenant_id=context.tenant_id, unit_id=context.unit_id,
+                        conversation_id=conversation.conversation_id,
+                        connection_id=connection_id, sender=item.sender,
+                        external_ref=conversation.external_ref or "",
+                    )
                 if conversation.status is ConversationStatus.HUMAN_HANDOFF:
                     self._inbox.complete(
                         channel_id=connection_id, message_id=item.message_id,
@@ -338,6 +347,13 @@ class EvolutionRuntime:
                 context=context, channel=Channel.WHATSAPP,
                 external_ref=f"wae:{item.connection_id}:{sender_hash}",
             )
+            if self._human_whatsapp_outbox is not None:
+                self._human_whatsapp_outbox.bind_verified_inbound(
+                    tenant_id=context.tenant_id, unit_id=context.unit_id,
+                    conversation_id=conversation.conversation_id,
+                    connection_id=item.connection_id, sender=item.sender,
+                    external_ref=conversation.external_ref or "",
+                )
             if conversation.status is ConversationStatus.HUMAN_HANDOFF:
                 self._inbox.complete(
                     channel_id=item.connection_id, message_id=item.message_id,

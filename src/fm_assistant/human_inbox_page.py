@@ -61,9 +61,10 @@ label{font-weight:600;font-size:13px}
 <div class="tools">
 <button class="primary" id="claim">Assumir atendimento</button>
 <button class="critical" id="return">Devolver à IA</button></div>
-<div id="reply-panel" hidden><h3>Resposta humana no Webchat / API</h3>
+<div id="reply-panel" hidden><h3 id="reply-heading">Resposta humana</h3>
 <label for="reply">Mensagem ao cliente</label><textarea id="reply" maxlength="20000"></textarea>
-<button class="primary" id="send-reply">Registrar resposta no histórico do cliente</button></div>
+<button class="primary" id="send-reply">Enviar resposta</button>
+<button id="check-reply" hidden>Consultar situação do envio</button></div>
 <h3>Transferir para agente da unidade</h3>
 <label for="target">ID do agente</label><input id="target" maxlength="64"
  placeholder="Identificador do usuário">
@@ -80,6 +81,7 @@ label{font-weight:600;font-size:13px}
 "use strict";
 const $ = id => document.getElementById(id);
 let page=0, nextPage=null, current=null, busy=false, pendingReplyId=null;
+let selectedChannel=null;
 const note = message => { $("notice").textContent=message; };
 async function api(path, method="GET", body=null) {
   const init={method,credentials:"same-origin",cache:"no-store",
@@ -122,7 +124,11 @@ async function load() {
 }
 async function select(item) {
   current=item.conversation_id;pendingReplyId=null;$("controls").hidden=false;
-  $("reply-panel").hidden=!["api","webchat"].includes(item.channel);
+  selectedChannel=item.channel;$("reply-panel").hidden=false;
+  $("check-reply").hidden=true;
+  $("reply-heading").textContent=item.channel==="whatsapp"?
+    "Resposta WhatsApp Evolution (fila segura; sem confirmação imediata)":
+    "Resposta humana Webchat/API";
   $("detail").replaceChildren(
     elt("p","",item.external_ref||item.conversation_id),
     elt("p","meta","Canal: "+item.channel+" • Estado: "+item.status),
@@ -147,14 +153,18 @@ async function action(name,body=null){
   if(!current||busy)return;
   busy=true;
   try{
-    await api("/v1/inbox/"+encodeURIComponent(current)+"/"+name,"POST",body);
-    note("Operação registrada.");
+    const result=await api("/v1/inbox/"+encodeURIComponent(current)+"/"+name,"POST",body);
+    const statusText=name==="reply"&&selectedChannel==="whatsapp"?
+      "Mensagem enfileirada ("+result.status+"). Consulte o envio; não reenvie.":
+      "Operação registrada.";
+    $("check-reply").hidden=!(name==="reply"&&selectedChannel==="whatsapp");
     if(name==="return-to-ai"){current=null;$("controls").hidden=true;
       $("detail").textContent="Conversa devolvida à IA.";}
     if(name==="notes")$("note").value="";
-    if(name==="reply"){$("reply").value="";pendingReplyId=null;}
+    if(name==="reply"&&selectedChannel!=="whatsapp"){
+      $("reply").value="";pendingReplyId=null;}
     busy=false;
-    await load();await activity();
+    await load();await activity();note(statusText);
   }catch(error){note("Ação não concluída: "+error.message);}
   finally{busy=false;}
 }
@@ -165,6 +175,16 @@ $("claim").onclick=()=>action("claim");
 $("return").onclick=()=>action("return-to-ai");
 $("transfer").onclick=()=>{const target=$("target").value.trim();
   if(target)action("transfer",{user_id:target});};
+$("check-reply").onclick=async()=>{
+  if(!current||!pendingReplyId)return;
+  try{const status=await api("/v1/inbox/"+encodeURIComponent(current)+
+    "/outbound/"+encodeURIComponent(pendingReplyId));
+    note("Situação do envio no VendeAtendeIA: "+status.status+
+      ". Confirmação do provedor não equivale a leitura pelo destinatário.");
+    if(status.status==="provider_acknowledged"){
+      $("reply").value="";pendingReplyId=null;$("check-reply").hidden=true;}
+  }catch{note("Não foi possível consultar o estado do envio.");}
+};
 $("send-reply").onclick=()=>{const value=$("reply").value.trim();
   if(value){pendingReplyId ||= crypto.randomUUID();
     action("reply",{message_id:pendingReplyId,content:value});}};

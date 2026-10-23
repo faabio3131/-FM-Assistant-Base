@@ -44,6 +44,7 @@ from .evolution_runtime import EvolutionRuntime
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .human_inbox import HumanInbox, HumanInboxDenied
 from .human_inbox_page import render_human_inbox_page
+from .human_whatsapp_outbox import HumanWhatsAppOutbox
 from .identity import (
     MACHINE_PERMISSIONS,
     AuthContext,
@@ -589,6 +590,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     integration_repository = IntegrationRepository(session_factory)
     vault = FernetCredentialVault(cfg.channel_encryption_key)
+    human_whatsapp_outbox = HumanWhatsAppOutbox(
+        session_factory, vault, sender_pepper=cfg.credential_pepper,
+    )
     integration_service = IntegrationService(
         repository=integration_repository,
         vault=vault,
@@ -620,6 +624,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session_factory, vault,
                 max_pending_per_connection=cfg.evolution_max_pending_per_connection,
             ),
+            human_whatsapp_outbox=human_whatsapp_outbox,
         )
         if evolution_onboarding is not None and cfg.evolution_webhook_signing_key
         else None
@@ -710,6 +715,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge_versioning = knowledge_versioning
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
+        app.state.human_whatsapp_outbox = human_whatsapp_outbox
         app.state.integration_repository = integration_repository
         app.state.integration_service = integration_service
         app.state.evolution_onboarding = evolution_onboarding
@@ -1426,12 +1432,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict:
         """Webchat/API response enters customer history; WhatsApp fails closed."""
         try:
+            context = TenantContext(
+                tenant_id=principal.tenant_id, unit_id=principal.unit_id,
+                credential_id=f"user:{principal.user_id}",
+            )
+            conv = request.app.state.assistant_service.get_conversation(
+                context=context, conversation_id=conversation_id,
+            )
+            if conv.channel is Channel.WHATSAPP:
+                return request.app.state.human_whatsapp_outbox.enqueue(
+                    principal=principal, conversation_id=conversation_id,
+                    message_id=str(payload.message_id), content=payload.content,
+                )
             return request.app.state.human_inbox.reply(
                 principal=principal, conversation_id=conversation_id,
                 message_id=str(payload.message_id), content=payload.content,
             )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="conversation_not_found") from exc
         except HumanInboxDenied as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/inbox/{conversation_id}/outbound/{message_id}")
+    def human_whatsapp_outbound_status(
+        conversation_id: str, message_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.human_whatsapp_outbox.status(
+                principal=principal, conversation_id=conversation_id,
+                message_id=message_id,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=404, detail="inbox.not_found") from exc
 
     @app.post("/v1/inbox/{conversation_id}/return-to-ai")
     def return_human_conversation_to_ai(

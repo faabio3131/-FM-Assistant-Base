@@ -273,6 +273,16 @@ class HumanInbox:
                 state.assigned_to != principal.user_id and not self._manager(principal)
             ):
                 raise HumanInboxDenied("inbox.return_forbidden")
+            if conv.channel == "whatsapp":
+                from .human_whatsapp_outbox import HumanWhatsAppOutboxORM
+                unsettled = db.scalar(select(HumanWhatsAppOutboxORM.message_id).where(
+                    HumanWhatsAppOutboxORM.conversation_id == conversation_id,
+                    HumanWhatsAppOutboxORM.tenant_id == principal.tenant_id,
+                    HumanWhatsAppOutboxORM.unit_id == principal.unit_id,
+                    HumanWhatsAppOutboxORM.state.in_(("pending", "sending_uncertain")),
+                ).limit(1))
+                if unsettled is not None:
+                    raise HumanInboxDenied("inbox.outbound_pending_or_uncertain")
             affected = db.execute(update(ConversationORM).where(
                 ConversationORM.conversation_id == conversation_id,
                 ConversationORM.tenant_id == principal.tenant_id,
