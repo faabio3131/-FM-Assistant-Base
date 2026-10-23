@@ -81,8 +81,9 @@ def test_core_generation_and_authoritative_metering_remain_separate(monkeypatch)
     assert reading.reserved_units == 200
     unknown = from_trusted_core_receipt({
         "provider": "gemini", "model": "gemini-model",
+        "tenant_id": "tenant-one", "unit_id": "unit-one",
         "request_id": "message-one", "usage_status": "uncertain",
-    }, request_id="message-one")
+    }, tenant_id="tenant-one", unit_id="unit-one", request_id="message-one")
     assert unknown.total_tokens is None
     assert unknown.cost_usd is None
 
