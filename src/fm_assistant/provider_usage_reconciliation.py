@@ -11,6 +11,8 @@ from decimal import Decimal, InvalidOperation
 
 @dataclass(frozen=True, kw_only=True)
 class ProviderUsage:
+    tenant_id: str
+    unit_id: str
     provider: str
     model: str
     request_id: str
@@ -22,7 +24,7 @@ class ProviderUsage:
     def __post_init__(self) -> None:
         if (
             not all(isinstance(x, str) and 0 < len(x) <= 160
-                    for x in (self.provider, self.model, self.request_id))
+                    for x in (self.tenant_id, self.unit_id, self.provider, self.model, self.request_id))
             or self.status not in {"confirmed", "uncertain"}
         ):
             raise ValueError("provider_usage_invalid")
@@ -51,9 +53,24 @@ class ProviderUsage:
         return self.input_tokens + self.output_tokens
 
 
-def from_trusted_core_receipt(receipt: dict, *, request_id: str) -> ProviderUsage:
-    """Parse trusted Core result only. No fallback from text length or pricing."""
-    if not isinstance(receipt, dict) or receipt.get("request_id") != request_id:
+def from_trusted_core_receipt(
+    receipt: dict, *, tenant_id: str, unit_id: str, request_id: str,
+) -> ProviderUsage:
+    """Bind the trusted Core result to the exact tenant, unit and request.
+
+    Cross-tenant correlation-id reuse must never merge financial readings.
+    No fallback from text length, model pricing or unsigned exports.
+    """
+    if (
+        not isinstance(receipt, dict)
+        or any(type(value) is not str or not value for value in (
+            tenant_id, unit_id, request_id,
+        ))
+        or any(receipt.get(name) != value or type(receipt.get(name)) is not str
+               for name, value in (("tenant_id", tenant_id),
+                                   ("unit_id", unit_id),
+                                   ("request_id", request_id)))
+    ):
         raise ValueError("provider_usage_receipt_mismatch")
     if not all(
         isinstance(receipt.get(key), str) and receipt[key].strip()
@@ -67,6 +84,7 @@ def from_trusted_core_receipt(receipt: dict, *, request_id: str) -> ProviderUsag
         )):
             raise ValueError("provider_usage_uncertain_contradictory_evidence")
         return ProviderUsage(
+            tenant_id=tenant_id, unit_id=unit_id,
             provider=receipt["provider"], model=receipt["model"],
             request_id=request_id, input_tokens=None, output_tokens=None,
             cost_usd=None, status="uncertain",
@@ -81,6 +99,7 @@ def from_trusted_core_receipt(receipt: dict, *, request_id: str) -> ProviderUsag
     except InvalidOperation as exc:
         raise ValueError("provider_usage_cost_invalid") from exc
     return ProviderUsage(
+        tenant_id=tenant_id, unit_id=unit_id,
         provider=receipt["provider"], model=receipt["model"],
         request_id=request_id, input_tokens=receipt.get("input_tokens"),
         output_tokens=receipt.get("output_tokens"), cost_usd=cost,
@@ -94,7 +113,9 @@ def reconcile_usage(original: ProviderUsage, receipt: ProviderUsage) -> Provider
     Conflicting confirmed readings cannot be silently overwritten.
     """
     if (
-        original.request_id != receipt.request_id
+        original.tenant_id != receipt.tenant_id
+        or original.unit_id != receipt.unit_id
+        or original.request_id != receipt.request_id
         or original.provider != receipt.provider
         or original.model != receipt.model
     ):
