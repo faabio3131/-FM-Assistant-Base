@@ -182,6 +182,16 @@ class HumanInboxSlaRequest(BaseModel):
     expected_revision: int = Field(ge=0, le=1_000_000, strict=True)
 
 
+class HumanProviderCandidateRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    provider_reference: str = Field(pattern=r"^[A-Za-z0-9._:-]{1,160}$")
+
+
+class HumanUncertainReviewRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    note: str = Field(min_length=10, max_length=2000)
+
+
 
 
 class CommandBridgeManagePayload(BaseModel):
@@ -1513,6 +1523,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except HumanInboxDenied as exc:
             raise HTTPException(status_code=404, detail="inbox.not_found") from exc
+
+    @app.get("/v1/inbox/outbound-operations")
+    def human_outbound_review_queue(
+        request: Request,
+        limit: int = Query(default=50, ge=1, le=100),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
+    ) -> dict:
+        return request.app.state.human_whatsapp_outbox.review_queue(
+            principal=principal, limit=limit,
+        )
+
+    @app.post("/v1/inbox/{conversation_id}/outbound/{message_id}/investigate")
+    def investigate_human_outbound(
+        conversation_id: str, message_id: str, payload: HumanProviderCandidateRequest,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_RESPOND)),
+    ) -> dict:
+        if evolution_onboarding is None:
+            raise HTTPException(status_code=503, detail="inbox.provider_unavailable")
+        try:
+            return request.app.state.human_whatsapp_outbox.investigate_uncertain(
+                principal=principal, conversation_id=conversation_id,
+                message_id=message_id, candidate_reference=payload.provider_reference,
+                integrations=integration_repository,
+                transport=evolution_onboarding._transport,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503, detail="inbox.provider_evidence_unavailable",
+            ) from exc
+
+    @app.post("/v1/inbox/{conversation_id}/outbound/{message_id}/review")
+    def review_human_uncertain_outbound(
+        conversation_id: str, message_id: str, payload: HumanUncertainReviewRequest,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_HANDOFF)),
+    ) -> dict:
+        try:
+            return request.app.state.human_whatsapp_outbox.review_uncertain(
+                principal=principal, conversation_id=conversation_id,
+                message_id=message_id, note=payload.note,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/inbox/{conversation_id}/return-to-ai")
     def return_human_conversation_to_ai(

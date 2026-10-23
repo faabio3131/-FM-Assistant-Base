@@ -54,7 +54,10 @@ label{font-weight:600;font-size:13px}
 <button id="previous" disabled>Anterior</button>
 <button id="next" disabled>Próxima</button></nav>
 <p id="notice" role="status" aria-live="polite"></p>
-<div id="queue"></div><h3>Agentes disponíveis</h3>
+<div id="queue"></div>
+<h3>Envios WhatsApp pendentes ou incertos</h3>
+<div id="outbox-operations" class="meta">Carregando operações...</div>
+<h3>Agentes disponíveis</h3>
 <div id="agents" class="meta">Carregando presença...</div>
 <h3>Limites operacionais</h3><p class="meta">Ajuste permitido aos gestores.</p>
 <label for="sla-minutes">Tempo máximo de espera (minutos)</label>
@@ -72,7 +75,16 @@ label{font-weight:600;font-size:13px}
 <div id="reply-panel" hidden><h3 id="reply-heading">Resposta humana</h3>
 <label for="reply">Mensagem ao cliente</label><textarea id="reply" maxlength="20000"></textarea>
 <button class="primary" id="send-reply">Enviar resposta</button>
-<button id="check-reply" hidden>Consultar situação do envio</button></div>
+<button id="check-reply" hidden>Consultar situação do envio</button>
+<div id="uncertain-review" hidden><h3>Investigar envio incerto</h3>
+<p class="meta">Uma evidência candidata não prova entrega e não libera reenvio.</p>
+<label for="candidate-ref">ID da mensagem no provedor (se encontrado)</label>
+<input id="candidate-ref" maxlength="160">
+<button id="investigate">Consultar evidência no provedor</button>
+<label for="review-note">Nota da revisão administrativa</label>
+<textarea id="review-note" maxlength="2000"></textarea>
+<button id="review">Registrar revisão sem liberar reenvio</button></div>
+</div>
 <h3>Transferir para agente da unidade</h3>
 <label for="target">ID do agente</label><input id="target" maxlength="64"
  placeholder="Identificador do usuário">
@@ -130,9 +142,36 @@ async function load() {
     }
     if(!result.items.length)box.append(elt("p","empty","Nenhuma conversa aguardando."));
     note(result.items.length+" conversa(s) nesta página.");
-    await refreshAgents();
+    await refreshAgents();await refreshOutbox();
   }catch(error){note("Não foi possível carregar a fila: "+error.message);}
   finally{busy=false;$("refresh").disabled=false;}
+}
+async function refreshOutbox(){
+  try{
+    const result=await api("/v1/inbox/outbound-operations?limit=50");
+    $("outbox-operations").replaceChildren();
+    if(!result.items.length)
+      $("outbox-operations").textContent="Sem envios humanos pendentes.";
+    for(const item of result.items){
+      const button=elt("button","item",
+        item.status+" • "+item.message_id.slice(0,8)+
+        (item.reviewed?" • revisado":""));
+      button.onclick=()=>{
+        current=item.conversation_id;selectedChannel="whatsapp";
+        pendingReplyId=item.message_id;
+        $("controls").hidden=false;$("reply-panel").hidden=false;
+        $("send-reply").disabled=true;$("check-reply").hidden=false;
+        $("uncertain-review").hidden=item.status!=="sending_uncertain";
+        $("detail").replaceChildren(
+          elt("strong","","Operação WhatsApp sob acompanhamento"),
+          elt("p","meta","ID da mensagem: "+item.message_id),
+          elt("p","meta","Estado: "+item.status),
+        );
+        activity();
+      };
+      $("outbox-operations").append(button);
+    }
+  }catch{$("outbox-operations").textContent="Operações indisponíveis.";}
 }
 async function refreshAgents(){
   try{
@@ -153,6 +192,7 @@ async function loadPolicy(){
 }
 async function select(item) {
   current=item.conversation_id;pendingReplyId=null;$("controls").hidden=false;
+  $("send-reply").disabled=false;$("uncertain-review").hidden=true;
   selectedChannel=item.channel;$("reply-panel").hidden=false;
   $("check-reply").hidden=true;
   $("reply-heading").textContent=item.channel==="whatsapp"?
@@ -223,11 +263,42 @@ $("check-reply").onclick=async()=>{
   if(!current||!pendingReplyId)return;
   try{const status=await api("/v1/inbox/"+encodeURIComponent(current)+
     "/outbound/"+encodeURIComponent(pendingReplyId));
-    note("Situação do envio no VendeAtendeIA: "+status.status+
-      ". Confirmação do provedor não equivale a leitura pelo destinatário.");
+    note("Situação do envio: "+status.status+
+      (status.delivery_status?" • transportador: "+status.delivery_status:"")+
+      (status.provider_candidate?" • evidência candidata (não conclusiva)":"")+
+      ". ACK não equivale a entrega ou leitura.");
+    $("uncertain-review").hidden=status.status!=="sending_uncertain";
     if(status.status==="provider_acknowledged"){
       $("reply").value="";pendingReplyId=null;$("check-reply").hidden=true;}
   }catch{note("Não foi possível consultar o estado do envio.");}
+};
+$("investigate").onclick=async()=>{
+  if(!current||!pendingReplyId)return;
+  const ref=$("candidate-ref").value.trim();
+  if(!/^[A-Za-z0-9._:-]{1,160}$/.test(ref)){
+    note("Informe um ID de mensagem válido do provedor.");return;
+  }
+  try{
+    const result=await api("/v1/inbox/"+encodeURIComponent(current)+"/outbound/"+
+      encodeURIComponent(pendingReplyId)+"/investigate","POST",
+      {provider_reference:ref});
+    note(result.status==="candidate_only"?
+      "Evidência candidata encontrada; a entrega continua não comprovada.":
+      "Nenhuma evidência correspondente encontrada.");
+  }catch{note("Investigação não concluída. Nenhum reenvio foi realizado.");}
+};
+$("review").onclick=async()=>{
+  if(!current||!pendingReplyId)return;
+  const value=$("review-note").value.trim();
+  if(value.length<10){note("A revisão exige uma justificativa.");return;}
+  try{
+    const result=await api("/v1/inbox/"+encodeURIComponent(current)+"/outbound/"+
+      encodeURIComponent(pendingReplyId)+"/review","POST",{note:value});
+    note(result.status==="reviewed_uncertain"?
+      "Revisão registrada; envio continua incerto e bloqueado contra reenvio.":
+      "Revisão não alterou o estado.");
+    await refreshOutbox();
+  }catch{note("A revisão exige permissão administrativa ou estado incerto.");}
 };
 $("send-reply").onclick=()=>{const value=$("reply").value.trim();
   if(value){pendingReplyId ||= crypto.randomUUID();
