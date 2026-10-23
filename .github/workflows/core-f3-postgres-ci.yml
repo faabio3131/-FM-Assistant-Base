@@ -1,0 +1,46 @@
+name: F3 Quota PostgreSQL Security Gate
+
+on:
+  push:
+    branches:
+      - main
+      - feat/**
+  pull_request:
+
+jobs:
+  quota-postgres:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/fm-core
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: core_f3
+          POSTGRES_USER: core_f3
+          POSTGRES_PASSWORD: synthetic_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U core_f3 -d core_f3"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      FM_CORE_F3_POSTGRES_TEST_URL: postgresql+psycopg://core_f3:synthetic_ci_only@localhost:5432/core_f3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/fm-core/pyproject.toml
+      - name: Install test-only PostgreSQL driver
+        run: |
+          python -m pip install -e ".[dev]" "psycopg[binary]>=3.2,<4"
+          python -m pip check
+      - name: Ruff PostgreSQL quota test
+        run: ruff check tests/service/test_ai_quota_postgres.py
+      - name: Real PostgreSQL migration and concurrent reservations
+        run: pytest tests/service/test_ai_quota_postgres.py -q -rs
