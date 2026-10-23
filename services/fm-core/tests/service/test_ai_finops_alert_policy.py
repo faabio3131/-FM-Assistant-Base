@@ -94,7 +94,7 @@ def test_policy_rejects_malformed_or_unauthorized_mutations(store, changes):
         set_policy(policies, **changes)
 
 
-def test_http_requires_both_service_identity_and_recent_human_step_up(store):
+def test_http_requires_both_service_identity_and_recent_human_step_up(store, monkeypatch):
     from fastapi import FastAPI
 
     policies, sessions = store
@@ -214,3 +214,65 @@ def test_http_requires_both_service_identity_and_recent_human_step_up(store):
     with sessions() as db:
         row = db.get(AIFinOpsAlertOutboxRecord, event_id)
         assert row.status == "reviewed" and row.reviewed_at is not None
+
+    # F3 regression: page 0 import must not shift the records on later pages.
+    # Feed is mocked locally; no supplier or credential is contacted.
+    from core import ai_finops_policy_api as finops_api
+    from core.ai_provider_billing_export import ProviderExportPolicy, ProviderExportRecord
+    from core.ai_usage_ledger import AIUsageRecord
+
+    observed_at = datetime.now(UTC)
+    with sessions.begin() as db:
+        for index in range(3):
+            db.add(AIUsageRecord(
+                event_id=f"feed-event-{index}", attempt_id=f"feed-attempt-{index}",
+                tenant_id="tenant-a", unit_id="unit-a", request_id=f"feed-req-{index}",
+                correlation_id=f"feed-corr-{index}", capability="text",
+                provider="provider-a", model="model-a", route_reason="primary",
+                fallback_used=False, fallback_reason=None,
+                input_tokens=12, output_tokens=5, cached_tokens=None,
+                latency_ms=4, outcome="success", cost_decimal="0.004",
+                currency="USD", cost_origin="estimated",
+                price_snapshot_id="price-a", event_time=observed_at,
+            ))
+    seen_attempts = []
+    monkeypatch.setattr(finops_api, "configured_feed", lambda _provider, _account: object())
+
+    def provider_report(*, config, tenant_id, unit_id, attempts):
+        del config
+        seen_attempts.extend(row["attempt_id"] for row in attempts)
+        return ProviderExportPolicy(
+            provider="provider-a", adapter="openai_compatible",
+            account_ref="fm-account",
+        ), tuple(ProviderExportRecord(
+            provider="provider-a", model=row["model"],
+            tenant_id=tenant_id, unit_id=unit_id,
+            request_id=row["request_id"], attempt_id=row["attempt_id"],
+            account_ref="fm-account", source_ref="report-" + row["attempt_id"],
+            observed_at=observed_at,
+            usage={"prompt_tokens": 12, "completion_tokens": 5},
+            cost_usd="0.004",
+        ) for row in attempts)
+
+    monkeypatch.setattr(finops_api, "fetch_observations", provider_report)
+    sync_path = "/internal/v1/command/ai/finops/provider-export/sync"
+    sync_body = {
+        "tenant_id": "tenant-a", "unit_id": "unit-a",
+        "provider": "provider-a", "account_ref": "fm-account",
+        "start_date": observed_at.date().isoformat(),
+        "end_date": observed_at.date().isoformat(), "limit": 1,
+    }
+    for page in range(3):
+        response = http.post(
+            sync_path, json={**sync_body, "page": page}, headers={
+                **headers, "Authorization": "Bearer " +
+                jwt_for(f"feed-admin-jti-{page}-distinct"),
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["created"] == 1
+        assert response.json()["quota_recovery_authorized"] is False
+        assert response.json()["next_page"] == (page + 1 if page < 2 else None)
+    assert seen_attempts == [
+        "feed-attempt-0", "feed-attempt-1", "feed-attempt-2",
+    ]
