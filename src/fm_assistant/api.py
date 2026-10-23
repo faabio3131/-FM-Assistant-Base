@@ -704,9 +704,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine.dispose()
 
     app = FastAPI(
-        title="FM Assistant Base",
+        title="VendeAtendeIA",
         version="0.1.0",
-        description="Base SaaS multi-tenant para agentes de atendimento.",
+        description="SaaS único de atendimento e vendas com motor Core de IA interno.",
         lifespan=lifespan,
     )
 
