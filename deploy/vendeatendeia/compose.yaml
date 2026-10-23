@@ -1,0 +1,84 @@
+# One VendeAtendeIA product. No automatic migration or production cutover.
+name: vendeatendeia
+
+x-assistant: &assistant
+  env_file: ../../.env
+  environment:
+    FM_ASSISTANT_MODEL_BACKEND: core
+    FM_ASSISTANT_CORE_BASE_URL: http://core:8000
+    FM_ASSISTANT_CORE_SERVICE_KEY: ${FM_VENDEATENDEIA_INTERNAL_KEY:?internal_key_required}
+    FM_ASSISTANT_ENV: ${FM_ASSISTANT_ENV:-development}
+  networks: [product]
+
+services:
+  core:
+    build:
+      context: ../..
+      dockerfile: deploy/vendeatendeia/Dockerfile.core
+    image: vendeatendeia/core:local
+    env_file: ../../.env
+    environment:
+      FM_CORE_SERVICE_KEY: ${FM_VENDEATENDEIA_INTERNAL_KEY:?internal_key_required}
+      FM_CORE_ENV: ${FM_CORE_ENV:-development}
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
+    restart: unless-stopped
+    networks: [product]
+
+  assistant:
+    <<: *assistant
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: vendeatendeia/assistant:local
+    depends_on:
+      core:
+        condition: service_healthy
+    ports:
+      - "${FM_VENDEATENDEIA_HTTP_BIND:-127.0.0.1}:${FM_VENDEATENDEIA_HTTP_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    restart: unless-stopped
+
+  evolution-inbound:
+    <<: *assistant
+    profiles: [evolution]
+    image: vendeatendeia/assistant:local
+    command: ["python", "-m", "fm_assistant.evolution_worker", "--batch", "10", "--sleep", "2"]
+    depends_on:
+      assistant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  evolution-human-outbound:
+    <<: *assistant
+    profiles: [evolution]
+    image: vendeatendeia/assistant:local
+    command: ["python", "-m", "fm_assistant.human_whatsapp_worker"]
+    depends_on:
+      assistant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  meta-human-outbound:
+    <<: *assistant
+    profiles: [meta]
+    image: vendeatendeia/assistant:local
+    command: ["python", "-m", "fm_assistant.human_meta_whatsapp_worker"]
+    depends_on:
+      assistant:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  product:
+    driver: bridge

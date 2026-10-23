@@ -189,6 +189,34 @@ def register_admin_read_routes(app: FastAPI) -> None:
             "provider_invoice_verified": False,
         }, headers={"Cache-Control": "no-store"})
 
+    @router.get("/usage/provider-export/coverage")
+    def provider_export_coverage(
+        request: Request,
+        tenant_id: str = Query(min_length=1, max_length=128),
+        unit_id: str = Query(min_length=1, max_length=128),
+        start_date: date = Query(),
+        end_date: date = Query(),
+        page: int = Query(default=0, ge=0, le=20000),
+        limit: int = Query(default=50, ge=1, le=100),
+        only_missing: bool = False,
+    ) -> JSONResponse:
+        """Inventory physical attempts, missing exports and mismatches."""
+        try:
+            result = PersistentProviderExportStore(_sessions(request)).coverage(
+                tenant_id=tenant_id, unit_id=unit_id,
+                start_date=start_date, end_date=end_date,
+                page=page, limit=limit, only_missing=only_missing,
+            )
+        except ControlPlaneError as exc:
+            raise HTTPException(
+                status_code=422, detail="core_finops.export_coverage_invalid",
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503, detail="core_finops.export_coverage_unavailable",
+            ) from exc
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
     @router.get("/usage/provider-export")
     def provider_export_comparison(
         request: Request,

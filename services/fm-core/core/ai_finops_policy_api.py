@@ -74,6 +74,13 @@ class ProviderExportImportPayload(BaseModel):
     cost_usd: str | None = Field(default=None, max_length=80)
 
 
+class ProviderExportBatchPayload(BaseModel):
+    """Bounded FM-admin import. Each record names its physical Core attempt."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    records: list[ProviderExportImportPayload] = Field(min_length=1, max_length=50)
+
+
 def finops_alert_policy_router(
     *, trust: CommandTrustPolicy, transport_key: str,
 ) -> APIRouter:
@@ -248,6 +255,54 @@ def finops_alert_policy_router(
             "unit_id": payload.unit_id, "request_id": payload.request_id,
             "attempt_id": payload.attempt_id,
             "provider_invoice_verified": False,
+            "quota_recovery_authorized": False,
+        }
+
+    @router.post("/ai/finops/provider-export/batch")
+    def import_provider_export_batch(
+        payload: ProviderExportBatchPayload,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_fm_recovery_service_key: str | None = Header(
+            default=None, alias="X-FM-Recovery-Service-Key",
+        ),
+    ) -> dict[str, object]:
+        """No machine impersonation: batch needs genuine FM admin JWT step-up."""
+        principal = require_fm_admin(authorization, x_fm_recovery_service_key)
+        engine = getattr(request.app.state, "control_plane_engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="core_finops.export_unavailable")
+        first = payload.records[0]
+        if any(
+            (part.tenant_id, part.unit_id, part.provider, part.account_ref, part.adapter)
+            != (first.tenant_id, first.unit_id, first.provider, first.account_ref,
+                first.adapter)
+            for part in payload.records
+        ):
+            raise HTTPException(status_code=409, detail="core_finops.export_batch_scope_invalid")
+        try:
+            policy = ProviderExportPolicy(
+                provider=first.provider, adapter=first.adapter,
+                account_ref=first.account_ref, max_age_seconds=31 * 86400,
+            )
+            records = tuple(ProviderExportRecord(
+                provider=part.provider, model=part.model,
+                tenant_id=part.tenant_id, unit_id=part.unit_id,
+                request_id=part.request_id, attempt_id=part.attempt_id,
+                account_ref=part.account_ref, source_ref=part.source_ref,
+                observed_at=part.observed_at, usage=part.usage,
+                cost_usd=part.cost_usd,
+            ) for part in payload.records)
+            outcome = PersistentProviderExportStore(
+                sessionmaker(engine, expire_on_commit=False),
+            ).import_batch(policy=policy, records=records, principal=principal)
+        except ControlPlaneError as exc:
+            raise HTTPException(status_code=409, detail="core_finops.export_batch_rejected") from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(status_code=503, detail="core_finops.export_unavailable") from exc
+        return {
+            **outcome, "tenant_id": first.tenant_id, "unit_id": first.unit_id,
+            "provider": first.provider, "provider_invoice_verified": False,
             "quota_recovery_authorized": False,
         }
 
