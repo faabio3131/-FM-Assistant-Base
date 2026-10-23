@@ -265,6 +265,7 @@ class PersistentProviderExportStore:
         start_date: date, end_date: date,
         page: int = 0, limit: int = 50,
         only_missing: bool = False,
+        provider: str | None = None,
     ) -> dict[str, object]:
         """Bounded per-attempt coverage; observations are not invoice evidence.
 
@@ -280,6 +281,9 @@ class PersistentProviderExportStore:
             or type(page) is not int or not 0 <= page <= 20_000
             or type(limit) is not int or not 1 <= limit <= 100
             or type(only_missing) is not bool
+            or (provider is not None and (
+                type(provider) is not str or not 1 <= len(provider) <= 128
+            ))
         ):
             raise ControlPlaneError("core_finops.export_coverage_invalid")
         start_at = datetime.combine(start_date, time.min, tzinfo=UTC)
@@ -300,6 +304,8 @@ class PersistentProviderExportStore:
         )
         if only_missing:
             predicate.append(AIProviderExportRecord.digest.is_(None))
+        if provider is not None:
+            predicate.append(AIUsageRecord.provider == provider)
         with self._sessions() as db:
             rows = db.execute(
                 select(AIUsageRecord, AIProviderExportRecord)

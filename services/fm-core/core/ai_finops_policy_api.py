@@ -20,6 +20,7 @@ from core.ai_control_plane import ControlPlaneError
 from core.ai_finops_alert_outbox import PersistentFinOpsAlertOutbox
 from core.ai_finops_policy_store import PersistentFinOpsAlertPolicies
 from core.ai_provider_billing_export import ProviderExportPolicy, ProviderExportRecord
+from core.ai_provider_export_feed import configured_feed, fetch_observations
 from core.ai_provider_export_store import PersistentProviderExportStore
 
 _NONNEGATIVE_DECIMAL = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,12})?$")
@@ -72,6 +73,20 @@ class ProviderExportImportPayload(BaseModel):
     observed_at: datetime
     usage: dict[str, int | None] = Field(max_length=12)
     cost_usd: str | None = Field(default=None, max_length=80)
+
+
+class ProviderExportSyncPayload(BaseModel):
+    """Operator-triggered FM-managed source. No URL or secret in request."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tenant_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    unit_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    provider: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")
+    account_ref: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")
+    start_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    page: int = Field(default=0, ge=0, le=20000, strict=True)
+    limit: int = Field(default=25, ge=1, le=50, strict=True)
 
 
 class ProviderExportBatchPayload(BaseModel):
@@ -254,6 +269,69 @@ def finops_alert_policy_router(
             "status": result, "tenant_id": payload.tenant_id,
             "unit_id": payload.unit_id, "request_id": payload.request_id,
             "attempt_id": payload.attempt_id,
+            "provider_invoice_verified": False,
+            "quota_recovery_authorized": False,
+        }
+
+    @router.post("/ai/finops/provider-export/sync")
+    def sync_configured_provider_export(
+        payload: ProviderExportSyncPayload,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_fm_recovery_service_key: str | None = Header(
+            default=None, alias="X-FM-Recovery-Service-Key",
+        ),
+    ) -> dict[str, object]:
+        """Fetch configured source -> validate physical attempts -> atomic import.
+
+        Server owns the feed URL/credential. Human FM authority authorizes
+        the import; observational usage is never payment/settlement proof.
+        """
+        principal = require_fm_admin(authorization, x_fm_recovery_service_key)
+        engine = getattr(request.app.state, "control_plane_engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="core_finops.export_unavailable")
+        try:
+            config = configured_feed(payload.provider, payload.account_ref)
+            store = PersistentProviderExportStore(
+                sessionmaker(engine, expire_on_commit=False),
+            )
+            coverage = store.coverage(
+                tenant_id=payload.tenant_id, unit_id=payload.unit_id,
+                start_date=date.fromisoformat(payload.start_date),
+                end_date=date.fromisoformat(payload.end_date),
+                page=payload.page, limit=payload.limit,
+                only_missing=True, provider=payload.provider,
+            )
+            attempts = [{
+                "request_id": row["request_id"],
+                "attempt_id": row["attempt_id"],
+                "model": row["model"],
+            } for row in coverage["items"]]
+            if not attempts:
+                return {
+                    "created": 0, "already_recorded": 0,
+                    "unreported": 0, "scanned": 0,
+                    "next_page": coverage["next_page"],
+                    "provider_invoice_verified": False,
+                    "quota_recovery_authorized": False,
+                }
+            policy, records = fetch_observations(
+                config=config, tenant_id=payload.tenant_id,
+                unit_id=payload.unit_id, attempts=attempts,
+            )
+            outcome = (
+                store.import_batch(policy=policy, records=records, principal=principal)
+                if records else {"created": 0, "already_recorded": 0}
+            )
+        except (ControlPlaneError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail="core_finops.feed_sync_rejected") from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(status_code=503, detail="core_finops.export_unavailable") from exc
+        return {
+            **outcome, "scanned": len(attempts),
+            "unreported": len(attempts) - len(records),
+            "next_page": coverage["next_page"],
             "provider_invoice_verified": False,
             "quota_recovery_authorized": False,
         }
