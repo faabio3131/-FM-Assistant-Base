@@ -69,3 +69,13 @@ def test_production_accepts_core_backend_configuration():
 
     assert settings.production_like is True
     assert settings.model_backend == "core"
+
+
+@pytest.mark.parametrize("unsafe", [
+    "http://core.internal", "https://user:secret@core.internal",
+    "https://core.internal/proxy", "https://core.internal?key=a",
+    "https://core.internal/#fragment",
+])
+def test_production_rejects_untrusted_core_origin(unsafe):
+    with pytest.raises(RuntimeError, match="FM_ASSISTANT_CORE_TLS_REQUIRED"):
+        _settings(core_base_url=unsafe).validate()

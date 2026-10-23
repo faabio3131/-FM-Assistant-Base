@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -155,8 +156,6 @@ class Settings:
         if self.evolution_provider_family != "evolution_v2_whatsapp_baileys":
             raise RuntimeError("FM_ASSISTANT_EVOLUTION_PROVIDER_FAMILY_UNSUPPORTED")
         if self.evolution_native_webhook_base_url:
-            from urllib.parse import urlsplit
-
             url = urlsplit(self.evolution_native_webhook_base_url)
             if (
                 url.scheme != "https" or not url.hostname
@@ -208,10 +207,18 @@ class Settings:
                     "FM_ASSISTANT_CORE_BASE_URL e FM_ASSISTANT_CORE_SERVICE_KEY "
                     "são obrigatórios para backend core"
                 )
-            if self.production_like and len(self.core_service_key or "") < 32:
-                raise RuntimeError(
-                    "FM_ASSISTANT_CORE_SERVICE_KEY deve ter ao menos 32 caracteres"
-                )
+            if self.production_like:
+                origin = urlsplit(self.core_base_url or "")
+                if (
+                    origin.scheme != "https" or not origin.hostname
+                    or origin.username or origin.password or origin.query
+                    or origin.fragment or origin.path not in {"", "/"}
+                ):
+                    raise RuntimeError("FM_ASSISTANT_CORE_TLS_REQUIRED")
+                if len(self.core_service_key or "") < 32:
+                    raise RuntimeError(
+                        "FM_ASSISTANT_CORE_SERVICE_KEY deve ter ao menos 32 caracteres"
+                    )
         return self
 
 

@@ -13,12 +13,13 @@ from fm_assistant.core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from fm_assistant.provider_usage_reconciliation import from_trusted_core_receipt
 
 
-def _stub_metering_client(monkeypatch, handler):
+def _stub_metering_client(monkeypatch, handler, post_handler=None):
     class StubHTTP:
         def __init__(self, **options):
             assert options["trust_env"] is False
             assert options["follow_redirects"] is False
-            assert options["timeout"] == 3.0
+            assert options["timeout"] in {3.0, 30.0}
+            self._timeout = options["timeout"]
 
         def __enter__(self):
             return self
@@ -28,6 +29,10 @@ def _stub_metering_client(monkeypatch, handler):
 
         def get(self, url, **kwargs):
             return handler(url, **kwargs)
+
+        def post(self, url, **kwargs):
+            assert post_handler is not None
+            return post_handler(url, timeout=self._timeout, **kwargs)
 
     monkeypatch.setattr("fm_assistant.core_plan_usage_reader.httpx.Client", StubHTTP)
 
@@ -54,8 +59,7 @@ def test_core_generation_and_authoritative_metering_remain_separate(monkeypatch)
             "remaining_units": 1700, "observed_at": datetime.now(UTC).isoformat(),
         })
 
-    monkeypatch.setattr(httpx, "post", post)
-    _stub_metering_client(monkeypatch, get)
+    _stub_metering_client(monkeypatch, get, post_handler=post)
     client = CoreAIClient(
         base_url="https://core.internal.test", service_key="synthetic-internal-key",
     )
