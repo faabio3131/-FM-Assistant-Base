@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 import core.ai_admin_audit as admin_audit
 import core.ai_circuit_state_store
-import core.ai_finops_alert_outbox  # noqa: F401 - registers alert outbox table
+import core.ai_finops_alert_outbox
 import core.ai_quota_store  # noqa: F401 - registers quota reservation tables
 from core.ai_control_plane import AIControlPlaneStore, ControlPlaneBase
 from core.ai_control_plane_runtime import (
