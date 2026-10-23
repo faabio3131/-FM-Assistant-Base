@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
