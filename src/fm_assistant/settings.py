@@ -156,8 +156,6 @@ class Settings:
         if self.evolution_provider_family != "evolution_v2_whatsapp_baileys":
             raise RuntimeError("FM_ASSISTANT_EVOLUTION_PROVIDER_FAMILY_UNSUPPORTED")
         if self.evolution_native_webhook_base_url:
-            from urllib.parse import urlsplit
-
             url = urlsplit(self.evolution_native_webhook_base_url)
             if (
                 url.scheme != "https" or not url.hostname
