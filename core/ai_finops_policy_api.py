@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hmac
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -19,6 +19,8 @@ from core.ai_command_authority import (
 from core.ai_control_plane import ControlPlaneError
 from core.ai_finops_alert_outbox import PersistentFinOpsAlertOutbox
 from core.ai_finops_policy_store import PersistentFinOpsAlertPolicies
+from core.ai_provider_billing_export import ProviderExportPolicy, ProviderExportRecord
+from core.ai_provider_export_store import PersistentProviderExportStore
 
 _NONNEGATIVE_DECIMAL = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,12})?$")
 
@@ -51,6 +53,25 @@ class AlertReviewPayload(BaseModel):
     tenant_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
     unit_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
     event_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ProviderExportImportPayload(BaseModel):
+    """Import observational usage after FM admin step-up; no provider invoices."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tenant_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    unit_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    request_id: str = Field(min_length=1, max_length=128)
+    attempt_id: str = Field(min_length=1, max_length=128)
+    provider: str = Field(min_length=1, max_length=128)
+    model: str = Field(min_length=1, max_length=200)
+    adapter: str = Field(pattern=r"^(openai_compatible|gemini)$")
+    account_ref: str = Field(min_length=1, max_length=128)
+    source_ref: str = Field(min_length=1, max_length=128)
+    observed_at: datetime
+    usage: dict[str, int | None] = Field(max_length=12)
+    cost_usd: str | None = Field(default=None, max_length=80)
 
 
 def finops_alert_policy_router(
@@ -180,5 +201,54 @@ def finops_alert_policy_router(
             raise HTTPException(status_code=409, detail="core_finops.alert_conflict") from exc
         except SQLAlchemyError as exc:
             raise HTTPException(status_code=503, detail="core_finops.alert_unavailable") from exc
+
+    @router.post("/ai/finops/provider-export")
+    def import_provider_export(
+        payload: ProviderExportImportPayload,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_fm_recovery_service_key: str | None = Header(
+            default=None, alias="X-FM-Recovery-Service-Key",
+        ),
+    ) -> dict[str, object]:
+        """FM-controlled import; traceable, scoped and never billable itself."""
+        principal = require_fm_admin(authorization, x_fm_recovery_service_key)
+        engine = getattr(request.app.state, "control_plane_engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="core_finops.export_unavailable")
+        try:
+            policy = ProviderExportPolicy(
+                provider=payload.provider, adapter=payload.adapter,
+                account_ref=payload.account_ref,
+                max_age_seconds=31 * 86400,
+            )
+            record = ProviderExportRecord(
+                provider=payload.provider, model=payload.model,
+                tenant_id=payload.tenant_id, unit_id=payload.unit_id,
+                request_id=payload.request_id, attempt_id=payload.attempt_id,
+                account_ref=payload.account_ref, source_ref=payload.source_ref,
+                observed_at=payload.observed_at, usage=payload.usage,
+                cost_usd=payload.cost_usd,
+            )
+            result = PersistentProviderExportStore(
+                sessionmaker(engine, expire_on_commit=False),
+            ).import_snapshot(
+                policy=policy, record=record, principal=principal,
+            )
+        except ControlPlaneError as exc:
+            raise HTTPException(
+                status_code=409, detail="core_finops.export_rejected",
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503, detail="core_finops.export_unavailable",
+            ) from exc
+        return {
+            "status": result, "tenant_id": payload.tenant_id,
+            "unit_id": payload.unit_id, "request_id": payload.request_id,
+            "attempt_id": payload.attempt_id,
+            "provider_invoice_verified": False,
+            "quota_recovery_authorized": False,
+        }
 
     return router
