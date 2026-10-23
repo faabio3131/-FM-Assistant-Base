@@ -1,0 +1,550 @@
+"""F3: ledger de consumo e custos estimados com origem explicita.
+
+O custo desconhecido nunca vira 0 contabil: cost_total em FinOps representa
+somente os eventos conhecidos, e cost_unknown_events e obrigatorio para leitura.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
+from decimal import Decimal, InvalidOperation
+from hashlib import sha256
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, case, func, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
+
+from core.ai_control_plane import ControlPlaneBase, ControlPlaneError
+from core.ai_cost import CalculadoraCustoIA, OrigemCustoIA
+from core.ai_finops import AIFinOpsBucket
+from core.ai_pricing import (
+    CatalogoPrecosIAEmMemoria,
+    PriceSnapshotIA,
+    SnapshotPrecoAusente,
+    TarifaIA,
+)
+from core.ai_router import AIUsageEvent
+
+
+class AIPriceSnapshotRecord(ControlPlaneBase):
+    __tablename__ = "core_ai_price_snapshots"
+
+    price_snapshot_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(128), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    modalidade: Mapped[str] = mapped_column(String(40), nullable=False)
+    moeda: Mapped[str] = mapped_column(String(3), nullable=False)
+    versao: Mapped[int] = mapped_column(Integer, nullable=False)
+    vigencia_inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    vigencia_fim: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AIPriceTariffRecord(ControlPlaneBase):
+    __tablename__ = "core_ai_price_tariffs"
+
+    tariff_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    price_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("core_ai_price_snapshots.price_snapshot_id"), nullable=False
+    )
+    componente: Mapped[str] = mapped_column(String(80), nullable=False)
+    preco_decimal: Mapped[str] = mapped_column(String(80), nullable=False)
+    unidades_por_preco: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class AIUsageRecord(ControlPlaneBase):
+    __tablename__ = "core_ai_usage_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempt_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    unit_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    capability: Mapped[str] = mapped_column(String(80), nullable=False)
+    provider: Mapped[str] = mapped_column(String(128), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    route_reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    fallback_used: Mapped[bool] = mapped_column(nullable=False)
+    fallback_reason: Mapped[str | None] = mapped_column(String(200))
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    cached_tokens: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False)
+    cost_decimal: Mapped[str | None] = mapped_column(String(80))
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    cost_origin: Mapped[str] = mapped_column(String(40), nullable=False)
+    price_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("uq_core_ai_usage_physical_attempt",
+              "tenant_id", "unit_id", "request_id", "attempt_id", unique=True),
+    )
+
+
+def _utc(value: datetime) -> datetime:
+    # SQLite nao devolve timezone, embora PostgreSQL preserve TIMESTAMPTZ.
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _observed_cost(value: str | None) -> Decimal | None:
+    """Check each provider attempt separately, before cost aggregation.
+
+    Offsetting a negative or corrupt record with a positive one would forge
+    a plausible subtotal and hide a damaged ledger in FM Command.
+    """
+    if value is None:
+        return None
+    try:
+        amount = Decimal(value)
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ControlPlaneError("core_finops.invalid_known_cost") from exc
+    if not amount.is_finite() or amount < 0:
+        raise ControlPlaneError("core_finops.invalid_known_cost")
+    return amount
+
+
+@dataclass(frozen=True, kw_only=True)
+class AIRequestCostSummary:
+    """No false cost=zero when provider attempts lack trustworthy usage."""
+
+    tenant_id: str
+    unit_id: str
+    request_id: str
+    currency: str | None
+    known_total: Decimal
+    known_attempts: int
+    unknown_attempts: int
+    total_attempts: int
+    fallback_attempts: int
+    all_recorded_costs_known: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class AIReconciliationBacklogItem:
+    """Observed unresolved attempts in a bounded window, never provider invoice proof."""
+
+    request_id: str
+    first_seen: datetime
+    last_seen: datetime
+    observed_attempts: int
+    unknown_cost_attempts: int
+    incomplete_token_attempts: int
+    fallback_attempts: int
+
+
+class PersistentAIFinOps:
+    """Catalogo imutavel por API e ledger idempotente, filtrado por tenant/unidade."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+        self._calculator = CalculadoraCustoIA()
+
+    @staticmethod
+    def _snapshot(db: Session, snapshot_id: str) -> PriceSnapshotIA:
+        record = db.get(AIPriceSnapshotRecord, snapshot_id)
+        if record is None:
+            raise SnapshotPrecoAusente("price_snapshot_id_nao_encontrado")
+        tariffs = db.scalars(
+            select(AIPriceTariffRecord).where(
+                AIPriceTariffRecord.price_snapshot_id == snapshot_id
+            )
+        ).all()
+        return PriceSnapshotIA(
+            price_snapshot_id=record.price_snapshot_id,
+            provider=record.provider,
+            model=record.model,
+            modalidade=record.modalidade,
+            moeda=record.moeda,
+            versao=record.versao,
+            vigencia_inicio=_utc(record.vigencia_inicio),
+            vigencia_fim=_utc(record.vigencia_fim) if record.vigencia_fim else None,
+            tarifas=tuple(
+                TarifaIA(
+                    componente=item.componente,
+                    preco=Decimal(item.preco_decimal),
+                    unidades_por_preco=item.unidades_por_preco,
+                )
+                for item in tariffs
+            ),
+        )
+
+    def add_price_snapshot(self, snapshot: PriceSnapshotIA) -> None:
+        with self._sessions.begin() as db:
+            ids = db.scalars(select(AIPriceSnapshotRecord.price_snapshot_id)).all()
+            snapshots = tuple(self._snapshot(db, identity) for identity in ids)
+            # Reutiliza o catalogo canônico, inclusive verificacao de vigencias.
+            CatalogoPrecosIAEmMemoria((*snapshots, snapshot))
+            db.add(
+                AIPriceSnapshotRecord(
+                    price_snapshot_id=snapshot.price_snapshot_id,
+                    provider=snapshot.provider,
+                    model=snapshot.model,
+                    modalidade=snapshot.modalidade,
+                    moeda=snapshot.moeda,
+                    versao=snapshot.versao,
+                    vigencia_inicio=snapshot.vigencia_inicio,
+                    vigencia_fim=snapshot.vigencia_fim,
+                )
+            )
+            for tariff in snapshot.tarifas:
+                db.add(
+                    AIPriceTariffRecord(
+                        price_snapshot_id=snapshot.price_snapshot_id,
+                        componente=tariff.componente,
+                        preco_decimal=str(tariff.preco),
+                        unidades_por_preco=tariff.unidades_por_preco,
+                    )
+                )
+
+    @staticmethod
+    def _event_id(event: AIUsageEvent) -> str:
+        fields = (
+            event.tenant_id,
+            event.unidade_id,
+            event.request_id,
+            event.capability.value,
+            event.provider,
+            event.model,
+            event.route_reason,
+            event.price_snapshot_id,
+            event.outcome.value,
+            str(event.fallback_used),
+        )
+        # Preserve historical IDs for legacy recordings with no attempt_id,
+        # while counting each physical provider call (including repeat route)
+        # as its own immutable financial event. Replay of one event stays stable.
+        if event.attempt_id is not None:
+            fields = (*fields, "physical_attempt", event.attempt_id)
+        return sha256("\x1f".join(fields).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _verify_replay(prior: AIUsageRecord, evento: AIUsageEvent) -> None:
+        """Identical physical event is idempotent; changed evidence is forbidden."""
+        original = (
+            prior.tenant_id, prior.unit_id, prior.request_id,
+            prior.correlation_id, prior.capability, prior.provider,
+            prior.model, prior.route_reason, prior.fallback_used,
+            prior.fallback_reason, prior.input_tokens, prior.output_tokens,
+            prior.cached_tokens, prior.latency_ms, prior.outcome,
+            prior.price_snapshot_id, _utc(prior.event_time),
+        )
+        replayed = (
+            evento.tenant_id, evento.unidade_id, evento.request_id,
+            evento.correlation_id, evento.capability.value, evento.provider,
+            evento.model, evento.route_reason, evento.fallback_used,
+            evento.fallback_reason, evento.input_tokens, evento.output_tokens,
+            evento.cached_tokens, evento.latency_ms, evento.outcome.value,
+            evento.price_snapshot_id, _utc(evento.timestamp),
+        )
+        if original != replayed or prior.attempt_id != evento.attempt_id:
+            raise ControlPlaneError("core_finops.attempt_replay_conflict")
+
+    def registrar(self, evento: AIUsageEvent) -> None:
+        event_id = self._event_id(evento)
+        with self._sessions.begin() as db:
+            if evento.attempt_id is not None:
+                same_physical = db.scalar(select(AIUsageRecord).where(
+                    AIUsageRecord.tenant_id == evento.tenant_id,
+                    AIUsageRecord.unit_id == evento.unidade_id,
+                    AIUsageRecord.request_id == evento.request_id,
+                    AIUsageRecord.attempt_id == evento.attempt_id,
+                ).limit(1))
+                if same_physical is not None and same_physical.event_id != event_id:
+                    raise ControlPlaneError("core_finops.physical_attempt_conflict")
+            prior = db.get(AIUsageRecord, event_id)
+            if prior is not None:
+                self._verify_replay(prior, evento)
+                return
+            snapshot: PriceSnapshotIA | None = None
+            try:
+                snapshot = self._snapshot(db, evento.price_snapshot_id)
+            except SnapshotPrecoAusente:
+                pass
+            valid_snapshot = (
+                snapshot is not None
+                and snapshot.provider == evento.provider
+                and snapshot.model == evento.model
+                and snapshot.vigente_em(evento.timestamp)
+            )
+            if valid_snapshot and snapshot is not None:
+                calculated = self._calculator.estimar_tokens(
+                    snapshot=snapshot,
+                    input_tokens=evento.input_tokens,
+                    output_tokens=evento.output_tokens,
+                    cached_tokens=evento.cached_tokens,
+                )
+                value = calculated.valor
+                currency = snapshot.moeda
+                origin = calculated.origem.value
+            else:
+                value = None
+                currency = "XXX"  # ISO 4217: sem moeda conhecida
+                origin = OrigemCustoIA.INDISPONIVEL.value
+            record = AIUsageRecord(
+                    event_id=event_id,
+                    attempt_id=evento.attempt_id,
+                    tenant_id=evento.tenant_id,
+                    unit_id=evento.unidade_id,
+                    request_id=evento.request_id,
+                    correlation_id=evento.correlation_id,
+                    capability=evento.capability.value,
+                    provider=evento.provider,
+                    model=evento.model,
+                    route_reason=evento.route_reason,
+                    fallback_used=evento.fallback_used,
+                    fallback_reason=evento.fallback_reason,
+                    input_tokens=evento.input_tokens,
+                    output_tokens=evento.output_tokens,
+                    cached_tokens=evento.cached_tokens,
+                    latency_ms=evento.latency_ms,
+                    outcome=evento.outcome.value,
+                    cost_decimal=str(value) if value is not None else None,
+                    currency=currency,
+                    cost_origin=origin,
+                    price_snapshot_id=evento.price_snapshot_id,
+                    event_time=evento.timestamp,
+                )
+            try:
+                # A savepoint contains a concurrent unique-key collision.
+                # The outer transaction stays usable to verify the winner.
+                with db.begin_nested():
+                    db.add(record)
+                    db.flush()
+            except IntegrityError as exc:
+                persisted = db.get(AIUsageRecord, event_id)
+                if persisted is not None:
+                    self._verify_replay(persisted, evento)
+                    return
+                if evento.attempt_id is not None:
+                    other = db.scalar(select(AIUsageRecord).where(
+                        AIUsageRecord.tenant_id == evento.tenant_id,
+                        AIUsageRecord.unit_id == evento.unidade_id,
+                        AIUsageRecord.request_id == evento.request_id,
+                        AIUsageRecord.attempt_id == evento.attempt_id,
+                    ).limit(1))
+                    if other is not None:
+                        raise ControlPlaneError(
+                            "core_finops.physical_attempt_conflict"
+                        ) from exc
+                raise ControlPlaneError("core_finops.attempt_write_conflict") from exc
+
+    def listar_pendencias(
+        self, *, tenant_id: str, unit_id: str,
+        inicio: date, fim: date, limit: int = 50,
+    ) -> tuple[tuple[AIReconciliationBacklogItem, ...], bool]:
+        """Find unverified attempts without fetching all events into application memory.
+
+        This is a *windowed observation*, not a statement that a request is
+        fully reconciled elsewhere or that a provider billed nothing.
+        Unknown provider costs and missing input/output tokens are distinct.
+        """
+        if (
+            any(
+                type(value) is not str or not value.strip() or len(value) > 128
+                for value in (tenant_id, unit_id)
+            )
+            or type(inicio) is not date or type(fim) is not date
+            or fim < inicio or (fim - inicio).days >= 31
+            or type(limit) is not int or not 1 <= limit <= 100
+            or fim == date.max
+        ):
+            raise ControlPlaneError("core_finops.pending_scope_invalid")
+
+        start = datetime.combine(inicio, time.min, tzinfo=UTC)
+        end = datetime.combine(date.fromordinal(fim.toordinal() + 1), time.min, tzinfo=UTC)
+        missing_cost = func.sum(case(
+            (AIUsageRecord.cost_decimal.is_(None), 1), else_=0,
+        ))
+        missing_tokens = func.sum(case(
+            (or_(
+                AIUsageRecord.input_tokens.is_(None),
+                AIUsageRecord.output_tokens.is_(None),
+            ), 1), else_=0,
+        ))
+        fallback_count = func.sum(case(
+            (AIUsageRecord.fallback_used.is_(True), 1), else_=0,
+        ))
+        first_seen = func.min(AIUsageRecord.event_time)
+        last_seen = func.max(AIUsageRecord.event_time)
+        query = (
+            select(
+                AIUsageRecord.request_id,
+                first_seen,
+                last_seen,
+                func.count(AIUsageRecord.event_id),
+                missing_cost,
+                missing_tokens,
+                fallback_count,
+            )
+            .where(
+                AIUsageRecord.tenant_id == tenant_id,
+                AIUsageRecord.unit_id == unit_id,
+                AIUsageRecord.event_time >= start,
+                AIUsageRecord.event_time < end,
+            )
+            .group_by(AIUsageRecord.request_id)
+            .having(or_(missing_cost > 0, missing_tokens > 0))
+            .order_by(first_seen, AIUsageRecord.request_id)
+            .limit(limit + 1)
+        )
+        with self._sessions() as db:
+            results = db.execute(query).all()
+        items = tuple(
+            AIReconciliationBacklogItem(
+                request_id=row[0], first_seen=_utc(row[1]), last_seen=_utc(row[2]),
+                observed_attempts=row[3], unknown_cost_attempts=row[4],
+                incomplete_token_attempts=row[5], fallback_attempts=row[6],
+            )
+            for row in results[:limit]
+        )
+        return items, len(results) > limit
+
+    def listar_ids_solicitacoes(
+        self, *, tenant_id: str, unit_id: str,
+        inicio: date, fim: date, after_request_id: str | None = None,
+        limit: int = 50,
+    ) -> tuple[tuple[str, ...], str | None]:
+        """Bounded deterministic pages for a corporate FinOps alert inbox.
+
+        All pages are scoped to one tenant/unit/window. A missing next cursor
+        never proves provider invoicing, only that this observed page ended.
+        """
+        if (
+            any(type(v) is not str or not v.strip() or len(v) > 128
+                for v in (tenant_id, unit_id))
+            or type(inicio) is not date or type(fim) is not date
+            or fim < inicio or (fim - inicio).days >= 31
+            or fim == date.max or type(limit) is not int
+            or not 1 <= limit <= 100
+            or (after_request_id is not None and (
+                type(after_request_id) is not str
+                or not 1 <= len(after_request_id) <= 128
+                or any(c.isspace() for c in after_request_id)
+            ))
+        ):
+            raise ControlPlaneError("core_finops.alert_inbox_scope_invalid")
+        start = datetime.combine(inicio, time.min, tzinfo=UTC)
+        end = datetime.combine(date.fromordinal(fim.toordinal() + 1), time.min, tzinfo=UTC)
+        conditions = [
+            AIUsageRecord.tenant_id == tenant_id,
+            AIUsageRecord.unit_id == unit_id,
+            AIUsageRecord.event_time >= start,
+            AIUsageRecord.event_time < end,
+        ]
+        if after_request_id is not None:
+            conditions.append(AIUsageRecord.request_id > after_request_id)
+        query = (
+            select(AIUsageRecord.request_id)
+            .where(*conditions)
+            .distinct()
+            .order_by(AIUsageRecord.request_id)
+            .limit(limit + 1)
+        )
+        with self._sessions() as db:
+            ids = tuple(db.scalars(query).all())
+        page = ids[:limit]
+        return page, page[-1] if len(ids) > limit else None
+
+    def reconcile_request(
+        self, *, tenant_id: str, unit_id: str, request_id: str,
+    ) -> AIRequestCostSummary:
+        """Summarize ALL persisted routing attempts in one scoped request.
+
+        Known_total is a subtotal, never a proof of final spend when unknown
+        attempts exist. Mixing currencies is not silently converted.
+        """
+        if any(
+            not isinstance(value, str) or not value.strip() or len(value) > 128
+            for value in (tenant_id, unit_id, request_id)
+        ):
+            raise ControlPlaneError("core_finops.invalid_request_scope")
+        with self._sessions() as db:
+            rows = db.scalars(select(AIUsageRecord).where(
+                AIUsageRecord.tenant_id == tenant_id,
+                AIUsageRecord.unit_id == unit_id,
+                AIUsageRecord.request_id == request_id,
+            )).all()
+            currencies = {
+                item.currency for item in rows
+                if item.cost_decimal is not None
+            }
+            if len(currencies) > 1:
+                raise ControlPlaneError("core_finops.mixed_currency")
+            known_amounts = [_observed_cost(item.cost_decimal) for item in rows]
+            known = [amount for amount in known_amounts if amount is not None]
+            total = sum(known, Decimal(0))
+            unknown = len(rows) - len(known)
+            return AIRequestCostSummary(
+                tenant_id=tenant_id,
+                unit_id=unit_id,
+                request_id=request_id,
+                currency=next(iter(currencies), None),
+                known_total=total,
+                known_attempts=len(known),
+                unknown_attempts=unknown,
+                total_attempts=len(rows),
+                fallback_attempts=sum(bool(item.fallback_used) for item in rows),
+                all_recorded_costs_known=bool(rows) and unknown == 0,
+            )
+
+    def listar(
+        self, *, tenant_id: str, unidade_id: str, inicio: date, fim: date
+    ) -> tuple[AIFinOpsBucket, ...]:
+        if not tenant_id.strip() or not unidade_id.strip() or fim < inicio:
+            raise ControlPlaneError("core_finops.invalid_scope_or_interval")
+        from_date = datetime.combine(inicio, time.min, tzinfo=UTC)
+        until_date = datetime.combine(date.fromordinal(fim.toordinal() + 1), time.min, tzinfo=UTC)
+        with self._sessions() as db:
+            rows = db.scalars(
+                select(AIUsageRecord).where(
+                    AIUsageRecord.tenant_id == tenant_id,
+                    AIUsageRecord.unit_id == unidade_id,
+                    AIUsageRecord.event_time >= from_date,
+                    AIUsageRecord.event_time < until_date,
+                )
+            ).all()
+            buckets: dict[tuple, list[AIUsageRecord]] = defaultdict(list)
+            for item in rows:
+                key = (
+                    _utc(item.event_time).date(),
+                    item.provider, item.model, item.capability, item.outcome, item.currency,
+                )
+                buckets[key].append(item)
+            result = []
+            for key, events in sorted(buckets.items()):
+                day, provider, model, capability, outcome, currency = key
+                result.append(
+                    AIFinOpsBucket(
+                        tenant_id=tenant_id,
+                        unidade_id=unidade_id,
+                        bucket_date=day,
+                        provider=provider,
+                        model=model,
+                        capability=capability,
+                        outcome=outcome,
+                        moeda=currency,
+                        attempts=len(events),
+                        fallback_attempts=sum(int(x.fallback_used) for x in events),
+                        input_tokens=sum(x.input_tokens or 0 for x in events),
+                        output_tokens=sum(x.output_tokens or 0 for x in events),
+                        cached_tokens=sum(x.cached_tokens or 0 for x in events),
+                        latency_ms_total=sum(x.latency_ms for x in events),
+                        latency_ms_max=max(x.latency_ms for x in events),
+                        cost_known_events=sum(x.cost_decimal is not None for x in events),
+                        cost_unknown_events=sum(x.cost_decimal is None for x in events),
+                        cost_total=sum(
+                            (
+                                amount for item in events
+                                if (amount := _observed_cost(item.cost_decimal)) is not None
+                            ),
+                            Decimal(0),
+                        ),
+                    )
+                )
+            return tuple(result)

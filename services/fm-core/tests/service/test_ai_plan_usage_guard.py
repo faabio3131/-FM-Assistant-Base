@@ -1,0 +1,369 @@
+"""Plan franchise authorization uses disposable DB and synthetic usage."""
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from core.ai_control_plane import ControlPlaneBase
+from core.ai_plan_usage_guard import PlanQuotaPolicy, PlanUsageGuard
+from core.ai_quota_store import AIQuotaPolicyRecord, QuotaDenied, QuotaReservations
+from core.ai_router import (
+    AIUsageEvent,
+    CapabilityIA,
+    OutcomeIA,
+    SolicitacaoIA,
+)
+
+NOW = datetime(2026, 10, 18, 20, tzinfo=UTC)
+
+
+class Authority:
+    def __init__(self, tenant="a", cutoff=None):
+        self.tenant = tenant
+        self.cutoff = cutoff or NOW + timedelta(days=1)
+
+    def resolve(self, *, tenant_id, unit_id, capability, now):
+        return PlanQuotaPolicy(
+            tenant_id=self.tenant, unit_id=unit_id, plan_code="FM_ALL_FEATURES",
+            revision=1, valid_until=self.cutoff,
+            input_bound=100, output_bound=80,
+            scopes=(
+                ("ai.requests", "tenant"),
+                ("ai.total_tokens", "tenant"),
+                ("ai.input_tokens", "unit"),
+                ("ai.output_tokens", "unit"),
+            ),
+        )
+
+
+@pytest.fixture()
+def guarded(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'plan-franchise.sqlite'}")
+    ControlPlaneBase.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as db:
+        for tenant in ("a", "b"):
+            for metric, unit, ceiling in (
+                ("ai.requests", "__tenant__", 2),
+                ("ai.total_tokens", "__tenant__", 300),
+                ("ai.input_tokens", "u1", 300),
+                ("ai.output_tokens", "u1", 200),
+            ):
+                db.add(AIQuotaPolicyRecord(
+                    tenant_id=tenant, unit_id=unit, capability=metric,
+                    limit_units=ceiling, window_seconds=86400, revision=1,
+                ))
+    store = QuotaReservations(sessions)
+    yield PlanUsageGuard(quota=store, authority=Authority()), store
+    engine.dispose()
+
+
+def request(rid="r-1", tenant="a"):
+    return SolicitacaoIA(
+        tenant_id=tenant, unidade_id="u1", request_id=rid,
+        correlation_id=rid, capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
+        conteudo={"test": "test"},
+    )
+
+
+def event(req, *, inp=20, out=10, cached=5, fallback=False):
+    return AIUsageEvent(
+        tenant_id=req.tenant_id, unidade_id=req.unidade_id,
+        request_id=req.request_id, correlation_id=req.correlation_id,
+        capability=req.capability, provider="synthetic-provider", model="fake-model",
+        route_reason="test", fallback_used=fallback, fallback_reason=None,
+        input_tokens=inp, output_tokens=out, cached_tokens=cached,
+        latency_ms=1, outcome=OutcomeIA.SUCESSO,
+        custo_real_calculado=None, moeda=None, price_snapshot_id="test",
+        timestamp=NOW,
+    )
+
+
+def test_admit_reconcile_and_partial_refund(guarded):
+    guard, store = guarded
+    req = request()
+    policy = guard.admit(request=req, at=NOW)
+    snapshot = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert snapshot.reserved_units == 180 and snapshot.remaining_units == 120
+    assert guard.reconcile(request=req, policy=policy, events=(event(req),))
+    after = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert after.reserved_units == 0 and after.consumed_units == 30
+    assert after.remaining_units == 270
+    with pytest.raises(QuotaDenied, match="execution_replay_denied"):
+        guard.admit(request=req, at=NOW)
+
+
+def test_concurrent_budget_limit_and_unknown_metering_remain_reserved(guarded):
+    guard, store = guarded
+    req = request()
+    policy = guard.admit(request=req, at=NOW)
+    assert not guard.reconcile(
+        request=req, policy=policy, events=(event(req, inp=None),),
+    )
+    snapshot = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert snapshot.reserved_units == 180
+    with pytest.raises(QuotaDenied, match="limit_exceeded"):
+        guard.admit(request=request("r-2"), at=NOW)
+
+
+def test_cross_tenant_projection_and_expired_license_denied(guarded):
+    _, store = guarded
+    guard = PlanUsageGuard(quota=store, authority=Authority(tenant="b"))
+    with pytest.raises(QuotaDenied, match="license_unavailable"):
+        guard.admit(request=request(), at=NOW)
+    expired = PlanUsageGuard(quota=store, authority=Authority(cutoff=NOW))
+    with pytest.raises(QuotaDenied, match="license_unavailable"):
+        expired.admit(request=request(), at=NOW)
+
+
+def test_fallback_totals_count_both_attempts_and_cache_not_double_counted(guarded):
+    guard, store = guarded
+    with store._sessions.begin() as db:
+        db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.total_tokens")).limit_units = 600
+        db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.input_tokens")).limit_units = 400
+        db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.output_tokens")).limit_units = 400
+    req = request()
+    policy = guard.admit(request=req, at=NOW, attempt_budget=2)
+    assert guard.reconcile(request=req, policy=policy, events=(
+        event(req,inp=20,out=10,cached=5),
+        event(req,inp=25,out=15,cached=10,fallback=True),
+    ))
+    snapshot = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert snapshot.consumed_units == 70  # 20+10+25+15; cached is within input
+
+
+def test_overspend_is_never_silently_reconciled(guarded):
+    guard, store = guarded
+    req = request()
+    policy = guard.admit(request=req, at=NOW)
+    with pytest.raises(QuotaDenied, match="actual_usage_exceeds_reserved"):
+        guard.reconcile(
+            request=req, policy=policy, events=(event(req,inp=101,out=0,cached=0),),
+        )
+    assert store.usage_snapshot(
+        tenant_id="a",unit_id="__tenant__",
+        capability="ai.total_tokens",at=NOW,
+    ).reserved_units == 180
+
+
+def test_negative_attempt_usage_cannot_cancel_real_consumption(guarded):
+    guard, store = guarded
+    req = request()
+    policy = guard.admit(request=req, at=NOW)
+    assert not guard.reconcile(request=req, policy=policy, events=(
+        event(req, inp=70, out=20, cached=5),
+        event(req, inp=-50, out=0, cached=0, fallback=True),
+    ))
+    snapshot = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens", at=NOW,
+    )
+    assert snapshot.reserved_units == 180
+    assert snapshot.consumed_units == 0
+
+
+def test_boolean_plan_revision_is_not_valid_policy():
+    with pytest.raises(QuotaDenied, match="policy_invalid"):
+        PlanQuotaPolicy(
+            tenant_id="a", unit_id="u1", plan_code="all", revision=True,
+            valid_until=NOW + timedelta(days=1), input_bound=100,
+            output_bound=80,
+            scopes=(("ai.requests", "tenant"), ("ai.total_tokens", "tenant")),
+        )
+
+
+def test_stale_licensed_revision_cannot_reserve_under_new_policy(guarded):
+    guard, store = guarded
+    with store._sessions.begin() as db:
+        policy = db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.requests"))
+        policy.revision = 2
+    with pytest.raises(QuotaDenied, match="policy_revision_mismatch"):
+        guard.admit(request=request(), at=NOW)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.requests", at=NOW,
+    ).reserved_units == 0
+
+
+def test_policy_revision_change_blocks_unsafe_settlement(guarded):
+    guard, store = guarded
+    req = request()
+    policy = guard.admit(request=req, at=NOW)
+    with store._sessions.begin() as db:
+        row = db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.requests"))
+        row.revision = 2
+    with pytest.raises(QuotaDenied, match="policy_revision_mismatch"):
+        guard.reconcile(request=req, policy=policy, events=(event(req),))
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__", capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 180
+
+
+def test_fallback_budget_reserves_each_potential_provider_attempt(guarded):
+    guard, store = guarded
+    req = request("multi-attempt")
+    # The existing total-token quota is only 300, while two possible model
+    # attempts require 2 * (100 + 80) = 360. No provider may run.
+    with pytest.raises(QuotaDenied, match="limit_exceeded"):
+        guard.admit(request=req, at=NOW, attempt_budget=2)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 0
+
+
+def test_fallback_budget_reconciles_aggregate_usage(guarded):
+    guard, store = guarded
+    with store._sessions.begin() as db:
+        row = db.get(AIQuotaPolicyRecord, ("a", "__tenant__", "ai.total_tokens"))
+        row.limit_units = 600
+        input_row = db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.input_tokens"))
+        input_row.limit_units = 400
+        output_row = db.get(AIQuotaPolicyRecord, ("a", "u1", "ai.output_tokens"))
+        output_row.limit_units = 400
+    req = request("double-provider")
+    policy = guard.admit(request=req, at=NOW, attempt_budget=2)
+    assert policy.attempt_budget == 2
+    before = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert before.reserved_units == 360
+    assert guard.reconcile(request=req, policy=policy, events=(
+        event(req, inp=80, out=40, cached=0),
+        event(req, inp=90, out=50, cached=0, fallback=True),
+    ))
+    after = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert (after.consumed_units, after.reserved_units) == (260, 0)
+    with pytest.raises(QuotaDenied, match="policy_invalid"):
+        PlanQuotaPolicy(
+            tenant_id="a", unit_id="u1", plan_code="all", revision=1,
+            valid_until=NOW + timedelta(days=1), input_bound=100,
+            output_bound=80, attempt_budget=9,
+            scopes=(("ai.requests", "tenant"), ("ai.total_tokens", "tenant")),
+        )
+
+
+def test_oversized_utf8_prompt_denied_before_any_quota_reservation(guarded):
+    from core.ai_service_contracts import TextMessage, TextRequestContent
+
+    guard, store = guarded
+    req = SolicitacaoIA(
+        tenant_id="a", unidade_id="u1", request_id="big-prompt",
+        correlation_id="big-prompt",
+        capability=CapabilityIA.ATENDIMENTO_INTERPRETACAO,
+        conteudo=TextRequestContent(
+            system_prompt="system",
+            messages=(TextMessage(role="user", content="á" * 70),),
+        ),
+    )
+    with pytest.raises(QuotaDenied, match="input_envelope_exceeded"):
+        guard.admit(request=req, at=NOW)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 0
+
+
+def test_audio_upload_ceiling_denies_before_any_quota_reservation(guarded):
+    from core.ai_router import ConteudoAudioIA
+
+    _, store = guarded
+    guard = PlanUsageGuard(
+        quota=store, authority=Authority(), max_audio_bytes=6,
+    )
+    req = SolicitacaoIA(
+        tenant_id="a", unidade_id="u1", request_id="big-audio",
+        correlation_id="big-audio",
+        capability=CapabilityIA.ATENDIMENTO_TRANSCRICAO,
+        conteudo=ConteudoAudioIA(
+            audio=b"0123456", mime_type="audio/wav", instrucao="transcreva",
+        ),
+    )
+    with pytest.raises(QuotaDenied, match="audio_upload_exceeded"):
+        guard.admit(request=req, at=NOW)
+    assert store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    ).reserved_units == 0
+    with pytest.raises(ValueError, match="audio_upload_ceiling_invalid"):
+        PlanUsageGuard(quota=store, authority=Authority(), max_audio_bytes=True)
+
+
+def test_known_total_usage_settles_without_unconfigured_cache_metric(guarded):
+    """No fake cache measurement: only existing quotas are settled."""
+    guard, store = guarded
+    req = request("provider-without-cache-breakdown")
+    policy = guard.admit(request=req, at=NOW)
+    provider_event = event(req, inp=20, out=10, cached=None)
+    assert provider_event.cached_tokens is None
+    assert guard.reconcile(request=req, policy=policy, events=(provider_event,))
+    total = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert total.reserved_units == 0
+    assert total.consumed_units == 30
+    assert provider_event.cached_tokens is None  # no fabricated receipt
+
+
+def test_missing_cache_breakdown_holds_reservation_when_cache_quota_exists(guarded):
+    from dataclasses import replace
+
+    _, store = guarded
+    with store._sessions.begin() as db:
+        db.add(AIQuotaPolicyRecord(
+            tenant_id="a", unit_id="__tenant__",
+            capability="ai.cached_tokens", limit_units=300,
+            window_seconds=86400, revision=1,
+        ))
+
+    class CacheAuthority(Authority):
+        def resolve(self, *, tenant_id, unit_id, capability, now):
+            current = super().resolve(
+                tenant_id=tenant_id, unit_id=unit_id,
+                capability=capability, now=now,
+            )
+            return replace(current, scopes=(
+                *current.scopes, ("ai.cached_tokens", "tenant"),
+            ))
+
+    cache_guard = PlanUsageGuard(quota=store, authority=CacheAuthority())
+    req = request("provider-cache-enforced")
+    policy = cache_guard.admit(request=req, at=NOW)
+    assert not cache_guard.reconcile(
+        request=req, policy=policy,
+        events=(event(req, inp=20, out=10, cached=None),),
+    )
+    total = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert total.reserved_units == 180
+    assert total.consumed_units == 0
+    assert cache_guard.reconcile(
+        request=req, policy=policy,
+        events=(event(req, inp=20, out=10, cached=2),),
+    )
+    total = store.usage_snapshot(
+        tenant_id="a", unit_id="__tenant__",
+        capability="ai.total_tokens", at=NOW,
+    )
+    assert total.reserved_units == 0
+    assert total.consumed_units == 30

@@ -1,0 +1,73 @@
+name: AI Service CI
+
+on:
+  push:
+    branches:
+      - main
+      - feat/**
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff new AI service
+        run: >
+          ruff check
+          core/ai_router.py
+          core/ai_circuit_breaker.py
+          core/ai_circuit_state_store.py
+          core/ai_quota_store.py
+          core/ai_finops_preflight.py
+          core/ai_control_plane.py
+          core/ai_control_plane_runtime.py
+          core/ai_control_plane_bootstrap.py
+          core/ai_admin_read_api.py
+          core/ai_command_authority.py
+          core/ai_governed_recovery.py
+          core/ai_governed_recovery_api.py
+          core/ai_provider_evidence_store.py
+          core/ai_provider_source_verifier.py
+          core/ai_provider_usage_match.py
+          core/ai_provider_request_reconciliation.py
+          core/ai_provider_billing_export.py
+          core/ai_provider_export_store.py
+          core/ai_verified_usage_receipt.py
+          core/ai_tenant_credential_resolver.py
+          core/ai_assistant_credential_gateway.py
+          core/ai_admin_audit.py
+          core/ai_usage_ledger.py
+          core/ai_finops.py
+          core/ai_finops_alerts.py
+          core/ai_finops_policy_store.py
+          core/ai_finops_policy_api.py
+          core/ai_command_finops_api.py
+          tests/test_ai_command_finops_api.py
+          alembic/env.py
+          alembic/versions/0001_f3_ai_control_plane.py
+          alembic/versions/0002_f3_command_admin_audit.py
+          alembic/versions/0003_f3_quota_reservations.py
+          alembic/versions/0004_f3_circuit_state.py
+          alembic/versions/0005_f3_provider_evidence.py
+          alembic/versions/0006_f3_finops_alert_policies.py
+          alembic/versions/0009_f3_provider_export_snapshots.py
+          core/ai_service_contracts.py
+          core/ai_service_settings.py
+          core/ai_providers.py
+          core/ai_service_runtime.py
+          core/ai_service_api.py
+          core/ai_service_main.py
+          tests/service
+      - name: Ruff Core command readback and runtime mount
+        run: ruff check core/ai_command_quota_readback.py tests/test_ai_command_quota_readback.py tests/test_ai_command_quota_runtime_mount.py
+      - name: Core Command signed readback contract and actual runtime mount
+        run: pytest -q tests/test_ai_command_quota_readback.py tests/test_ai_command_quota_runtime_mount.py tests/test_ai_command_finops_api.py
+      - name: AI service tests
+        run: pytest tests/unit/ai_router tests/service
