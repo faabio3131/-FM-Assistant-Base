@@ -301,13 +301,16 @@ def finops_alert_policy_router(
                 start_date=date.fromisoformat(payload.start_date),
                 end_date=date.fromisoformat(payload.end_date),
                 page=payload.page, limit=payload.limit,
-                only_missing=True, provider=payload.provider,
+                # Page over all attempts: importing page 0 must not shift page 1.
+                # Filtering the mutable "missing" set with OFFSET skips records.
+                only_missing=False, provider=payload.provider,
             )
             attempts = [{
                 "request_id": row["request_id"],
                 "attempt_id": row["attempt_id"],
                 "model": row["model"],
-            } for row in coverage["items"]]
+            } for row in coverage["items"]
+              if row["export_status"] == "missing_provider_export"]
             if not attempts:
                 return {
                     "created": 0, "already_recorded": 0,
