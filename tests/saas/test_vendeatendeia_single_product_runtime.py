@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.vendeatendeia_dev import configure_product
+from fm_assistant.vendeatendeia_runtime import configure_product
 
 
 def local_config(**overrides):
