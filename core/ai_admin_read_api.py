@@ -28,7 +28,7 @@ from core.ai_finops_alerts import evaluate_request_cost_alert
 from core.ai_finops_policy_store import PersistentFinOpsAlertPolicies
 from core.ai_provider_export_store import PersistentProviderExportStore
 from core.ai_router import CapabilityIA
-from core.ai_usage_ledger import AIUsageRecord, PersistentAIFinOps
+from core.ai_usage_ledger import AIUsageRecord, PersistentAIFinOps, _observed_cost
 
 
 def require_operator_key(
@@ -169,7 +169,9 @@ def register_admin_read_routes(app: FastAPI) -> None:
                     "input_tokens": row.input_tokens,
                     "output_tokens": row.output_tokens,
                     "cost_known_subtotal_usd": (
-                        row.cost_decimal if row.currency == "USD" else None
+                        str(_observed_cost(row.cost_decimal))
+                        if row.cost_decimal is not None and row.currency == "USD"
+                        else None
                     ),
                     "cost_known": row.cost_decimal is not None,
                 } for row in rows]
