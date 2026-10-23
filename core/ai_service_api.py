@@ -250,12 +250,19 @@ def create_app(
             trust=recovery_trust,
             transport_key=cfg.governed_recovery_transport_key or "",
         )
-        policy_path = "/internal/v1/command/ai/finops/alert-policy"
-        if len(policy_router.routes) != 1 or (
-            getattr(policy_router.routes[0], "path", None) != policy_path
+        expected_paths = {
+            "/internal/v1/command/ai/finops/alert-policy",
+            "/internal/v1/command/ai/finops/alert-scan",
+            "/internal/v1/command/ai/finops/alert-review",
+        }
+        actual_paths = {getattr(route, "path", None) for route in policy_router.routes}
+        if (
+            len(policy_router.routes) != len(expected_paths)
+            or actual_paths != expected_paths
         ):
             raise RuntimeError("core_finops_policy_route_invalid")
-        if any(getattr(r, "path", None) == policy_path for r in app.router.routes):
+        existing_paths = {getattr(route, "path", None) for route in app.router.routes}
+        if actual_paths & existing_paths:
             raise RuntimeError("core_finops_policy_route_duplicate")
         app.router.routes.extend(policy_router.routes)
 

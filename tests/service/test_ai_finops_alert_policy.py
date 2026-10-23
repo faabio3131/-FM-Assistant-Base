@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from core.ai_admin_audit import CommandAdminAuditRecord
 from core.ai_command_authority import CommandTrustPolicy, VerifiedCommandAdmin
 from core.ai_control_plane import ControlPlaneBase, ControlPlaneError
+from core.ai_finops_alert_outbox import AIFinOpsAlertOutboxRecord
 from core.ai_finops_policy_api import finops_alert_policy_router
 from core.ai_finops_policy_store import (
     AIFinOpsAlertPolicyRecord,
@@ -152,3 +153,52 @@ def test_http_requires_both_service_identity_and_recent_human_step_up(store):
     assert http.post(path, json={**body, "expected_revision": 1},
                      headers=headers).status_code == 409
     assert policies.get(tenant_id="tenant-a", unit_id="unit-a").revision == 1
+
+    scan_path = "/internal/v1/command/ai/finops/alert-scan"
+    scan_body = {
+        "tenant_id": "tenant-a", "unit_id": "unit-a",
+        "start_date": "2026-10-01", "end_date": "2026-10-22", "limit": 20,
+    }
+    assert http.post(scan_path, json=scan_body).status_code == 401
+    assert http.post(
+        scan_path, json=scan_body, headers={
+            **headers, "Authorization": "Bearer " +
+            jwt_for("foreign-tenant-jti-3210", role="tenant_owner"),
+        },
+    ).status_code == 403
+    assert http.post(
+        scan_path, json={**scan_body, "limit": True}, headers=headers,
+    ).status_code == 422
+    read = http.post(scan_path, json=scan_body, headers=headers)
+    assert read.status_code == 200
+    assert read.json()["created"] == 0
+    assert read.json()["automated_dispatch_enabled"] is False
+
+    # A synthetic persisted alert can be reviewed with an independent
+    # step-upped FM identity without touching providers or tenant billing.
+    event_id = "a" * 64
+    with sessions.begin() as db:
+        db.add(AIFinOpsAlertOutboxRecord(
+            event_id=event_id, tenant_id="tenant-a", unit_id="unit-a",
+            request_id="request-a", policy_revision=1,
+            reasons_json='["provider_cost_unverified"]',
+            known_cost_subtotal="0", currency=None, unknown_attempts=1,
+            observed_attempts=1, status="pending",
+            created_at=datetime.now(UTC), reviewed_at=None,
+        ))
+    review_path = "/internal/v1/command/ai/finops/alert-review"
+    review_body = {"event_id": event_id}
+    assert http.post(review_path, json=review_body).status_code == 401
+    review_headers = {
+        **headers, "Authorization": "Bearer " +
+        jwt_for("synthetic-review-jti-123456789"),
+    }
+    assert http.post(
+        review_path, json={"event_id": "invalid"}, headers=review_headers,
+    ).status_code == 422
+    assert http.post(
+        review_path, json=review_body, headers=review_headers,
+    ).status_code == 204
+    with sessions() as db:
+        row = db.get(AIFinOpsAlertOutboxRecord, event_id)
+        assert row.status == "reviewed" and row.reviewed_at is not None
