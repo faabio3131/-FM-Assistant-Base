@@ -19,7 +19,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field, SecretStr, ValidationError
+from pydantic import UUID4, BaseModel, Field, SecretStr, ValidationError
 
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerifier
@@ -167,6 +167,11 @@ class HumanTransferRequest(BaseModel):
 
 class HumanPrivateNoteRequest(BaseModel):
     note: str = Field(min_length=1, max_length=4000)
+
+
+class HumanWebReplyRequest(BaseModel):
+    message_id: UUID4
+    content: str = Field(min_length=1, max_length=20000)
 
 
 
@@ -1411,6 +1416,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except HumanInboxDenied as exc:
             raise HTTPException(status_code=404, detail="inbox.not_found") from exc
+
+    @app.post("/v1/inbox/{conversation_id}/reply")
+    def write_human_web_reply(
+        conversation_id: str,
+        payload: HumanWebReplyRequest,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_RESPOND)),
+    ) -> dict:
+        """Webchat/API response enters customer history; WhatsApp fails closed."""
+        try:
+            return request.app.state.human_inbox.reply(
+                principal=principal, conversation_id=conversation_id,
+                message_id=str(payload.message_id), content=payload.content,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/inbox/{conversation_id}/return-to-ai")
     def return_human_conversation_to_ai(
