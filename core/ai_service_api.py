@@ -254,6 +254,7 @@ def create_app(
             "/internal/v1/command/ai/finops/alert-policy",
             "/internal/v1/command/ai/finops/alert-scan",
             "/internal/v1/command/ai/finops/alert-review",
+            "/internal/v1/command/ai/finops/provider-export",
         }
         actual_paths = {getattr(route, "path", None) for route in policy_router.routes}
         if (

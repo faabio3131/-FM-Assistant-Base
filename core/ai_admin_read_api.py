@@ -26,8 +26,9 @@ from core.ai_control_plane import (
 from core.ai_finops_alert_outbox import PersistentFinOpsAlertOutbox
 from core.ai_finops_alerts import evaluate_request_cost_alert
 from core.ai_finops_policy_store import PersistentFinOpsAlertPolicies
+from core.ai_provider_export_store import PersistentProviderExportStore
 from core.ai_router import CapabilityIA
-from core.ai_usage_ledger import PersistentAIFinOps
+from core.ai_usage_ledger import AIUsageRecord, PersistentAIFinOps, _observed_cost
 
 
 def require_operator_key(
@@ -139,6 +140,100 @@ def register_admin_read_routes(app: FastAPI) -> None:
             }
             for item in buckets
         ]
+
+    @router.get("/usage/attempts")
+    def usage_physical_attempts(
+        request: Request,
+        tenant_id: str = Query(min_length=1, max_length=128),
+        unit_id: str = Query(min_length=1, max_length=128),
+        request_id: str = Query(min_length=1, max_length=128),
+    ) -> JSONResponse:
+        """Operator's bounded physical attempts, including fallbacks."""
+        try:
+            with _sessions(request)() as db:
+                rows = db.scalars(select(AIUsageRecord).where(
+                    AIUsageRecord.tenant_id == tenant_id,
+                    AIUsageRecord.unit_id == unit_id,
+                    AIUsageRecord.request_id == request_id,
+                ).order_by(AIUsageRecord.event_time, AIUsageRecord.event_id)
+                    .limit(101)).all()
+                if len(rows) > 100:
+                    raise ControlPlaneError("core_finops.attempts_unbounded")
+                items = [{
+                    "event_id": row.event_id,
+                    "attempt_id": row.attempt_id,
+                    "provider": row.provider,
+                    "model": row.model,
+                    "outcome": row.outcome,
+                    "fallback": bool(row.fallback_used),
+                    "input_tokens": row.input_tokens,
+                    "output_tokens": row.output_tokens,
+                    "cost_known_subtotal_usd": (
+                        str(_observed_cost(row.cost_decimal))
+                        if row.cost_decimal is not None and row.currency == "USD"
+                        else None
+                    ),
+                    "cost_known": row.cost_decimal is not None,
+                } for row in rows]
+        except ControlPlaneError as exc:
+            raise HTTPException(
+                status_code=422, detail="core_finops.attempts_invalid",
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503, detail="core_finops.attempts_unavailable",
+            ) from exc
+        return JSONResponse({
+            "tenant_id": tenant_id, "unit_id": unit_id,
+            "request_id": request_id, "items": items,
+            "provider_invoice_verified": False,
+        }, headers={"Cache-Control": "no-store"})
+
+    @router.get("/usage/provider-export")
+    def provider_export_comparison(
+        request: Request,
+        tenant_id: str = Query(min_length=1, max_length=128),
+        unit_id: str = Query(min_length=1, max_length=128),
+        request_id: str = Query(min_length=1, max_length=128),
+        attempt_id: str = Query(min_length=1, max_length=128),
+    ) -> JSONResponse:
+        """Scoped FM drilldown. Unknown and missing exports stay actionable."""
+        try:
+            result = PersistentProviderExportStore(_sessions(request)).compare(
+                tenant_id=tenant_id, unit_id=unit_id,
+                request_id=request_id, attempt_id=attempt_id,
+            )
+        except ControlPlaneError as exc:
+            raise HTTPException(
+                status_code=422, detail="core_finops.export_read_invalid",
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503, detail="core_finops.export_unavailable",
+            ) from exc
+        return JSONResponse({
+            "tenant_id": tenant_id, "unit_id": unit_id,
+            "request_id": request_id, "attempt_id": attempt_id,
+            "status": result.status if result else "missing_provider_export",
+            "provider": result.provider if result else None,
+            "source_ref": result.source_ref if result else None,
+            "input_tokens_reported": result.input_tokens_reported if result else None,
+            "output_tokens_reported": result.output_tokens_reported if result else None,
+            "report_cost_usd": (
+                str(result.report_cost_usd)
+                if result and result.report_cost_usd is not None else None
+            ),
+            "internal_cost_usd": (
+                str(result.internal_cost_usd)
+                if result and result.internal_cost_usd is not None else None
+            ),
+            "usage_matches": result.usage_matches if result else None,
+            "cost_matches": result.cost_matches if result else None,
+            "needs_attention": result.needs_attention if result else True,
+            "provider_invoice_verified": False,
+            "provider_signature_verified": False,
+            "quota_recovery_authorized": False,
+        }, headers={"Cache-Control": "no-store"})
 
     @router.get("/usage/pending")
     def pending_usage_reconciliation(

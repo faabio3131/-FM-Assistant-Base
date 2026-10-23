@@ -38,6 +38,7 @@ jobs:
           core/ai_provider_usage_match.py
           core/ai_provider_request_reconciliation.py
           core/ai_provider_billing_export.py
+          core/ai_provider_export_store.py
           core/ai_verified_usage_receipt.py
           core/ai_tenant_credential_resolver.py
           core/ai_assistant_credential_gateway.py
@@ -56,6 +57,7 @@ jobs:
           alembic/versions/0004_f3_circuit_state.py
           alembic/versions/0005_f3_provider_evidence.py
           alembic/versions/0006_f3_finops_alert_policies.py
+          alembic/versions/0009_f3_provider_export_snapshots.py
           core/ai_service_contracts.py
           core/ai_service_settings.py
           core/ai_providers.py
