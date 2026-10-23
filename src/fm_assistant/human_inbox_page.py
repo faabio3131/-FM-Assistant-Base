@@ -61,6 +61,9 @@ label{font-weight:600;font-size:13px}
 <div class="tools">
 <button class="primary" id="claim">Assumir atendimento</button>
 <button class="critical" id="return">Devolver à IA</button></div>
+<div id="reply-panel" hidden><h3>Resposta humana no Webchat / API</h3>
+<label for="reply">Mensagem ao cliente</label><textarea id="reply" maxlength="20000"></textarea>
+<button class="primary" id="send-reply">Registrar resposta no histórico do cliente</button></div>
 <h3>Transferir para agente da unidade</h3>
 <label for="target">ID do agente</label><input id="target" maxlength="64"
  placeholder="Identificador do usuário">
@@ -76,7 +79,7 @@ label{font-weight:600;font-size:13px}
 (() => {
 "use strict";
 const $ = id => document.getElementById(id);
-let page=0, nextPage=null, current=null, busy=false;
+let page=0, nextPage=null, current=null, busy=false, pendingReplyId=null;
 const note = message => { $("notice").textContent=message; };
 async function api(path, method="GET", body=null) {
   const init={method,credentials:"same-origin",cache:"no-store",
@@ -118,7 +121,8 @@ async function load() {
   finally{busy=false;$("refresh").disabled=false;}
 }
 async function select(item) {
-  current=item.conversation_id;$("controls").hidden=false;
+  current=item.conversation_id;pendingReplyId=null;$("controls").hidden=false;
+  $("reply-panel").hidden=!["api","webchat"].includes(item.channel);
   $("detail").replaceChildren(
     elt("p","",item.external_ref||item.conversation_id),
     elt("p","meta","Canal: "+item.channel+" • Estado: "+item.status),
@@ -148,6 +152,7 @@ async function action(name,body=null){
     if(name==="return-to-ai"){current=null;$("controls").hidden=true;
       $("detail").textContent="Conversa devolvida à IA.";}
     if(name==="notes")$("note").value="";
+    if(name==="reply"){$("reply").value="";pendingReplyId=null;}
     busy=false;
     await load();await activity();
   }catch(error){note("Ação não concluída: "+error.message);}
@@ -160,6 +165,9 @@ $("claim").onclick=()=>action("claim");
 $("return").onclick=()=>action("return-to-ai");
 $("transfer").onclick=()=>{const target=$("target").value.trim();
   if(target)action("transfer",{user_id:target});};
+$("send-reply").onclick=()=>{const value=$("reply").value.trim();
+  if(value){pendingReplyId ||= crypto.randomUUID();
+    action("reply",{message_id:pendingReplyId,content:value});}};
 $("save-note").onclick=()=>{const value=$("note").value.trim();
   if(value)action("notes",{note:value});};
 load();

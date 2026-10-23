@@ -18,6 +18,7 @@ from .db import (
     ConversationORM,
     MembershipORM,
     MembershipUnitORM,
+    MessageORM,
     UserORM,
 )
 from .identity import Permission, Role, permissions_for_role
@@ -222,6 +223,48 @@ class HumanInbox:
             self._event(db, principal=principal, conversation_id=conversation_id,
                         action="note", assigned_to=state.assigned_to, note=value)
             return {"status": "saved", "conversation_id": conversation_id}
+
+    def reply(
+        self, *, principal: SessionPrincipal, conversation_id: str,
+        message_id: str, content: str,
+    ) -> dict:
+        """Persist a human answer consumed by the existing WEBCHAT/API history.
+
+        WhatsApp is deliberately excluded until its separate transactional
+        outbound delivery intent and provider acknowledgement are connected.
+        """
+        value = content.strip()
+        if not value or len(value) > 20_000:
+            raise HumanInboxDenied("inbox.invalid_reply")
+        try:
+            with self._sessions.begin() as db:
+                conv, state = self._get_locked(db, principal, conversation_id)
+                if conv.status != "human_handoff" or state is None or (
+                    state.assigned_to != principal.user_id and not self._manager(principal)
+                ):
+                    raise HumanInboxDenied("inbox.reply_forbidden")
+                if conv.channel not in {"api", "webchat"}:
+                    raise HumanInboxDenied("inbox.channel_delivery_not_connected")
+                prior = db.get(MessageORM, message_id)
+                if prior is not None:
+                    if (prior.conversation_id != conversation_id or
+                        prior.tenant_id != principal.tenant_id or
+                        prior.unit_id != principal.unit_id or
+                        prior.role != "assistant" or prior.content != value):
+                        raise HumanInboxDenied("inbox.reply_idempotency_conflict")
+                    return {"status": "already_recorded", "message_id": message_id}
+                now = datetime.now(UTC)
+                db.add(MessageORM(
+                    message_id=message_id, conversation_id=conversation_id,
+                    tenant_id=principal.tenant_id, unit_id=principal.unit_id,
+                    role="assistant", content=value, created_at=now,
+                ))
+                self._event(db, principal=principal, conversation_id=conversation_id,
+                            action="human_reply", assigned_to=state.assigned_to)
+                conv.updated_at = now
+            return {"status": "stored_for_client", "message_id": message_id}
+        except IntegrityError as exc:
+            raise HumanInboxDenied("inbox.reply_concurrent_duplicate") from exc
 
     def return_to_ai(self, *, principal: SessionPrincipal, conversation_id: str) -> dict:
         with self._sessions.begin() as db:

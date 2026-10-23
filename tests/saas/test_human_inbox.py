@@ -12,6 +12,7 @@ from fm_assistant.db import (
     ConversationORM,
     MembershipORM,
     MembershipUnitORM,
+    MessageORM,
     TenantORM,
     UnitORM,
     UserORM,
@@ -143,3 +144,53 @@ def test_human_inbox_has_bounded_page_and_empty_next_page(environment):
     assert inbox.list_queue(principal=user, limit=1)["next_page"] is None
     with pytest.raises(HumanInboxDenied, match="invalid_page"):
         inbox.list_queue(principal=user, limit=101)
+
+
+def test_human_reply_is_durable_for_webchat_but_not_sent_to_whatsapp(environment):
+    inbox, sessions = environment
+    agent = principal()
+    with sessions.begin() as db:
+        db.get(ConversationORM, "conversation-tenant-a").channel = "webchat"
+    inbox.claim(principal=agent, conversation_id="conversation-tenant-a")
+    message_id = "95942e41-8b45-4b60-a9fe-62d5cb3dc91b"
+    result = inbox.reply(
+        principal=agent, conversation_id="conversation-tenant-a",
+        message_id=message_id, content="Posso ajudar com o seu pedido.",
+    )
+    assert result == {"status": "stored_for_client", "message_id": message_id}
+    same = inbox.reply(
+        principal=agent, conversation_id="conversation-tenant-a",
+        message_id=message_id, content="Posso ajudar com o seu pedido.",
+    )
+    assert same["status"] == "already_recorded"
+    with pytest.raises(HumanInboxDenied, match="reply_idempotency_conflict"):
+        inbox.reply(
+            principal=agent, conversation_id="conversation-tenant-a",
+            message_id=message_id, content="Outra mensagem.",
+        )
+    with sessions() as db:
+        persisted = db.get(MessageORM, message_id)
+        assert persisted.content == "Posso ajudar com o seu pedido."
+        assert persisted.role == "assistant"
+        assert len(db.scalars(select(MessageORM)).all()) == 1
+    inbox.return_to_ai(principal=agent, conversation_id="conversation-tenant-a")
+    with pytest.raises(HumanInboxDenied, match="reply_forbidden"):
+        inbox.reply(
+            principal=agent, conversation_id="conversation-tenant-a",
+            message_id="09df7e14-9079-46ba-8184-9d2d02b4c92a",
+            content="Depois do retorno.",
+        )
+
+
+def test_whatsapp_reply_fails_closed_until_transporter_is_connected(environment):
+    inbox, sessions = environment
+    agent = principal()
+    inbox.claim(principal=agent, conversation_id="conversation-tenant-a")
+    with pytest.raises(HumanInboxDenied, match="channel_delivery_not_connected"):
+        inbox.reply(
+            principal=agent, conversation_id="conversation-tenant-a",
+            message_id="68262ac5-9116-40e9-8460-6a83e7623a11",
+            content="Não deve afirmar entrega via WhatsApp.",
+        )
+    with sessions() as db:
+        assert db.scalars(select(MessageORM)).all() == []
