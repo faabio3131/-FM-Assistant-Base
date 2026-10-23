@@ -12,6 +12,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from core.ai_control_plane import ControlPlaneBase, ControlPlaneError
+from core.ai_provider_request_reconciliation import (
+    SignedAttemptEvidence,
+    reconcile_signed_provider_request,
+)
 from core.ai_provider_source_verifier import ProviderSigningPolicy
 from core.ai_provider_usage_match import match_signed_provider_attempt
 from core.ai_quota_store import QuotaDenied
@@ -205,3 +209,140 @@ def test_signed_statement_never_matches_truncated_attempt_history(ledger):
             )
     with pytest.raises(ControlPlaneError, match="provider_match_unbounded_attempts"):
         check(ledger, policy, raw, signature, now)
+
+
+def _batch(sessions, *evidences):
+    return reconcile_signed_provider_request(
+        sessions=sessions,
+        statements=tuple(SignedAttemptEvidence(
+            payload=body, signature=signature, policy=policy,
+        ) for policy, body, signature, _ in evidences),
+        tenant_id="tenant-a", unit_id="unit-a", request_id="req-1",
+        at=evidences[0][3],
+    )
+
+
+def test_request_reconciliation_never_confuses_statement_with_invoice(ledger):
+    signed = signed_statement()
+    original = ledger()
+    before = original.scalar(select(AIUsageRecord).where(
+        AIUsageRecord.event_id == "attempt-1",
+    ))
+    result = _batch(ledger, signed)
+    assert result.attempts_observed == 1
+    assert result.statements_matched == 1
+    assert result.unmatched_attempts == 0
+    assert result.all_attempts_matched is True
+    assert result.cost_disagreement_attempts == 1
+    assert result.internal_known_cost_usd_subtotal == Decimal("0.005")
+    assert result.statement_known_cost_usd_subtotal == Decimal("0.006")
+    assert result.needs_attention is True
+    assert result.invoice_verified is False
+    assert result.quota_recovery_authorized is False
+    with ledger() as check:
+        after = check.get(AIUsageRecord, "attempt-1")
+        assert after.cost_decimal == before.cost_decimal
+        assert after.input_tokens == before.input_tokens
+    original.close()
+
+
+def test_multi_provider_fallback_reconciles_every_attempt_without_mutation(ledger):
+    first = signed_statement(overrides={"cost_usd": "0.005"})
+    second = signed_statement(overrides={
+        "provider": "other-provider", "model": "model-b",
+        "input_tokens": 200, "output_tokens": 20, "cost_usd": "0.008",
+    })
+    # The second statement source may attest only its explicitly allowed vendor.
+    private = Ed25519PrivateKey.generate()
+    policy = ProviderSigningPolicy(
+        issuer="second-issuer",
+        public_key=private.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+        ),
+        allowed_providers=frozenset({"other-provider"}),
+    )
+    raw = json.loads(second[1])
+    raw["issuer"] = policy.issuer
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    second = (policy, payload, private.sign(
+        b"FM_PROVIDER_USAGE_SOURCE_V1\n" + payload,
+    ), first[3])
+    with ledger.begin() as db:
+        _insert_attempt(
+            db, event_id="attempt-2", provider="other-provider",
+            model="model-b", inp=200, out=20, fallback=True,
+        )
+        db.get(AIUsageRecord, "attempt-2").cost_decimal = "0.008"
+        db.get(AIUsageRecord, "attempt-2").currency = "USD"
+    result = _batch(ledger, first, second)
+    assert result.attempts_observed == 2
+    assert result.statements_matched == 2
+    assert result.unmatched_attempts == 0
+    assert result.unknown_usage_attempts == 0
+    assert result.internal_cost_unknown_attempts == 0
+    assert result.statement_cost_unknown_attempts == 0
+    assert result.internal_known_cost_usd_subtotal == Decimal("0.013")
+    assert result.statement_known_cost_usd_subtotal == Decimal("0.013")
+    assert result.cost_disagreement_attempts == 0
+    assert result.all_attempts_matched is True
+    assert result.needs_attention is False
+    assert result.invoice_verified is False
+    assert result.quota_recovery_authorized is False
+
+
+def test_partial_failed_fallback_and_unknown_cost_remain_needs_attention(ledger):
+    signed = signed_statement()
+    with ledger.begin() as db:
+        _insert_attempt(
+            db, event_id="attempt-transient-failure", provider="other-provider",
+            outcome="transient_failure", inp=None, out=None, fallback=True,
+        )
+        db.get(AIUsageRecord, "attempt-1").cost_decimal = None
+        db.get(AIUsageRecord, "attempt-1").currency = "XXX"
+    result = _batch(ledger, signed)
+    assert result.attempts_observed == 2
+    assert result.statements_matched == 1
+    assert result.unmatched_attempts == 1
+    assert result.unknown_usage_attempts == 1
+    assert result.internal_cost_unknown_attempts == 2
+    assert result.internal_known_cost_usd_subtotal == Decimal(0)
+    assert result.needs_attention is True
+
+
+def test_duplicate_sources_replay_cannot_double_count_request(ledger):
+    signed = signed_statement()
+    with pytest.raises(ControlPlaneError, match="reconciliation_duplicate_attempt"):
+        _batch(ledger, signed, signed)
+
+
+def test_corrupt_batch_unsigned_and_cross_tenant_are_denied(ledger):
+    signed = signed_statement()
+    source = SignedAttemptEvidence(
+        payload=signed[1], signature=signed[2], policy=signed[0],
+    )
+    args = {"sessions": ledger, "tenant_id": "tenant-a", "unit_id": "unit-a",
+            "request_id": "req-1", "at": signed[3]}
+    with pytest.raises(ControlPlaneError, match="invalid_batch"):
+        reconcile_signed_provider_request(statements=(), **args)
+    with pytest.raises(ControlPlaneError, match="invalid_batch"):
+        reconcile_signed_provider_request(statements=(source,) * 101, **args)
+    with pytest.raises(ControlPlaneError, match="invalid_source"):
+        reconcile_signed_provider_request(statements=(object(),), **args)
+    with pytest.raises(QuotaDenied):
+        reconcile_signed_provider_request(statements=(
+            SignedAttemptEvidence(
+                payload=source.payload, signature=b"", policy=source.policy,
+            ),
+        ), **args)
+    with pytest.raises(QuotaDenied):
+        reconcile_signed_provider_request(
+            statements=(source,), **{**args, "tenant_id": "foreign-tenant"},
+        )
+
+
+def test_request_reconciliation_denies_unknown_currency_with_known_cost(ledger):
+    signed = signed_statement()
+    with ledger.begin() as db:
+        db.get(AIUsageRecord, "attempt-1").currency = "BRL"
+    with pytest.raises(ControlPlaneError, match="currency_mismatch"):
+        _batch(ledger, signed)
