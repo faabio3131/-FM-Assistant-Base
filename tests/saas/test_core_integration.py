@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 
 from fm_assistant.core_client import CoreAIClient, CoreAudioTranscriber
 from fm_assistant.domain import AssistantPersona, Channel, Conversation, Message, MessageRole
@@ -143,8 +144,6 @@ def test_core_audio_transcriber_preserves_scope_and_correlation(monkeypatch):
 
 
 def test_core_client_rejects_foreign_origin_credentials_and_query():
-    import pytest
-
     for unsafe in (
         "ftp://core.invalid", "https://name:secret@core.invalid",
         "https://core.invalid/path", "https://core.invalid?redirect=evil",
