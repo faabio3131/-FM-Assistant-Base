@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+import test_human_whatsapp_outbox as source_fixtures
 from test_human_inbox import principal
 
 from fm_assistant.channels.whatsapp_meta import (
@@ -22,8 +23,9 @@ from fm_assistant.vendeatendeia_runtime import configure_product
 
 
 @pytest.fixture
-def meta_configured(source_configured):
-    inbox, sessions, outbox = source_configured
+def meta_configured(tmp_path):
+    fixture = source_fixtures.configured.__wrapped__(tmp_path)
+    inbox, sessions, outbox = next(fixture)
     now = datetime.now(UTC)
     sender = "5511987654321"
     digest = hmac.new(b"private-pepper", f"evolution-1:{sender}".encode(),
@@ -60,6 +62,7 @@ def meta_configured(source_configured):
             return config
 
     yield inbox, sessions, outbox, config, Channels()
+    next(fixture, None)
 
 
 def test_meta_outbound_only_meta_worker_can_claim(meta_configured, monkeypatch):
