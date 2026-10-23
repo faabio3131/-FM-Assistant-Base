@@ -240,6 +240,7 @@ class HumanInbox:
     def record_verified_handoff_inbound(
         self, *, tenant_id: str, unit_id: str, conversation_id: str,
         connection_id: str, provider_message_id: str, content: str,
+        provider_key: str = "whatsapp_evolution",
     ) -> str:
         """Preserve customer text during AI handoff, without generating an AI reply.
 
@@ -268,7 +269,11 @@ class HumanInbox:
             ).with_for_update())
             if (
                 conv is None or conv.status != "human_handoff"
-                or not (conv.external_ref or "").startswith(f"wae:{connection_id}:")
+                or (provider_key not in {"whatsapp_evolution", "whatsapp_meta"})
+                or not (conv.external_ref or "").startswith(
+                    f"{'wae' if provider_key == 'whatsapp_evolution' else 'wa'}:"
+                    f"{connection_id}:"
+                )
             ):
                 raise HumanInboxDenied("inbox.inbound_scope_or_state_changed")
             prior = db.get(MessageORM, message_id)

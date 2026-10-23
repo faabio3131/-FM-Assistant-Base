@@ -36,6 +36,8 @@ class WhatsAppRuntime:
         assistant: AssistantService,
         sender_pepper: str,
         audio_transcriber: AudioTranscriber | None = None,
+        human_inbox=None,
+        human_whatsapp_outbox=None,
     ) -> None:
         if not sender_pepper.strip():
             raise ValueError("sender_pepper_required")
@@ -44,6 +46,8 @@ class WhatsAppRuntime:
         self._assistant = assistant
         self._sender_pepper = sender_pepper
         self._audio_transcriber = audio_transcriber or UnavailableAudioTranscriber()
+        self._human_inbox = human_inbox
+        self._human_whatsapp_outbox = human_whatsapp_outbox
 
     def _sender_hash(self, *, channel_id: str, sender: str) -> str:
         return hmac.new(
@@ -79,6 +83,16 @@ class WhatsAppRuntime:
             raise LookupError("whatsapp_channel_not_found")
         client = MetaWhatsAppClient(config)
         messages = client.parse_webhook(body=body, signature=signature)
+        delivery_updates = client.parse_delivery_statuses(body=body, signature=signature)
+        if self._human_whatsapp_outbox is not None:
+            evidence = hashlib.sha256(body).hexdigest()
+            for provider_reference, delivery_status in delivery_updates:
+                self._human_whatsapp_outbox.correlate_authenticated_status(
+                    connection_id=channel_id,
+                    provider_reference=provider_reference,
+                    delivery_status=delivery_status,
+                    evidence_sha256=evidence,
+                )
 
         processed = 0
         duplicates = 0
@@ -113,7 +127,24 @@ class WhatsAppRuntime:
                     external_ref=external_ref,
                 )
 
+                if self._human_whatsapp_outbox is not None:
+                    self._human_whatsapp_outbox.bind_verified_inbound(
+                        tenant_id=context.tenant_id, unit_id=context.unit_id,
+                        conversation_id=conversation.conversation_id,
+                        connection_id=channel_id, sender=incoming.sender,
+                        external_ref=conversation.external_ref or "",
+                        provider_key="whatsapp_meta",
+                    )
                 if conversation.status is ConversationStatus.HUMAN_HANDOFF:
+                    if self._human_inbox is not None and incoming.message_type == "text":
+                        self._human_inbox.record_verified_handoff_inbound(
+                            tenant_id=context.tenant_id, unit_id=context.unit_id,
+                            conversation_id=conversation.conversation_id,
+                            connection_id=channel_id,
+                            provider_message_id=incoming.message_id,
+                            content=incoming.text or "",
+                            provider_key="whatsapp_meta",
+                        )
                     self._inbound.complete(
                         channel_id=channel_id,
                         message_id=incoming.message_id,

@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, select, update
@@ -85,15 +85,19 @@ class HumanWhatsAppOutbox:
     def bind_verified_inbound(
         self, *, tenant_id: str, unit_id: str, conversation_id: str,
         connection_id: str, sender: str, external_ref: str,
+        provider_key: str = "whatsapp_evolution",
     ) -> None:
-        """Only called after the verified Evolution webhook selected the scope."""
+        """Only the verified provider webhook may bind an exact conversation."""
+        if provider_key not in {"whatsapp_evolution", "whatsapp_meta"}:
+            raise HumanInboxDenied("inbox.provider_invalid")
         if not isinstance(sender, str) or not re.fullmatch(r"[0-9]{8,20}", sender):
             raise HumanInboxDenied("inbox.sender_invalid")
         digest = hmac.new(
             self._pepper, f"{connection_id}:{sender}".encode(),
             hashlib.sha256,
         ).hexdigest()
-        if external_ref != f"wae:{connection_id}:{digest}":
+        prefix = "wae" if provider_key == "whatsapp_evolution" else "wa"
+        if external_ref != f"{prefix}:{connection_id}:{digest}":
             raise HumanInboxDenied("inbox.sender_binding_mismatch")
         now = datetime.now(UTC)
         with self._sessions.begin() as db:
@@ -108,7 +112,7 @@ class HumanWhatsAppOutbox:
                 IntegrationConnectionORM.connection_id == connection_id,
                 IntegrationConnectionORM.tenant_id == tenant_id,
                 IntegrationConnectionORM.unit_id == unit_id,
-                IntegrationConnectionORM.provider_key == "whatsapp_evolution",
+                IntegrationConnectionORM.provider_key == provider_key,
             ))
             if conv is None or conn is None:
                 raise HumanInboxDenied("inbox.inbound_binding_denied")
@@ -170,7 +174,7 @@ class HumanWhatsAppOutbox:
                     IntegrationConnectionORM.connection_id == contact.connection_id,
                     IntegrationConnectionORM.tenant_id == principal.tenant_id,
                     IntegrationConnectionORM.unit_id == principal.unit_id,
-                    IntegrationConnectionORM.provider_key == "whatsapp_evolution",
+                    IntegrationConnectionORM.provider_key.in_(("whatsapp_evolution", "whatsapp_meta")),
                     IntegrationConnectionORM.status == "active",
                 ))
                 if conn is None:
@@ -403,18 +407,31 @@ class HumanWhatsAppOutbox:
         return {"status": "reviewed_uncertain", "automatic_resend": False,
                 "delivery_confirmed": False}
 
-    def process_one(self, *, integrations, transport) -> dict | None:
+    def process_one(
+        self, *, integrations=None, transport=None,
+        channels=None, provider_key: str = "whatsapp_evolution",
+    ) -> dict | None:
+        if provider_key not in {"whatsapp_evolution", "whatsapp_meta"}:
+            raise ValueError("inbox.worker_provider_invalid")
+        if provider_key == "whatsapp_meta" and channels is None:
+            raise ValueError("inbox.meta_channel_resolver_missing")
         """Trusted worker action, not a public HTTP route. At most one HTTP send."""
         with self._sessions.begin() as db:
             # PostgreSQL SKIP LOCKED avoids two workers claiming the same row.
-            stmt = select(HumanWhatsAppOutboxORM).where(
+            stmt = select(HumanWhatsAppOutboxORM).join(
+                IntegrationConnectionORM,
+                IntegrationConnectionORM.connection_id == HumanWhatsAppOutboxORM.connection_id,
+            ).where(
                 HumanWhatsAppOutboxORM.state == "pending",
+                IntegrationConnectionORM.provider_key == provider_key,
             ).order_by(
                 HumanWhatsAppOutboxORM.created_at,
                 HumanWhatsAppOutboxORM.message_id,
             ).limit(1)
             if db.bind.dialect.name == "postgresql":
-                stmt = stmt.with_for_update(skip_locked=True)
+                stmt = stmt.with_for_update(
+                    skip_locked=True, of=HumanWhatsAppOutboxORM,
+                )
             item = db.scalar(stmt)
             if item is None:
                 return None
@@ -438,7 +455,7 @@ class HumanWhatsAppOutbox:
                     IntegrationConnectionORM.connection_id == row.connection_id,
                     IntegrationConnectionORM.tenant_id == row.tenant_id,
                     IntegrationConnectionORM.unit_id == row.unit_id,
-                    IntegrationConnectionORM.provider_key == "whatsapp_evolution",
+                    IntegrationConnectionORM.provider_key == provider_key,
                 ))
                 if (
                     conv is None or conv.status != "human_handoff"
@@ -446,18 +463,25 @@ class HumanWhatsAppOutbox:
                 ):
                     # No send attempted, but quarantine conservatively.
                     return {"status": "sending_uncertain", "message_id": message_id}
-                config = json.loads(conn.config_json)
-                instance = config.get("instance_name")
-                if not isinstance(instance, str) or not instance:
-                    return {"status": "sending_uncertain", "message_id": message_id}
                 recipient = self._vault.decrypt(row.encrypted_recipient)
                 content = self._vault.decrypt(row.encrypted_message)
-                ciphertext = integrations.active_secret_ciphertexts(row.connection_id).get(
-                    "instance_token"
-                )
-                if ciphertext is None:
-                    return {"status": "sending_uncertain", "message_id": message_id}
-                token = self._vault.decrypt(ciphertext)
+                if provider_key == "whatsapp_evolution":
+                    config = json.loads(conn.config_json)
+                    instance = config.get("instance_name")
+                    if not isinstance(instance, str) or not instance:
+                        return {"status": "sending_uncertain", "message_id": message_id}
+                    ciphertext = integrations.active_secret_ciphertexts(
+                        row.connection_id
+                    ).get("instance_token")
+                    if ciphertext is None:
+                        return {"status": "sending_uncertain", "message_id": message_id}
+                    token = self._vault.decrypt(ciphertext)
+                else:
+                    config = channels.get_by_channel_id(row.connection_id)
+                    if config is None or config.tenant_id != row.tenant_id or (
+                        config.unit_id != row.unit_id
+                    ):
+                        return {"status": "sending_uncertain", "message_id": message_id}
             # Serialize provider transmission against handoff return and
             # channel pause/revoke. Never hold the intent transaction over HTTP:
             # it was already committed above for crash-safe at-most-once send.
@@ -476,9 +500,26 @@ class HumanWhatsAppOutbox:
                     or locked_conn is None or locked_conn.status != "active"
                     or locked_conn.revision != conn.revision):
                     return {"status": "sending_uncertain", "message_id": message_id}
-                reference = transport.send_text(
-                    instance, instance_token=token, recipient=recipient, message=content,
-                )
+                if provider_key == "whatsapp_meta":
+                    contact = hold.get(HumanWhatsAppContactORM, row.conversation_id)
+                    if contact is None or contact.connection_id != row.connection_id:
+                        return {"status": "sending_uncertain", "message_id": message_id}
+                    last_inbound = contact.updated_at.replace(
+                        tzinfo=contact.updated_at.tzinfo or UTC
+                    )
+                    # Free-form Meta messages require an active customer-service window.
+                    if datetime.now(UTC) - last_inbound >= timedelta(hours=24):
+                        return {"status": "sending_uncertain", "message_id": message_id}
+                if provider_key == "whatsapp_evolution":
+                    reference = transport.send_text(
+                        instance, instance_token=token, recipient=recipient, message=content,
+                    )
+                else:
+                    from .channels.whatsapp_meta import MetaWhatsAppClient
+
+                    reference = MetaWhatsAppClient(config).send_text(
+                        recipient=recipient, text=content, correlation_id=message_id,
+                    )
             if not isinstance(reference, str) or not 1 <= len(reference) <= 160:
                 raise RuntimeError("inbox.provider_reference_invalid")
             with self._sessions.begin() as db:
