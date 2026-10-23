@@ -153,14 +153,16 @@ def test_review_is_fm_only_audited_and_cannot_create_double_send(harness):
     first = outbox.list_pending(tenant_id="tenant-a", unit_id="unit-a")[0]
     with pytest.raises(ControlPlaneError, match="review_denied"):
         outbox.mark_reviewed(
-            event_id=first.event_id,
+            event_id=first.event_id, tenant_id="tenant-a", unit_id="unit-a",
             principal=replace(principal(), permissions=frozenset()),
         )
     assert outbox.mark_reviewed(
-        event_id=first.event_id, principal=principal("fm-alert-review-test-003"),
+        event_id=first.event_id, tenant_id="tenant-a", unit_id="unit-a",
+        principal=principal("fm-alert-review-test-003"),
     )
     assert outbox.mark_reviewed(
-        event_id=first.event_id, principal=principal("fm-alert-review-test-004"),
+        event_id=first.event_id, tenant_id="tenant-a", unit_id="unit-a",
+        principal=principal("fm-alert-review-test-004"),
     ) is False
     assert len(outbox.list_pending(tenant_id="tenant-a", unit_id="unit-a")) == 1
     assert scan(outbox).created == 0
@@ -217,3 +219,71 @@ def test_operator_api_is_read_only_authenticated_and_tenant_scoped(harness):
         headers={"X-Core-Admin-Key": "synthetic-operator-secret"},
     )
     assert foreign.status_code == 200 and foreign.json()["items"] == []
+
+
+def test_keyset_alert_pagination_exceeds_first_50_and_rejects_foreign_cursor(harness):
+    _, sessions, policy, outbox, _ = harness
+    enable(policy)
+    from datetime import UTC, datetime, timedelta
+
+    with sessions.begin() as db:
+        timestamp = datetime.now(UTC)
+        for index in range(123):
+            db.add(AIFinOpsAlertOutboxRecord(
+                event_id=f"{index:064x}", tenant_id="tenant-a", unit_id="unit-a",
+                request_id=f"request-{index:03}", policy_revision=1,
+                reasons_json='["provider_cost_unverified"]',
+                known_cost_subtotal="0", currency=None, unknown_attempts=1,
+                observed_attempts=1, status="pending",
+                created_at=timestamp + timedelta(seconds=index // 7),
+                reviewed_at=None,
+            ))
+        db.add(AIFinOpsAlertOutboxRecord(
+            event_id="f" * 64, tenant_id="foreign", unit_id="unit-a",
+            request_id="secret", policy_revision=1,
+            reasons_json='["provider_cost_unverified"]',
+            known_cost_subtotal="0", currency=None, unknown_attempts=1,
+            observed_attempts=1, status="pending", created_at=timestamp,
+            reviewed_at=None,
+        ))
+    cursor = None
+    collected = []
+    for page_no in range(3):
+        page = outbox.page_pending(
+            tenant_id="tenant-a", unit_id="unit-a", limit=50,
+            after_event_id=cursor,
+        )
+        collected.extend(item.event_id for item in page.items)
+        cursor = page.next_cursor
+        if page_no < 2:
+            assert cursor is not None
+        else:
+            assert cursor is None
+    assert len(collected) == len(set(collected)) == 123
+    assert collected == [f"{i:064x}" for i in range(123)]
+    with pytest.raises(ControlPlaneError, match="cursor_invalid"):
+        outbox.page_pending(
+            tenant_id="tenant-a", unit_id="unit-a", after_event_id="f" * 64,
+        )
+    with pytest.raises(ControlPlaneError, match="cursor_invalid"):
+        outbox.page_pending(
+            tenant_id="tenant-a", unit_id="unit-a", after_event_id="../foreign",
+        )
+    with pytest.raises(ControlPlaneError, match="alert_not_found"):
+        outbox.mark_reviewed(
+            event_id=collected[0], tenant_id="other",
+            unit_id="unit-a", principal=principal(),
+        )
+    with pytest.raises(ControlPlaneError, match="alert_not_found"):
+        outbox.mark_reviewed(
+            event_id="f" * 64, tenant_id="tenant-a",
+            unit_id="unit-a", principal=principal(),
+        )
+    assert outbox.mark_reviewed(
+        event_id=collected[0], tenant_id="tenant-a",
+        unit_id="unit-a", principal=principal("review-paginated-001"),
+    )
+    next_page = outbox.page_pending(
+        tenant_id="tenant-a", unit_id="unit-a", limit=50,
+    )
+    assert collected[0] not in [item.event_id for item in next_page.items]
