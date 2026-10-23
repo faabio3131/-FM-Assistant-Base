@@ -54,7 +54,15 @@ label{font-weight:600;font-size:13px}
 <button id="previous" disabled>Anterior</button>
 <button id="next" disabled>Próxima</button></nav>
 <p id="notice" role="status" aria-live="polite"></p>
-<div id="queue"></div></section>
+<div id="queue"></div><h3>Agentes disponíveis</h3>
+<div id="agents" class="meta">Carregando presença...</div>
+<h3>Limites operacionais</h3><p class="meta">Ajuste permitido aos gestores.</p>
+<label for="sla-minutes">Tempo máximo de espera (minutos)</label>
+<input id="sla-minutes" inputmode="numeric" type="number" min="1" max="1440">
+<label for="presence-seconds">Presença ativa (segundos)</label>
+<input id="presence-seconds" inputmode="numeric" type="number" min="30" max="900">
+<button id="save-policy">Salvar política</button>
+</section>
 <section aria-label="Conversa selecionada"><h2>Detalhes e responsável</h2>
 <div id="detail" class="empty">Selecione uma conversa na fila.</div>
 <div id="controls" hidden>
@@ -81,7 +89,7 @@ label{font-weight:600;font-size:13px}
 "use strict";
 const $ = id => document.getElementById(id);
 let page=0, nextPage=null, current=null, busy=false, pendingReplyId=null;
-let selectedChannel=null;
+let selectedChannel=null,policyRevision=0;
 const note = message => { $("notice").textContent=message; };
 async function api(path, method="GET", body=null) {
   const init={method,credentials:"same-origin",cache:"no-store",
@@ -113,14 +121,35 @@ async function load() {
       button.type="button";
       button.setAttribute("aria-pressed",String(current===item.conversation_id));
       button.append(elt("strong","",item.external_ref||item.conversation_id),
-        elt("small","meta",item.channel+" • "+(item.assigned_to||"Sem responsável")));
+        elt("small","meta",item.channel+" • "+(item.assigned_to||"Sem responsável")),
+        elt("small",item.sla_overdue?"tag":"meta",
+          "Espera "+item.waiting_minutes+" min / SLA "+item.sla_minutes+" min"+
+          (item.sla_overdue?" • SLA excedido":"")));
       button.onclick=()=>select(item);
       box.append(button);
     }
     if(!result.items.length)box.append(elt("p","empty","Nenhuma conversa aguardando."));
     note(result.items.length+" conversa(s) nesta página.");
+    await refreshAgents();
   }catch(error){note("Não foi possível carregar a fila: "+error.message);}
   finally{busy=false;$("refresh").disabled=false;}
+}
+async function refreshAgents(){
+  try{
+    const online=await api("/v1/inbox/presence");
+    $("agents").replaceChildren();
+    if(!online.items.length)$("agents").textContent="Nenhum agente com presença ativa.";
+    for(const agent of online.items)
+      $("agents").append(elt("p","meta",agent.display_name));
+  }catch{$("agents").textContent="Presença indisponível.";}
+}
+async function loadPolicy(){
+  try{
+    const policy=await api("/v1/inbox/policy");
+    $("sla-minutes").value=policy.first_response_minutes;
+    $("presence-seconds").value=policy.presence_timeout_seconds;
+    policyRevision=policy.revision;
+  }catch{note("Política SLA indisponível.");}
 }
 async function select(item) {
   current=item.conversation_id;pendingReplyId=null;$("controls").hidden=false;
@@ -168,6 +197,21 @@ async function action(name,body=null){
   }catch(error){note("Ação não concluída: "+error.message);}
   finally{busy=false;}
 }
+$("save-policy").onclick=async()=>{
+  const mins=Number($("sla-minutes").value);
+  const secs=Number($("presence-seconds").value);
+  if(!Number.isInteger(mins)||mins<1||mins>1440||
+    !Number.isInteger(secs)||secs<30||secs>900){
+    note("Verifique os limites da política.");return;
+  }
+  try{
+    await api("/v1/inbox/policy","PUT",{
+      first_response_minutes:mins,presence_timeout_seconds:secs,
+      expected_revision:policyRevision,
+    });
+    await loadPolicy();await load();note("SLA atualizado para esta unidade.");
+  }catch{note("Política não alterada: permissão ou revisão inválida.");}
+};
 $("refresh").onclick=()=>load();
 $("previous").onclick=()=>{if(page>0){page--;load();}};
 $("next").onclick=()=>{if(nextPage!==null){page=nextPage;load();}};
@@ -190,7 +234,9 @@ $("send-reply").onclick=()=>{const value=$("reply").value.trim();
     action("reply",{message_id:pendingReplyId,content:value});}};
 $("save-note").onclick=()=>{const value=$("note").value.trim();
   if(value)action("notes",{note:value});};
-load();
+load();loadPolicy();
+api("/v1/inbox/presence","POST").catch(()=>{});
+setInterval(()=>api("/v1/inbox/presence","POST").catch(()=>{}),60000);
 })();
 </script>
 </body></html>"""
