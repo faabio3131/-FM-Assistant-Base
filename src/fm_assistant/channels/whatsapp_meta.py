@@ -190,6 +190,57 @@ class MetaWhatsAppClient:
                         continue
         return tuple(messages)
 
+    def parse_delivery_statuses(
+        self, *, body: bytes, signature: str,
+    ) -> tuple[tuple[str, str], ...]:
+        """Only a valid Meta HMAC and matching phone_number_id can update state."""
+        if not self.validate_signature(body=body, signature=signature):
+            raise WhatsAppProviderError("meta_signature_invalid")
+        if len(body) > 256_000:
+            raise WhatsAppProviderError("meta_status_payload_too_large")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise WhatsAppProviderError("meta_webhook_invalid") from exc
+        if not isinstance(payload, Mapping):
+            raise WhatsAppProviderError("meta_webhook_invalid")
+        entries = payload.get("entry", [])
+        if not isinstance(entries, list) or len(entries) > 100:
+            raise WhatsAppProviderError("meta_status_payload_invalid")
+        results: list[tuple[str, str]] = []
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            changes = entry.get("changes", [])
+            if not isinstance(changes, list) or len(changes) > 50:
+                raise WhatsAppProviderError("meta_status_payload_invalid")
+            for change in changes:
+                if not isinstance(change, Mapping):
+                    continue
+                value = change.get("value")
+                if not isinstance(value, Mapping):
+                    continue
+                metadata = value.get("metadata")
+                if not isinstance(metadata, Mapping) or str(
+                    metadata.get("phone_number_id", "")
+                ) != self._config.phone_number_id:
+                    continue
+                statuses = value.get("statuses", [])
+                if not isinstance(statuses, list) or len(statuses) > 200:
+                    raise WhatsAppProviderError("meta_status_payload_invalid")
+                for item in statuses:
+                    if not isinstance(item, Mapping):
+                        continue
+                    reference = item.get("id")
+                    state = item.get("status")
+                    if (
+                        isinstance(reference, str) and 1 <= len(reference) <= 160
+                        and isinstance(state, str)
+                        and state in {"sent", "delivered", "read"}
+                    ):
+                        results.append((reference, state))
+        return tuple(results)
+
     def send_text(
         self,
         *,

@@ -201,7 +201,7 @@ async function select(item) {
   selectedChannel=item.channel;$("reply-panel").hidden=false;
   $("check-reply").hidden=true;
   $("reply-heading").textContent=item.channel==="whatsapp"?
-    "Resposta WhatsApp Evolution (fila segura; sem confirmação imediata)":
+    "Resposta WhatsApp (Evolution ou Meta; fila segura)":
     "Resposta humana Webchat/API";
   $("detail").replaceChildren(
     elt("p","",item.external_ref||item.conversation_id),

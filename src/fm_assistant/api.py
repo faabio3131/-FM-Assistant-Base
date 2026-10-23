@@ -719,6 +719,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         assistant=service,
         sender_pepper=cfg.credential_pepper,
         audio_transcriber=audio_transcriber,
+        human_inbox=human_inbox,
+        human_whatsapp_outbox=human_whatsapp_outbox,
     )
 
     @asynccontextmanager
