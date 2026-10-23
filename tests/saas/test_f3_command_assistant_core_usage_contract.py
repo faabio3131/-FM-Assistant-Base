@@ -13,6 +13,25 @@ from fm_assistant.core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from fm_assistant.provider_usage_reconciliation import from_trusted_core_receipt
 
 
+def _stub_metering_client(monkeypatch, handler):
+    class StubHTTP:
+        def __init__(self, **options):
+            assert options["trust_env"] is False
+            assert options["follow_redirects"] is False
+            assert options["timeout"] == 3.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, **kwargs):
+            return handler(url, **kwargs)
+
+    monkeypatch.setattr("fm_assistant.core_plan_usage_reader.httpx.Client", StubHTTP)
+
+
 def test_core_generation_and_authoritative_metering_remain_separate(monkeypatch):
     def post(url, *, headers, json, timeout):
         assert url == "https://core.internal.test/v1/ai/text"
@@ -22,12 +41,12 @@ def test_core_generation_and_authoritative_metering_remain_separate(monkeypatch)
         assert json["correlation_id"] == "message-one"
         return httpx.Response(200, json={"content": "Resposta segura"})
 
-    def get(url, *, params, headers, timeout, follow_redirects):
+    def get(url, *, params, headers):
         assert url == "https://core.internal.test/v1/plan/usage"
         assert headers["X-Core-Service-Key"] == "synthetic-internal-key"
         assert params["tenant_id"] == "tenant-one"
         assert params["unit_id"] == "unit-one"
-        assert not follow_redirects
+        assert params["resource"] == "ai.total_tokens"
         return httpx.Response(200, json={
             **params, "policy_revision": 4,
             "limit_units": 2000, "window_seconds": 3600,
@@ -36,7 +55,7 @@ def test_core_generation_and_authoritative_metering_remain_separate(monkeypatch)
         })
 
     monkeypatch.setattr(httpx, "post", post)
-    monkeypatch.setattr(httpx, "get", get)
+    _stub_metering_client(monkeypatch, get)
     client = CoreAIClient(
         base_url="https://core.internal.test", service_key="synthetic-internal-key",
     )
@@ -65,7 +84,7 @@ def test_core_generation_and_authoritative_metering_remain_separate(monkeypatch)
 
 
 def test_broken_core_metering_does_not_advertise_available_credits(monkeypatch):
-    monkeypatch.setattr(httpx, "get", lambda *a, **kw: httpx.Response(
+    _stub_metering_client(monkeypatch, lambda *a, **kw: httpx.Response(
         200, json={
             "tenant_id": "other-tenant", "unit_id": "unit-one",
             "resource": "ai.total_tokens", "scope": "tenant",
@@ -107,7 +126,9 @@ def test_signed_core_scope_requires_exact_types_and_balanced_quota(monkeypatch, 
         "remaining_units": 1700, "observed_at": now.isoformat(),
     }
     payload = {**legitimate, **forgery}
-    monkeypatch.setattr(httpx, "get", lambda *a, **kw: httpx.Response(200, json=payload))
+    _stub_metering_client(
+        monkeypatch, lambda *a, **kw: httpx.Response(200, json=payload),
+    )
     reader = CoreQuotaUsageHTTPReader(
         core_origin="https://core.internal.test", service_key="synthetic-key",
     )
@@ -127,7 +148,9 @@ def test_core_quota_reader_requires_timezone_aware_clock(monkeypatch):
         "consumed_units": 100, "reserved_units": 200,
         "remaining_units": 1700, "observed_at": now.isoformat(),
     }
-    monkeypatch.setattr(httpx, "get", lambda *a, **kw: httpx.Response(200, json=payload))
+    _stub_metering_client(
+        monkeypatch, lambda *a, **kw: httpx.Response(200, json=payload),
+    )
     reader = CoreQuotaUsageHTTPReader(
         core_origin="https://core.internal.test", service_key="synthetic-key",
     )
