@@ -95,6 +95,9 @@ class HumanInbox:
     ) -> dict:
         if page < 0 or page > 20000 or not 1 <= limit <= 100:
             raise HumanInboxDenied("inbox.invalid_page")
+        from .human_inbox_operations import HumanInboxOperations
+        policy = HumanInboxOperations(self._sessions).policy(principal=principal)
+        now = datetime.now(UTC)
         with self._sessions() as db:
             rows = db.execute(
                 select(ConversationORM, HumanInboxStateORM)
@@ -110,7 +113,16 @@ class HumanInbox:
                 ).offset(page * limit).limit(limit + 1)
             ).all()
             return {
-                "items": [self._view(conv, state) for conv, state in rows[:limit]],
+                "items": [{
+                    **self._view(conv, state),
+                    "waiting_minutes": max(0, int((now - conv.updated_at.replace(
+                        tzinfo=conv.updated_at.tzinfo or UTC
+                    )).total_seconds() // 60)),
+                    "sla_minutes": policy["first_response_minutes"],
+                    "sla_overdue": (now - conv.updated_at.replace(
+                        tzinfo=conv.updated_at.tzinfo or UTC
+                    )).total_seconds() >= 60 * policy["first_response_minutes"],
+                } for conv, state in rows[:limit]],
                 "next_page": page + 1 if len(rows) > limit else None,
             }
 

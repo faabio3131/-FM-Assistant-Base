@@ -43,6 +43,7 @@ from .evolution_queue import EvolutionInboundQueue, EvolutionQueueCapacityExceed
 from .evolution_runtime import EvolutionRuntime
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .human_inbox import HumanInbox, HumanInboxDenied
+from .human_inbox_operations import HumanInboxOperations
 from .human_inbox_page import render_human_inbox_page
 from .human_whatsapp_outbox import HumanWhatsAppOutbox
 from .identity import (
@@ -173,6 +174,12 @@ class HumanPrivateNoteRequest(BaseModel):
 class HumanWebReplyRequest(BaseModel):
     message_id: UUID4
     content: str = Field(min_length=1, max_length=20000)
+
+
+class HumanInboxSlaRequest(BaseModel):
+    first_response_minutes: int = Field(ge=1, le=1440, strict=True)
+    presence_timeout_seconds: int = Field(ge=30, le=900, strict=True)
+    expected_revision: int = Field(ge=0, le=1_000_000, strict=True)
 
 
 
@@ -547,6 +554,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     personas = PersonaSQLAlchemyRepository(session_factory)
     conversations = ConversationSQLAlchemyRepository(session_factory)
     human_inbox = HumanInbox(session_factory)
+    human_inbox_operations = HumanInboxOperations(session_factory)
     knowledge = KnowledgeRepository(session_factory)
     knowledge_versioning = VersionedKnowledgeIngestion(session_factory)
     audit = SQLAuditSink(session_factory)
@@ -715,6 +723,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge_versioning = knowledge_versioning
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
+        app.state.human_inbox_operations = human_inbox_operations
         app.state.human_whatsapp_outbox = human_whatsapp_outbox
         app.state.integration_repository = integration_repository
         app.state.integration_service = integration_service
@@ -1354,6 +1363,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             render_human_inbox_page(), headers={"Cache-Control": "no-store",
                                                 "X-Content-Type-Options": "nosniff"},
         )
+
+    @app.get("/v1/inbox/policy")
+    def human_inbox_policy(
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
+    ) -> dict:
+        return request.app.state.human_inbox_operations.policy(principal=principal)
+
+    @app.put("/v1/inbox/policy")
+    def update_human_inbox_policy(
+        payload: HumanInboxSlaRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_HANDOFF)),
+    ) -> dict:
+        try:
+            return request.app.state.human_inbox_operations.configure(
+                principal=principal,
+                first_response_minutes=payload.first_response_minutes,
+                presence_timeout_seconds=payload.presence_timeout_seconds,
+                expected_revision=payload.expected_revision,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/inbox/presence")
+    def pulse_human_inbox_presence(
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_RESPOND)),
+    ) -> dict:
+        try:
+            return request.app.state.human_inbox_operations.heartbeat(principal=principal)
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @app.get("/v1/inbox/presence")
+    def human_inbox_online_agents(
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
+    ) -> dict:
+        return request.app.state.human_inbox_operations.online_agents(principal=principal)
 
     @app.get("/v1/inbox")
     def list_human_inbox(

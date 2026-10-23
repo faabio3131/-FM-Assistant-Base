@@ -22,6 +22,7 @@ from fm_assistant.human_inbox import (
     HumanInboxDenied,
     HumanInboxEventORM,
 )
+from fm_assistant.human_inbox_operations import HumanInboxOperations
 from fm_assistant.identity import Role
 from fm_assistant.identity_repository import SessionPrincipal
 
@@ -194,3 +195,40 @@ def test_whatsapp_reply_fails_closed_until_transporter_is_connected(environment)
         )
     with sessions() as db:
         assert db.scalars(select(MessageORM)).all() == []
+
+
+def test_unit_sla_policy_is_configurable_without_cross_tenant_leaks(environment):
+    inbox, sessions = environment
+    operations = HumanInboxOperations(sessions)
+    manager = principal(role=Role.MANAGER)
+    initial = operations.policy(principal=manager)
+    assert initial["revision"] == 0
+    assert initial["first_response_minutes"] == 20
+    updated = operations.configure(
+        principal=manager, first_response_minutes=5,
+        presence_timeout_seconds=60, expected_revision=0,
+    )
+    assert updated["revision"] == 1
+    assert inbox.list_queue(principal=manager)["items"][0]["sla_minutes"] == 5
+    assert operations.policy(principal=principal(tenant="tenant-b"))["revision"] == 0
+    with pytest.raises(HumanInboxDenied, match="sla_revision_conflict"):
+        operations.configure(
+            principal=manager, first_response_minutes=9,
+            presence_timeout_seconds=60, expected_revision=0,
+        )
+    with pytest.raises(HumanInboxDenied, match="sla_manager_required"):
+        operations.configure(
+            principal=principal(), first_response_minutes=10,
+            presence_timeout_seconds=60, expected_revision=1,
+        )
+
+
+def test_presence_only_lists_active_agent_from_current_tenant_unit(environment):
+    _inbox, sessions = environment
+    operations = HumanInboxOperations(sessions)
+    agent = principal()
+    pulse = operations.heartbeat(principal=agent)
+    assert pulse["status"] == "online"
+    online = operations.online_agents(principal=agent)
+    assert [p["user_id"] for p in online["items"]] == ["operator-a"]
+    assert operations.online_agents(principal=principal(tenant="tenant-b"))["items"] == []

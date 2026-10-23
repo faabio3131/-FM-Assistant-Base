@@ -289,11 +289,17 @@ class HumanWhatsAppOutbox:
                 )).rowcount
                 if updated != 1:
                     raise HumanInboxDenied("inbox.send_intent_lost")
+                acknowledged_at = datetime.now(UTC)
                 db.add(MessageORM(
                     message_id=message_id, conversation_id=row.conversation_id,
                     tenant_id=row.tenant_id, unit_id=row.unit_id,
-                    role="assistant", content=content, created_at=datetime.now(UTC),
+                    role="assistant", content=content, created_at=acknowledged_at,
                 ))
+                db.execute(update(ConversationORM).where(
+                    ConversationORM.conversation_id == row.conversation_id,
+                    ConversationORM.tenant_id == row.tenant_id,
+                    ConversationORM.unit_id == row.unit_id,
+                ).values(updated_at=acknowledged_at))
             return {"status": "provider_acknowledged", "message_id": message_id}
         except Exception:  # noqa: BLE001 - uncertain provider outcome must never retry
             # No attempt to resend. Operator needs provider evidence.

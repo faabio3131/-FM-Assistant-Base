@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 import fm_assistant.command_bridge_control_models
 import fm_assistant.core_bridge_models
 import fm_assistant.human_inbox
+import fm_assistant.human_inbox_operations
 import fm_assistant.human_whatsapp_outbox  # noqa: F401 - bind human outbox metadata
 from alembic import context
 from fm_assistant.db import Base
