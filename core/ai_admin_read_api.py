@@ -7,6 +7,7 @@ and governed admin mutation/audit policy exist, no write API is exposed.
 from __future__ import annotations
 
 import hmac
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -23,6 +24,7 @@ from core.ai_control_plane import (
     ControlPlaneError,
 )
 from core.ai_finops_alerts import evaluate_request_cost_alert
+from core.ai_finops_alert_outbox import PersistentFinOpsAlertOutbox
 from core.ai_finops_policy_store import PersistentFinOpsAlertPolicies
 from core.ai_router import CapabilityIA
 from core.ai_usage_ledger import PersistentAIFinOps
@@ -244,6 +246,47 @@ def register_admin_read_routes(app: FastAPI) -> None:
             "has_more": next_cursor is not None,
             "provider_invoice_verified": False,
             "items": items,
+        }, headers={"Cache-Control": "no-store"})
+
+    @router.get("/usage/alerts/outbox")
+    def pending_finops_outbox(
+        request: Request,
+        tenant_id: str = Query(min_length=1, max_length=128),
+        unit_id: str = Query(min_length=1, max_length=128),
+        limit: int = Query(default=50, ge=1, le=100),
+    ) -> JSONResponse:
+        """Read persisted FM-owned alerts; no claim of provider invoice proof."""
+        try:
+            rows = PersistentFinOpsAlertOutbox(_sessions(request)).list_pending(
+                tenant_id=tenant_id, unit_id=unit_id, limit=limit,
+            )
+        except ControlPlaneError as exc:
+            raise HTTPException(
+                status_code=422, detail="core_finops.alert_outbox_invalid",
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503, detail="core_finops.alert_outbox_unavailable",
+            ) from exc
+        return JSONResponse({
+            "tenant_id": tenant_id, "unit_id": unit_id,
+            "status": "pending_review" if rows else "no_queued_alerts",
+            "provider_invoice_verified": False,
+            "automated_dispatch_enabled": False,
+            "items": [
+                {
+                    "event_id": row.event_id,
+                    "request_id": row.request_id,
+                    "policy_revision": row.policy_revision,
+                    "reasons": json.loads(row.reasons_json),
+                    "known_cost_subtotal": row.known_cost_subtotal,
+                    "currency": row.currency,
+                    "unknown_attempts": row.unknown_attempts,
+                    "observed_attempts": row.observed_attempts,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ],
         }, headers={"Cache-Control": "no-store"})
 
     @router.get("/finops/alert-policy")
