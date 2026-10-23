@@ -154,6 +154,12 @@ class EvolutionRuntime:
                     outbound_reference=outbound_reference,
                     status=normalized, evidence_sha256=evidence,
                 )
+                if self._human_whatsapp_outbox is not None:
+                    self._human_whatsapp_outbox.correlate_authenticated_status(
+                        connection_id=connection_id,
+                        provider_reference=outbound_reference,
+                        delivery_status=normalized, evidence_sha256=evidence,
+                    )
             return EvolutionDeliveryResult()
         if connection.status is not IntegrationStatus.ACTIVE:
             raise PermissionError("evolution_connection_inactive")

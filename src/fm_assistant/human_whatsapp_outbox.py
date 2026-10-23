@@ -56,12 +56,21 @@ class HumanWhatsAppOutboxORM(Base):
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     provider_reference: Mapped[str | None] = mapped_column(String(160))
     operation_id: Mapped[str | None] = mapped_column(String(64))
+    delivery_status: Mapped[str | None] = mapped_column(String(24))
+    delivery_evidence_sha256: Mapped[str | None] = mapped_column(String(64))
+    delivery_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    candidate_reference: Mapped[str | None] = mapped_column(String(160))
+    candidate_evidence_sha256: Mapped[str | None] = mapped_column(String(64))
+    candidate_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[str | None] = mapped_column(String(64))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
         Index("ix_human_whatsapp_queue", "state", "created_at"),
         Index("ix_human_whatsapp_scope", "tenant_id", "unit_id", "conversation_id"),
+        Index("ix_human_whatsapp_provider_receipt", "connection_id", "provider_reference"),
     )
 
 
@@ -197,8 +206,202 @@ class HumanWhatsAppOutbox:
             return {
                 "message_id": row.message_id, "status": row.state,
                 "provider_reference": row.provider_reference,
+                "delivery_status": row.delivery_status,
+                "delivery_observed_at": (
+                    row.delivery_observed_at.isoformat() if row.delivery_observed_at else None
+                ),
+                "provider_candidate": bool(row.candidate_evidence_sha256),
+                "candidate_reference": row.candidate_reference,
+                "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
                 "automatic_resend": False,
             }
+
+    def correlate_authenticated_status(
+        self, *, connection_id: str, provider_reference: str,
+        delivery_status: str, evidence_sha256: str,
+    ) -> bool:
+        """Only called after the established signed Evolution webhook verifier.
+
+        A status receipt is not matched by phone, content, timestamp or operator
+        input. It must match a unique provider ACK in this exact connection.
+        """
+        ranks = {"sent": 1, "delivered": 2, "read": 3}
+        if (delivery_status not in ranks
+            or not isinstance(connection_id, str)
+            or not isinstance(provider_reference, str)
+            or not 1 <= len(provider_reference) <= 160
+            or not isinstance(evidence_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is None):
+            raise ValueError("inbox.delivery_evidence_invalid")
+        with self._sessions.begin() as db:
+            matches = db.scalars(select(HumanWhatsAppOutboxORM).where(
+                HumanWhatsAppOutboxORM.connection_id == connection_id,
+                HumanWhatsAppOutboxORM.provider_reference == provider_reference,
+                HumanWhatsAppOutboxORM.state == "provider_acknowledged",
+            ).with_for_update()).all()
+            if len(matches) != 1:
+                return False
+            row = matches[0]
+            if ranks[delivery_status] <= ranks.get(row.delivery_status, 0):
+                return False
+            row.delivery_status = delivery_status
+            row.delivery_evidence_sha256 = evidence_sha256
+            row.delivery_observed_at = datetime.now(UTC)
+            row.updated_at = datetime.now(UTC)
+            return True
+
+    def review_queue(
+        self, *, principal: SessionPrincipal, limit: int = 50,
+    ) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise HumanInboxDenied("inbox.review_limit_invalid")
+        with self._sessions() as db:
+            condition = [
+                HumanWhatsAppOutboxORM.tenant_id == principal.tenant_id,
+                HumanWhatsAppOutboxORM.unit_id == principal.unit_id,
+                HumanWhatsAppOutboxORM.state.in_(("pending", "sending_uncertain")),
+            ]
+            if principal.role not in {Role.OWNER, Role.ADMIN, Role.MANAGER}:
+                condition.append(HumanWhatsAppOutboxORM.assigned_to == principal.user_id)
+            rows = db.scalars(select(HumanWhatsAppOutboxORM).where(
+                *condition,
+            ).order_by(
+                HumanWhatsAppOutboxORM.created_at,
+                HumanWhatsAppOutboxORM.message_id,
+            ).limit(limit + 1)).all()
+            return {
+                "items": [{
+                    "message_id": row.message_id,
+                    "conversation_id": row.conversation_id,
+                    "status": row.state,
+                    "candidate_staged": row.candidate_evidence_sha256 is not None,
+                    "reviewed": row.reviewed_at is not None,
+                    "created_at": row.created_at.isoformat(),
+                    "automatic_resend": False,
+                } for row in rows[:limit]],
+                "has_more": len(rows) > limit,
+            }
+
+    @staticmethod
+    def _require_reviewer(principal: SessionPrincipal, row: HumanWhatsAppOutboxORM):
+        if (row.tenant_id != principal.tenant_id
+            or row.unit_id != principal.unit_id
+            or (row.assigned_to != principal.user_id
+                and principal.role not in {Role.OWNER, Role.ADMIN, Role.MANAGER})):
+            raise HumanInboxDenied("inbox.review_forbidden")
+
+    def investigate_uncertain(
+        self, *, principal: SessionPrincipal, conversation_id: str,
+        message_id: str, candidate_reference: str, integrations, transport,
+    ) -> dict:
+        """Provider readback is a candidate, never delivery proof or a resend."""
+        if (not isinstance(candidate_reference, str)
+            or re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", candidate_reference) is None):
+            raise HumanInboxDenied("inbox.candidate_reference_invalid")
+        with self._sessions() as db:
+            row = db.get(HumanWhatsAppOutboxORM, message_id)
+            if row is None or row.conversation_id != conversation_id:
+                raise HumanInboxDenied("inbox.not_found")
+            self._require_reviewer(principal, row)
+            if row.state != "sending_uncertain":
+                raise HumanInboxDenied("inbox.not_uncertain")
+            connection_id = row.connection_id
+            conn = db.scalar(select(IntegrationConnectionORM).where(
+                IntegrationConnectionORM.connection_id == connection_id,
+                IntegrationConnectionORM.tenant_id == principal.tenant_id,
+                IntegrationConnectionORM.unit_id == principal.unit_id,
+                IntegrationConnectionORM.provider_key == "whatsapp_evolution",
+            ))
+            if conn is None:
+                raise HumanInboxDenied("inbox.channel_not_found")
+            config = json.loads(conn.config_json)
+            instance = config.get("instance_name")
+            if not isinstance(instance, str) or not instance:
+                raise HumanInboxDenied("inbox.instance_not_configured")
+            if row.candidate_reference and row.candidate_reference != candidate_reference:
+                raise HumanInboxDenied("inbox.candidate_conflict")
+            other = db.scalar(select(HumanWhatsAppOutboxORM.message_id).where(
+                HumanWhatsAppOutboxORM.connection_id == connection_id,
+                HumanWhatsAppOutboxORM.provider_reference == candidate_reference,
+                HumanWhatsAppOutboxORM.message_id != message_id,
+            ).limit(1))
+            if other is not None:
+                raise HumanInboxDenied("inbox.candidate_already_claimed")
+        secret = integrations.active_secret_ciphertexts(connection_id).get("instance_token")
+        if secret is None:
+            raise HumanInboxDenied("inbox.channel_unavailable")
+        evidence_sha256 = transport.find_outbound_evidence(
+            instance, instance_token=self._vault.decrypt(secret),
+            provider_reference=candidate_reference,
+        )
+        if evidence_sha256 is None:
+            return {"status": "not_found", "candidate_only": True, "automatic_resend": False}
+        if (not isinstance(evidence_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is None):
+            raise HumanInboxDenied("inbox.candidate_invalid")
+        with self._sessions.begin() as db:
+            row = db.scalar(select(HumanWhatsAppOutboxORM).where(
+                HumanWhatsAppOutboxORM.message_id == message_id,
+                HumanWhatsAppOutboxORM.tenant_id == principal.tenant_id,
+                HumanWhatsAppOutboxORM.unit_id == principal.unit_id,
+                HumanWhatsAppOutboxORM.conversation_id == conversation_id,
+            ).with_for_update())
+            if row is None:
+                raise HumanInboxDenied("inbox.not_found")
+            self._require_reviewer(principal, row)
+            if row.state != "sending_uncertain" or (
+                row.candidate_reference and row.candidate_reference != candidate_reference
+            ):
+                raise HumanInboxDenied("inbox.candidate_conflict")
+            row.candidate_reference = candidate_reference
+            row.candidate_evidence_sha256 = evidence_sha256
+            row.candidate_observed_at = datetime.now(UTC)
+            row.updated_at = datetime.now(UTC)
+            db.add(HumanInboxEventORM(
+                event_id=str(uuid4()), conversation_id=conversation_id,
+                tenant_id=principal.tenant_id, unit_id=principal.unit_id,
+                actor_id=principal.user_id, action="provider_candidate",
+                assigned_to=row.assigned_to, private_note=None,
+                created_at=datetime.now(UTC),
+            ))
+        return {"status": "candidate_only", "candidate_only": True,
+                "automatic_resend": False}
+
+    def review_uncertain(
+        self, *, principal: SessionPrincipal, conversation_id: str,
+        message_id: str, note: str,
+    ) -> dict:
+        if principal.role not in {Role.OWNER, Role.ADMIN, Role.MANAGER}:
+            raise HumanInboxDenied("inbox.manager_required")
+        note = note.strip()
+        if not 10 <= len(note) <= 2000:
+            raise HumanInboxDenied("inbox.review_note_invalid")
+        with self._sessions.begin() as db:
+            row = db.scalar(select(HumanWhatsAppOutboxORM).where(
+                HumanWhatsAppOutboxORM.message_id == message_id,
+                HumanWhatsAppOutboxORM.tenant_id == principal.tenant_id,
+                HumanWhatsAppOutboxORM.unit_id == principal.unit_id,
+                HumanWhatsAppOutboxORM.conversation_id == conversation_id,
+            ).with_for_update())
+            if row is None:
+                raise HumanInboxDenied("inbox.not_found")
+            if row.state != "sending_uncertain":
+                raise HumanInboxDenied("inbox.not_uncertain")
+            if row.reviewed_at is not None:
+                return {"status": "reviewed_uncertain", "automatic_resend": False,
+                        "delivery_confirmed": False}
+            row.reviewed_by = principal.user_id
+            row.reviewed_at = datetime.now(UTC)
+            db.add(HumanInboxEventORM(
+                event_id=str(uuid4()), conversation_id=conversation_id,
+                tenant_id=principal.tenant_id, unit_id=principal.unit_id,
+                actor_id=principal.user_id, action="uncertain_reviewed",
+                assigned_to=row.assigned_to, private_note=note,
+                created_at=datetime.now(UTC),
+            ))
+        # Intent stays uncertain. No assertion of successful delivery, no resend.
+        return {"status": "reviewed_uncertain", "automatic_resend": False,
+                "delivery_confirmed": False}
 
     def process_one(self, *, integrations, transport) -> dict | None:
         """Trusted worker action, not a public HTTP route. At most one HTTP send."""
