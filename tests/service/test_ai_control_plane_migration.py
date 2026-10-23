@@ -6,6 +6,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 
 import core.ai_circuit_state_store
+import core.ai_finops_alert_outbox
 import core.ai_quota_store
 import core.ai_usage_ledger  # noqa: F401 - registra metadata
 from alembic import command
@@ -24,6 +25,12 @@ def test_f3_versioned_migration_upgrade_downgrade(tmp_path):
         assert "core_ai_quota_policies" in inspect(engine).get_table_names()
         assert "core_ai_quota_reservations" in inspect(engine).get_table_names()
         assert "core_ai_provider_circuit_state" in inspect(engine).get_table_names()
+        assert "core_ai_finops_alert_outbox" in inspect(engine).get_table_names()
+        alert_indexes = inspect(engine).get_indexes("core_ai_finops_alert_outbox")
+        assert any(
+            item["name"] == "ix_core_finops_alert_outbox_scope"
+            for item in alert_indexes
+        )
         indexes = inspect(engine).get_indexes("core_ai_usage_events")
         assert any(idx["name"] == "uq_core_ai_usage_physical_attempt"
                    and idx["unique"] for idx in indexes)
