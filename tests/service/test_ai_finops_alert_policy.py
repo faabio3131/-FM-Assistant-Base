@@ -187,7 +187,9 @@ def test_http_requires_both_service_identity_and_recent_human_step_up(store):
             created_at=datetime.now(UTC), reviewed_at=None,
         ))
     review_path = "/internal/v1/command/ai/finops/alert-review"
-    review_body = {"event_id": event_id}
+    review_body = {
+        "event_id": event_id, "tenant_id": "tenant-a", "unit_id": "unit-a",
+    }
     assert http.post(review_path, json=review_body).status_code == 401
     review_headers = {
         **headers, "Authorization": "Bearer " +
@@ -196,6 +198,16 @@ def test_http_requires_both_service_identity_and_recent_human_step_up(store):
     assert http.post(
         review_path, json={"event_id": "invalid"}, headers=review_headers,
     ).status_code == 422
+    assert http.post(
+        review_path,
+        json={**review_body, "tenant_id": "foreign"},
+        headers=review_headers,
+    ).status_code == 409
+    assert http.post(
+        review_path,
+        json={**review_body, "unit_id": "foreign"},
+        headers=review_headers,
+    ).status_code == 409
     assert http.post(
         review_path, json=review_body, headers=review_headers,
     ).status_code == 204
