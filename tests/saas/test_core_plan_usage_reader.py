@@ -31,6 +31,27 @@ def _read(reader, now):
     )
 
 
+def _stub_core_http(monkeypatch, handler):
+    """Exercise the real client construction boundary with synthetic I/O."""
+    settings = []
+
+    class StubClient:
+        def __init__(self, **kwargs):
+            settings.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, **kwargs):
+            return handler(url, **kwargs)
+
+    monkeypatch.setattr("fm_assistant.core_plan_usage_reader.httpx.Client", StubClient)
+    return settings
+
+
 def test_reader_uses_trusted_service_key_and_exact_customer_scope(monkeypatch):
     now = datetime.now(UTC)
     sent = []
@@ -39,7 +60,7 @@ def test_reader_uses_trusted_service_key_and_exact_customer_scope(monkeypatch):
         sent.append((url, kwargs))
         return _response(now=now)
 
-    monkeypatch.setattr("fm_assistant.core_plan_usage_reader.httpx.get", mock_get)
+    settings = _stub_core_http(monkeypatch, mock_get)
     reader = CoreQuotaUsageHTTPReader(
         core_origin="https://core.invalid", service_key="synthetic-secret",
     )
@@ -50,7 +71,9 @@ def test_reader_uses_trusted_service_key_and_exact_customer_scope(monkeypatch):
     )
     assert sent[0][1]["headers"]["X-Core-Service-Key"] == "synthetic-secret"
     assert sent[0][1]["params"]["tenant_id"] == "tenant-a"
-    assert sent[0][1]["follow_redirects"] is False
+    assert settings[0]["follow_redirects"] is False
+    assert settings[0]["trust_env"] is False
+    assert settings[0]["timeout"] == 3.0
 
 
 @pytest.mark.parametrize("changed", [
@@ -61,9 +84,8 @@ def test_reader_uses_trusted_service_key_and_exact_customer_scope(monkeypatch):
 ])
 def test_reader_rejects_mismatch_instead_of_inventing_remaining(monkeypatch, changed):
     now = datetime.now(UTC)
-    monkeypatch.setattr(
-        "fm_assistant.core_plan_usage_reader.httpx.get",
-        lambda url, **kw: _response(now=now, **changed),
+    _stub_core_http(
+        monkeypatch, lambda url, **kw: _response(now=now, **changed),
     )
     reader = CoreQuotaUsageHTTPReader(
         core_origin="https://core.invalid", service_key="synthetic",
@@ -73,9 +95,8 @@ def test_reader_rejects_mismatch_instead_of_inventing_remaining(monkeypatch, cha
 
 def test_reader_rejects_stale_and_failed_provider_without_false_balance(monkeypatch):
     now = datetime.now(UTC)
-    monkeypatch.setattr(
-        "fm_assistant.core_plan_usage_reader.httpx.get",
-        lambda url, **kw: _response(now=now - timedelta(minutes=10)),
+    _stub_core_http(
+        monkeypatch, lambda url, **kw: _response(now=now - timedelta(minutes=10)),
     )
     reader = CoreQuotaUsageHTTPReader(
         core_origin="https://core.invalid", service_key="synthetic",
@@ -85,7 +106,7 @@ def test_reader_rejects_stale_and_failed_provider_without_false_balance(monkeypa
     def timeout(*args, **kwargs):
         raise httpx.TimeoutException("synthetic network timeout")
 
-    monkeypatch.setattr("fm_assistant.core_plan_usage_reader.httpx.get", timeout)
+    _stub_core_http(monkeypatch, timeout)
     assert _read(reader, now) is None
 
 
