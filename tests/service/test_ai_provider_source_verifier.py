@@ -34,6 +34,7 @@ def _fixture():
     signature = private.sign(b"FM_PROVIDER_USAGE_SOURCE_V1\n" + body)
     policy = ProviderSigningPolicy(
         issuer="signed-provider-fixture", public_key=public,
+        allowed_providers=frozenset({"verified-source"}),
     )
     return private, policy, body, signature, now
 
@@ -77,3 +78,29 @@ def test_unsigned_generic_provider_response_never_counts_as_signed_evidence():
     _, policy, body, _, now = _fixture()
     with pytest.raises(QuotaDenied, match="provider_source_unauthenticated"):
         _verify(policy, body, b"", now)
+
+def test_valid_signature_cannot_impersonate_another_provider():
+    private, policy, body, _, now = _fixture()
+    attacker_payload = json.loads(body)
+    attacker_payload["provider"] = "another-provider"
+    swapped = json.dumps(
+        attacker_payload, sort_keys=True, separators=(",", ":"),
+    ).encode()
+    valid_for_same_issuer = private.sign(b"FM_PROVIDER_USAGE_SOURCE_V1\\n" + swapped)
+    with pytest.raises(QuotaDenied, match="provider_source_statement_invalid"):
+        _verify(policy, swapped, valid_for_same_issuer, now)
+    # Adding the provider to an explicitly approved policy is the only valid
+    # way to authorize a gateway that legitimately verifies multiple vendors.
+    authorized = replace(
+        policy, allowed_providers=frozenset({"verified-source", "another-provider"}),
+    )
+    assert _verify(authorized, swapped, valid_for_same_issuer, now).provider == (
+        "another-provider"
+    )
+
+
+def test_signing_policy_rejects_missing_or_mutable_provider_grants():
+    _, policy, _, _, _ = _fixture()
+    for invalid in (frozenset(), {"verified-source"}, frozenset({""})):
+        with pytest.raises(ValueError, match="provider_source_policy_invalid"):
+            replace(policy, allowed_providers=invalid)
