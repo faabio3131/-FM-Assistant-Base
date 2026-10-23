@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -214,6 +214,11 @@ def test_operator_api_is_read_only_authenticated_and_tenant_scoped(harness):
     assert payload["provider_invoice_verified"] is False
     assert len(payload["items"]) == 2
     assert {x["request_id"] for x in payload["items"]} == {"high", "unknown"}
+    assert payload["next_cursor"] is None
+    assert client.get(
+        path, params={**params, "after_event_id": "not-hex"},
+        headers={"X-Core-Admin-Key": "synthetic-operator-secret"},
+    ).status_code == 422
     foreign = client.get(
         path, params={**params, "tenant_id": "foreign"},
         headers={"X-Core-Admin-Key": "synthetic-operator-secret"},
@@ -224,8 +229,6 @@ def test_operator_api_is_read_only_authenticated_and_tenant_scoped(harness):
 def test_keyset_alert_pagination_exceeds_first_50_and_rejects_foreign_cursor(harness):
     _, sessions, policy, outbox, _ = harness
     enable(policy)
-    from datetime import UTC, datetime, timedelta
-
     with sessions.begin() as db:
         timestamp = datetime.now(UTC)
         for index in range(123):
