@@ -48,6 +48,8 @@ class AlertScanPayload(BaseModel):
 class AlertReviewPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    tenant_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    unit_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
     event_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -129,7 +131,10 @@ def finops_alert_policy_router(
         try:
             PersistentFinOpsAlertOutbox(
                 sessionmaker(engine, expire_on_commit=False),
-            ).mark_reviewed(event_id=payload.event_id, principal=principal)
+            ).mark_reviewed(
+                event_id=payload.event_id, tenant_id=payload.tenant_id,
+                unit_id=payload.unit_id, principal=principal,
+            )
         except ControlPlaneError as exc:
             raise HTTPException(
                 status_code=409, detail="core_finops.alert_review_conflict",
