@@ -27,15 +27,19 @@ class CoreQuotaUsageHTTPReader:
         limit_units: int, window_seconds: int,
     ) -> MeterReading | None:
         try:
-            response = httpx.get(
-                self._origin + "/v1/plan/usage",
-                params={
-                    "tenant_id": tenant_id, "unit_id": unit_id,
-                    "resource": metric, "scope": scope,
-                },
-                headers={"X-Core-Service-Key": self._key},
-                timeout=3.0, follow_redirects=False,
-            )
+            # Dedicated trust boundary: environment HTTP(S) proxies and CA
+            # overrides must not intercept this private service credential.
+            with httpx.Client(
+                timeout=3.0, follow_redirects=False, trust_env=False,
+            ) as client:
+                response = client.get(
+                    self._origin + "/v1/plan/usage",
+                    params={
+                        "tenant_id": tenant_id, "unit_id": unit_id,
+                        "resource": metric, "scope": scope,
+                    },
+                    headers={"X-Core-Service-Key": self._key},
+                )
             if response.status_code != 200 or len(response.content) > 4096:
                 return None
             data = response.json()
