@@ -19,6 +19,8 @@ def test_vendeatendeia_runs_one_product_with_private_core():
     runtime = local_config()
     assert runtime.core_port == 8765
     assert runtime.app_port == 8000
+    assert runtime.evolution_inbound_worker is False
+    assert runtime.evolution_human_outbound_worker is False
     assert runtime.core_environment["FM_CORE_SERVICE_KEY"] == (
         runtime.assistant_environment["FM_ASSISTANT_CORE_SERVICE_KEY"]
     )
@@ -66,3 +68,42 @@ def test_config_can_use_shared_persistent_core_database():
     assert configured.core_port == 8766
     assert configured.app_port == 8010
     assert configured.assistant_environment["FM_ASSISTANT_CORE_BASE_URL"].endswith(":8766")
+
+
+def test_configured_evolution_starts_both_product_workers():
+    runtime = local_config(
+        FM_ASSISTANT_EVOLUTION_ORIGIN="https://evolution.example.test",
+        FM_ASSISTANT_EVOLUTION_GLOBAL_KEY="a-unique-provider-secret-that-is-not-shared",
+        FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNING_KEY="independent-signed-broker-key-strong",
+        FM_ASSISTANT_DATABASE_URL="sqlite:///./assistant-local.db",
+        FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY="local-test-vault-secret",
+        FM_ASSISTANT_CREDENTIAL_PEPPER="local-test-hash-pepper",
+    )
+    assert runtime.evolution_human_outbound_worker
+    assert runtime.evolution_inbound_worker
+    assert runtime.assistant_environment["FM_ASSISTANT_MODEL_BACKEND"] == "core"
+
+
+def test_only_outbound_worker_when_broker_signer_absent():
+    runtime = local_config(
+        FM_ASSISTANT_EVOLUTION_ORIGIN="https://evolution.example.test",
+        FM_ASSISTANT_EVOLUTION_GLOBAL_KEY="a-unique-provider-secret-that-is-not-shared",
+        FM_ASSISTANT_DATABASE_URL="sqlite:///./assistant-local.db",
+        FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY="local-test-vault-secret",
+        FM_ASSISTANT_CREDENTIAL_PEPPER="local-test-hash-pepper",
+    )
+    assert runtime.evolution_human_outbound_worker
+    assert not runtime.evolution_inbound_worker
+
+
+@pytest.mark.parametrize("invalid", [
+    {"FM_ASSISTANT_EVOLUTION_ORIGIN": "https://example.test"},
+    {"FM_ASSISTANT_EVOLUTION_GLOBAL_KEY": "only-secret"},
+    {
+        "FM_ASSISTANT_EVOLUTION_ORIGIN": "https://example.test",
+        "FM_ASSISTANT_EVOLUTION_GLOBAL_KEY": "secret-key",
+    },
+])
+def test_workers_fail_closed_on_incomplete_configuration(invalid):
+    with pytest.raises(ValueError):
+        local_config(**invalid)

@@ -26,6 +26,8 @@ class ProductRuntime:
     app_port: int
     core_environment: dict[str, str]
     assistant_environment: dict[str, str]
+    evolution_inbound_worker: bool = False
+    evolution_human_outbound_worker: bool = False
 
 
 def _port(raw: str) -> int:
@@ -65,6 +67,18 @@ def configure_product(source: dict[str, str]) -> ProductRuntime:
     ):
         raise ValueError("vendeatendeia.core_routes_or_database_required")
 
+    evolution_origin = source.get("FM_ASSISTANT_EVOLUTION_ORIGIN", "")
+    evolution_key = source.get("FM_ASSISTANT_EVOLUTION_GLOBAL_KEY", "")
+    webhook_signer = source.get("FM_ASSISTANT_EVOLUTION_WEBHOOK_SIGNING_KEY", "")
+    if bool(evolution_origin) != bool(evolution_key):
+        raise ValueError("vendeatendeia.evolution_configuration_incomplete")
+    if evolution_origin:
+        for key_name in (
+            "FM_ASSISTANT_DATABASE_URL", "FM_ASSISTANT_CHANNEL_ENCRYPTION_KEY",
+            "FM_ASSISTANT_CREDENTIAL_PEPPER",
+        ):
+            if not source.get(key_name):
+                raise ValueError("vendeatendeia.worker_configuration_incomplete")
     core_env = dict(source)
     core_env.update({
         "FM_CORE_ENV": "development",
@@ -83,6 +97,8 @@ def configure_product(source: dict[str, str]) -> ProductRuntime:
     return ProductRuntime(
         core_port=core_port, app_port=app_port,
         core_environment=core_env, assistant_environment=assistant_env,
+        evolution_inbound_worker=bool(evolution_origin and webhook_signer),
+        evolution_human_outbound_worker=bool(evolution_origin),
     )
 
 
@@ -127,6 +143,8 @@ def main() -> int:
         return 2
     core: subprocess.Popen[bytes] | None = None
     assistant: subprocess.Popen[bytes] | None = None
+    evolution_worker: subprocess.Popen[bytes] | None = None
+    human_outbox_worker: subprocess.Popen[bytes] | None = None
     try:
         core = subprocess.Popen([
             sys.executable, "-m", "uvicorn", "core.ai_service_main:app",
@@ -137,6 +155,17 @@ def main() -> int:
             sys.executable, "-m", "uvicorn", "fm_assistant.main:app",
             "--host", "127.0.0.1", "--port", str(config.app_port),
         ], cwd=ROOT, env=config.assistant_environment)
+        # These are internal workers of ONE product, not independent SaaS.
+        # They are never started until their provider settings are configured.
+        if config.evolution_inbound_worker:
+            evolution_worker = subprocess.Popen([
+                sys.executable, "-m", "fm_assistant.evolution_worker",
+                "--batch", "10", "--sleep", "2",
+            ], cwd=ROOT, env=config.assistant_environment)
+        if config.evolution_human_outbound_worker:
+            human_outbox_worker = subprocess.Popen([
+                sys.executable, "-m", "fm_assistant.human_whatsapp_worker",
+            ], cwd=ROOT, env=config.assistant_environment)
         print(
             f"VendeAtendeIA iniciado: http://127.0.0.1:{config.app_port} "
             "(Core interno sem exposição pública)", flush=True,
@@ -146,6 +175,10 @@ def main() -> int:
                 raise RuntimeError("vendeatendeia.internal_core_stopped")
             if assistant.poll() is not None:
                 raise RuntimeError("vendeatendeia.assistant_stopped")
+            if evolution_worker is not None and evolution_worker.poll() is not None:
+                raise RuntimeError("vendeatendeia.inbound_worker_stopped")
+            if human_outbox_worker is not None and human_outbox_worker.poll() is not None:
+                raise RuntimeError("vendeatendeia.human_outbox_worker_stopped")
             time.sleep(0.5)
     except KeyboardInterrupt:
         return 0
@@ -153,6 +186,8 @@ def main() -> int:
         print(f"VendeAtendeIA indisponível: {exc}", file=sys.stderr)
         return 1
     finally:
+        stop_process(human_outbox_worker)
+        stop_process(evolution_worker)
         stop_process(assistant)
         stop_process(core)
 
