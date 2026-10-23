@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, pool
 
 import core.ai_admin_audit
 import core.ai_circuit_state_store
+import core.ai_finops_alert_outbox
 import core.ai_finops_policy_store
 import core.ai_provider_evidence_store
 import core.ai_quota_store
