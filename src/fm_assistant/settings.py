@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -208,10 +209,18 @@ class Settings:
                     "FM_ASSISTANT_CORE_BASE_URL e FM_ASSISTANT_CORE_SERVICE_KEY "
                     "são obrigatórios para backend core"
                 )
-            if self.production_like and len(self.core_service_key or "") < 32:
-                raise RuntimeError(
-                    "FM_ASSISTANT_CORE_SERVICE_KEY deve ter ao menos 32 caracteres"
-                )
+            if self.production_like:
+                origin = urlsplit(self.core_base_url or "")
+                if (
+                    origin.scheme != "https" or not origin.hostname
+                    or origin.username or origin.password or origin.query
+                    or origin.fragment or origin.path not in {"", "/"}
+                ):
+                    raise RuntimeError("FM_ASSISTANT_CORE_TLS_REQUIRED")
+                if len(self.core_service_key or "") < 32:
+                    raise RuntimeError(
+                        "FM_ASSISTANT_CORE_SERVICE_KEY deve ter ao menos 32 caracteres"
+                    )
         return self
 
 
