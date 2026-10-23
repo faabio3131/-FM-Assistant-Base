@@ -158,7 +158,7 @@ def create_app(
                 policy_client.close()
 
     app = FastAPI(
-        title="FM Core Base AI Service",
+        title="VendeAtendeIA - Motor de IA Interno",
         version="0.1.0",
         description="Roteamento multimodelo e capacidades de IA da FM Tecnologia.",
         lifespan=lifespan,
