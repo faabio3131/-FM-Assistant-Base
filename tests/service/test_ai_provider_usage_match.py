@@ -44,7 +44,10 @@ def signed_statement(*, overrides=None):
     public = private.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw,
     )
-    policy = ProviderSigningPolicy(issuer="provider-statement-fixture", public_key=public)
+    policy = ProviderSigningPolicy(
+        issuer="provider-statement-fixture", public_key=public,
+        allowed_providers=frozenset({"verified-provider"}),
+    )
     statement = {
         "issuer": policy.issuer, "request_id": "req-1", "tenant_id": "tenant-a",
         "unit_id": "unit-a", "provider": "verified-provider",
