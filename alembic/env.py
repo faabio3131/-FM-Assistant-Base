@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 
 import fm_assistant.core_bridge_models  # noqa: F401 - bind migration metadata
 import fm_assistant.command_bridge_control_models  # noqa: F401 - bind audit metadata
+import fm_assistant.human_inbox  # noqa: F401 - bind human inbox metadata
 from fm_assistant.db import Base
 
 config = context.config

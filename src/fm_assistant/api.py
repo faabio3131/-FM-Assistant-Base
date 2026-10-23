@@ -42,6 +42,8 @@ from .evolution_onboarding import EvolutionOnboarding
 from .evolution_queue import EvolutionInboundQueue, EvolutionQueueCapacityExceeded
 from .evolution_runtime import EvolutionRuntime
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
+from .human_inbox import HumanInbox, HumanInboxDenied
+from .human_inbox_page import render_human_inbox_page
 from .identity import (
     MACHINE_PERMISSIONS,
     AuthContext,
@@ -157,6 +159,14 @@ class MessageResponse(BaseModel):
 
 class HandoffRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
+
+
+class HumanTransferRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+
+
+class HumanPrivateNoteRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=4000)
 
 
 
@@ -530,6 +540,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     personas = PersonaSQLAlchemyRepository(session_factory)
     conversations = ConversationSQLAlchemyRepository(session_factory)
+    human_inbox = HumanInbox(session_factory)
     knowledge = KnowledgeRepository(session_factory)
     knowledge_versioning = VersionedKnowledgeIngestion(session_factory)
     audit = SQLAuditSink(session_factory)
@@ -693,6 +704,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge = knowledge
         app.state.knowledge_versioning = knowledge_versioning
         app.state.assistant_service = service
+        app.state.human_inbox = human_inbox
         app.state.integration_repository = integration_repository
         app.state.integration_service = integration_service
         app.state.evolution_onboarding = evolution_onboarding
@@ -1318,6 +1330,100 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="conversation_not_found") from exc
         return _conversation_response(conversation)
 
+
+
+
+    # Human Inbox is product functionality: scoped to signed human session only.
+    # WhatsApp handoff already pauses AI; these operations own the work queue.
+    @app.get("/app/inbox", response_class=HTMLResponse)
+    def human_inbox_page(
+        _principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
+    ) -> HTMLResponse:
+        return HTMLResponse(
+            render_human_inbox_page(), headers={"Cache-Control": "no-store",
+                                                "X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/v1/inbox")
+    def list_human_inbox(
+        request: Request,
+        page: int = Query(default=0, ge=0, le=20000),
+        limit: int = Query(default=50, ge=1, le=100),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
+    ) -> dict:
+        return request.app.state.human_inbox.list_queue(
+            principal=principal, page=page, limit=limit,
+        )
+
+    @app.post("/v1/inbox/{conversation_id}/claim")
+    def claim_human_conversation(
+        conversation_id: str,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_HANDOFF)),
+    ) -> dict:
+        try:
+            return request.app.state.human_inbox.claim(
+                principal=principal, conversation_id=conversation_id,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/inbox/{conversation_id}/transfer")
+    def transfer_human_conversation(
+        conversation_id: str,
+        payload: HumanTransferRequest,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_HANDOFF)),
+    ) -> dict:
+        try:
+            return request.app.state.human_inbox.transfer(
+                principal=principal, conversation_id=conversation_id,
+                target_user_id=payload.user_id,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/inbox/{conversation_id}/notes")
+    def add_human_private_note(
+        conversation_id: str,
+        payload: HumanPrivateNoteRequest,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_RESPOND)),
+    ) -> dict:
+        try:
+            return request.app.state.human_inbox.add_note(
+                principal=principal, conversation_id=conversation_id, note=payload.note,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/inbox/{conversation_id}/activity")
+    def human_inbox_activity(
+        conversation_id: str,
+        request: Request,
+        page: int = Query(default=0, ge=0, le=20000),
+        limit: int = Query(default=50, ge=1, le=100),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_RESPOND)),
+    ) -> dict:
+        try:
+            return request.app.state.human_inbox.activity(
+                principal=principal, conversation_id=conversation_id, page=page, limit=limit,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=404, detail="inbox.not_found") from exc
+
+    @app.post("/v1/inbox/{conversation_id}/return-to-ai")
+    def return_human_conversation_to_ai(
+        conversation_id: str,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_HANDOFF)),
+    ) -> dict:
+        try:
+            return request.app.state.human_inbox.return_to_ai(
+                principal=principal, conversation_id=conversation_id,
+            )
+        except HumanInboxDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
     @app.get("/v1/integrations/catalog", response_model=list[IntegrationProviderResponse])
