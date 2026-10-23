@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from hashlib import sha256
 
-from sqlalchemy import DateTime, Index, Integer, String, select
+from sqlalchemy import DateTime, Index, Integer, String, and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
@@ -51,6 +51,12 @@ class AIFinOpsAlertOutboxRecord(ControlPlaneBase):
 class FinOpsAlertScanResult:
     created: int
     scanned: int
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class FinOpsAlertPage:
+    items: tuple[AIFinOpsAlertOutboxRecord, ...]
     next_cursor: str | None
 
 
@@ -134,35 +140,79 @@ class PersistentFinOpsAlertOutbox:
             created=created, scanned=len(ids), next_cursor=cursor,
         )
 
-    def list_pending(
+    def page_pending(
         self, *, tenant_id: str, unit_id: str, limit: int = 50,
-    ) -> tuple[AIFinOpsAlertOutboxRecord, ...]:
+        after_event_id: str | None = None,
+    ) -> FinOpsAlertPage:
         self._policies.get(tenant_id=tenant_id, unit_id=unit_id)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ControlPlaneError("core_finops.alert_outbox_limit_invalid")
+        if after_event_id is not None and (
+            type(after_event_id) is not str or len(after_event_id) != 64
+            or any(c not in "0123456789abcdef" for c in after_event_id)
+        ):
+            raise ControlPlaneError("core_finops.alert_outbox_cursor_invalid")
         with self._sessions() as db:
-            return tuple(db.scalars(
-                select(AIFinOpsAlertOutboxRecord).where(
-                    AIFinOpsAlertOutboxRecord.tenant_id == tenant_id,
-                    AIFinOpsAlertOutboxRecord.unit_id == unit_id,
-                    AIFinOpsAlertOutboxRecord.status == "pending",
-                ).order_by(
+            predicates = [
+                AIFinOpsAlertOutboxRecord.tenant_id == tenant_id,
+                AIFinOpsAlertOutboxRecord.unit_id == unit_id,
+                AIFinOpsAlertOutboxRecord.status == "pending",
+            ]
+            if after_event_id is not None:
+                # Scope and cursor authority live in Core, not in an FMCC UI.
+                anchor = db.scalar(
+                    select(AIFinOpsAlertOutboxRecord).where(
+                        AIFinOpsAlertOutboxRecord.event_id == after_event_id,
+                        AIFinOpsAlertOutboxRecord.tenant_id == tenant_id,
+                        AIFinOpsAlertOutboxRecord.unit_id == unit_id,
+                    )
+                )
+                if anchor is None:
+                    raise ControlPlaneError("core_finops.alert_outbox_cursor_invalid")
+                predicates.append(or_(
+                    AIFinOpsAlertOutboxRecord.created_at > anchor.created_at,
+                    and_(
+                        AIFinOpsAlertOutboxRecord.created_at == anchor.created_at,
+                        AIFinOpsAlertOutboxRecord.event_id > anchor.event_id,
+                    ),
+                ))
+            rows = tuple(db.scalars(
+                select(AIFinOpsAlertOutboxRecord).where(*predicates).order_by(
                     AIFinOpsAlertOutboxRecord.created_at,
                     AIFinOpsAlertOutboxRecord.event_id,
-                ).limit(limit)
+                ).limit(limit + 1)
             ).all())
+            page = rows[:limit]
+            return FinOpsAlertPage(
+                items=page,
+                next_cursor=page[-1].event_id if len(rows) > limit else None,
+            )
 
-    def mark_reviewed(self, *, event_id: str, principal: VerifiedCommandAdmin) -> bool:
+    def list_pending(
+        self, *, tenant_id: str, unit_id: str, limit: int = 50,
+    ) -> tuple[AIFinOpsAlertOutboxRecord, ...]:
+        return self.page_pending(
+            tenant_id=tenant_id, unit_id=unit_id, limit=limit,
+        ).items
+
+    def mark_reviewed(
+        self, *, event_id: str, tenant_id: str, unit_id: str,
+        principal: VerifiedCommandAdmin,
+    ) -> bool:
         if (
             type(event_id) is not str or len(event_id) != 64
             or any(c not in "0123456789abcdef" for c in event_id)
             or not isinstance(principal, VerifiedCommandAdmin)
             or "core.ai.admin.mutate" not in principal.permissions
         ):
+
             raise ControlPlaneError("core_finops.alert_review_denied")
+        self._policies.get(tenant_id=tenant_id, unit_id=unit_id)
         with self._sessions.begin() as db:
             event = db.scalar(select(AIFinOpsAlertOutboxRecord).where(
                 AIFinOpsAlertOutboxRecord.event_id == event_id,
+                AIFinOpsAlertOutboxRecord.tenant_id == tenant_id,
+                AIFinOpsAlertOutboxRecord.unit_id == unit_id,
             ).with_for_update())
             if event is None:
                 raise ControlPlaneError("core_finops.alert_not_found")

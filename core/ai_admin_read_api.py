@@ -254,11 +254,15 @@ def register_admin_read_routes(app: FastAPI) -> None:
         tenant_id: str = Query(min_length=1, max_length=128),
         unit_id: str = Query(min_length=1, max_length=128),
         limit: int = Query(default=50, ge=1, le=100),
+        after_event_id: str | None = Query(
+            default=None, pattern=r"^[0-9a-f]{64}$",
+        ),
     ) -> JSONResponse:
         """Read persisted FM-owned alerts; no claim of provider invoice proof."""
         try:
-            rows = PersistentFinOpsAlertOutbox(_sessions(request)).list_pending(
+            page = PersistentFinOpsAlertOutbox(_sessions(request)).page_pending(
                 tenant_id=tenant_id, unit_id=unit_id, limit=limit,
+                after_event_id=after_event_id,
             )
         except ControlPlaneError as exc:
             raise HTTPException(
@@ -270,9 +274,10 @@ def register_admin_read_routes(app: FastAPI) -> None:
             ) from exc
         return JSONResponse({
             "tenant_id": tenant_id, "unit_id": unit_id,
-            "status": "pending_review" if rows else "no_queued_alerts",
+            "status": "pending_review" if page.items else "no_queued_alerts",
             "provider_invoice_verified": False,
             "automated_dispatch_enabled": False,
+            "next_cursor": page.next_cursor,
             "items": [
                 {
                     "event_id": row.event_id,
@@ -285,7 +290,7 @@ def register_admin_read_routes(app: FastAPI) -> None:
                     "observed_attempts": row.observed_attempts,
                     "created_at": row.created_at.isoformat(),
                 }
-                for row in rows
+                for row in page.items
             ],
         }, headers={"Cache-Control": "no-store"})
 
