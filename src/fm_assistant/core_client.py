@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
@@ -16,9 +17,14 @@ class CoreAIClient:
         service_key: str,
         timeout_seconds: float = 30.0,
     ) -> None:
-        url = base_url.rstrip("/")
-        if not url.startswith(("http://", "https://")):
+        parsed = urlsplit(base_url)
+        if (
+            parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
             raise ValueError("core_base_url_invalid")
+        url = base_url.rstrip("/")
         if not service_key.strip():
             raise ValueError("core_service_key_required")
         self._base_url = url
@@ -42,19 +48,21 @@ class CoreAIClient:
     ) -> str:
         request_id = str(uuid4())
         corr = correlation_id or request_id
-        response = httpx.post(
-            self._base_url + "/v1/ai/text",
-            headers=self._headers(),
-            json={
-                "tenant_id": tenant_id,
-                "unit_id": unit_id,
-                "request_id": request_id,
-                "correlation_id": corr,
-                "system_prompt": system_prompt,
-                "messages": messages,
-            },
-            timeout=self._timeout,
-        )
+        with httpx.Client(
+            timeout=self._timeout, follow_redirects=False, trust_env=False,
+        ) as client:
+            response = client.post(
+                self._base_url + "/v1/ai/text",
+                headers=self._headers(),
+                json={
+                    "tenant_id": tenant_id,
+                    "unit_id": unit_id,
+                    "request_id": request_id,
+                    "correlation_id": corr,
+                    "system_prompt": system_prompt,
+                    "messages": messages,
+                },
+            )
         self._raise_for_core(response)
         payload = response.json()
         content = str(payload.get("content", "")).strip()
@@ -72,23 +80,25 @@ class CoreAIClient:
         mime_type: str,
     ) -> str:
         request_id = str(uuid4())
-        response = httpx.post(
-            self._base_url + "/v1/ai/transcribe",
-            headers=self._headers(),
-            json={
-                "tenant_id": tenant_id,
-                "unit_id": unit_id,
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-                "mime_type": mime_type,
-                "audio_base64": base64.b64encode(content).decode("ascii"),
-                "instruction": (
-                    "Transcreva fielmente o áudio para texto no idioma falado. "
-                    "Não invente conteúdo ausente."
-                ),
-            },
-            timeout=self._timeout,
-        )
+        with httpx.Client(
+            timeout=self._timeout, follow_redirects=False, trust_env=False,
+        ) as client:
+            response = client.post(
+                self._base_url + "/v1/ai/transcribe",
+                headers=self._headers(),
+                json={
+                    "tenant_id": tenant_id,
+                    "unit_id": unit_id,
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                    "mime_type": mime_type,
+                    "audio_base64": base64.b64encode(content).decode("ascii"),
+                    "instruction": (
+                        "Transcreva fielmente o áudio para texto no idioma falado. "
+                        "Não invente conteúdo ausente."
+                    ),
+                },
+            )
         self._raise_for_core(response)
         payload = response.json()
         text = str(payload.get("content", "")).strip()
