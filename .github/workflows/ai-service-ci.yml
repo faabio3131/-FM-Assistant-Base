@@ -36,6 +36,7 @@ jobs:
           core/ai_provider_evidence_store.py
           core/ai_provider_source_verifier.py
           core/ai_provider_usage_match.py
+          core/ai_provider_request_reconciliation.py
           core/ai_verified_usage_receipt.py
           core/ai_tenant_credential_resolver.py
           core/ai_assistant_credential_gateway.py
