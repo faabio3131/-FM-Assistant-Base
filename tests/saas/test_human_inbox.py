@@ -232,3 +232,51 @@ def test_presence_only_lists_active_agent_from_current_tenant_unit(environment):
     online = operations.online_agents(principal=agent)
     assert [p["user_id"] for p in online["items"]] == ["operator-a"]
     assert operations.online_agents(principal=principal(tenant="tenant-b"))["items"] == []
+
+
+def test_verified_whatsapp_handoff_keeps_customer_messages_idempotently(environment):
+    inbox, sessions = environment
+    with sessions.begin() as db:
+        conv = db.get(ConversationORM, "conversation-tenant-a")
+        conv.external_ref = "wae:conn-1:bound-sender-digest"
+    first = inbox.record_verified_handoff_inbound(
+        tenant_id="tenant-a", unit_id="unit-1",
+        conversation_id="conversation-tenant-a",
+        connection_id="conn-1", provider_message_id="provider-msg-001",
+        content="Ainda preciso de ajuda.",
+    )
+    second = inbox.record_verified_handoff_inbound(
+        tenant_id="tenant-a", unit_id="unit-1",
+        conversation_id="conversation-tenant-a",
+        connection_id="conn-1", provider_message_id="provider-msg-001",
+        content="Ainda preciso de ajuda.",
+    )
+    assert first == second
+    assert len(first) == 64
+    with sessions() as db:
+        messages = db.scalars(select(MessageORM)).all()
+        assert len(messages) == 1
+        assert messages[0].role == "user"
+        assert messages[0].content == "Ainda preciso de ajuda."
+
+
+def test_verified_whatsapp_handoff_rejects_foreign_scope_and_wrong_sender(environment):
+    inbox, sessions = environment
+    with sessions.begin() as db:
+        db.get(ConversationORM, "conversation-tenant-a").external_ref = (
+            "wae:conn-1:bound-sender-digest"
+        )
+    with pytest.raises(HumanInboxDenied, match="inbound_scope_or_state_changed"):
+        inbox.record_verified_handoff_inbound(
+            tenant_id="tenant-b", unit_id="unit-1",
+            conversation_id="conversation-tenant-a", connection_id="conn-1",
+            provider_message_id="msg-1", content="Mensagem estrangeira.",
+        )
+    with pytest.raises(HumanInboxDenied, match="inbound_scope_or_state_changed"):
+        inbox.record_verified_handoff_inbound(
+            tenant_id="tenant-a", unit_id="unit-1",
+            conversation_id="conversation-tenant-a", connection_id="other-connection",
+            provider_message_id="msg-1", content="Mensagem de outro canal.",
+        )
+    with sessions() as db:
+        assert db.scalars(select(MessageORM)).all() == []

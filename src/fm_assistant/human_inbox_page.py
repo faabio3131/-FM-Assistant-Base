@@ -40,6 +40,10 @@ label{font-weight:600;font-size:13px}
 .meta{font-size:12px;color:#586f7e}
 .tag{background:#eaf5eb;color:#226241;border-radius:4px;padding:2px 6px;font-size:12px}
 #notice{min-height:25px;color:#265368;margin:0 0 12px}
+#transcript{max-height:360px;overflow-y:auto;padding:12px;background:#f7fafc;border-radius:9px}
+.bubble{max-width:94%;margin:8px 0;padding:9px 12px;background:#fff;border:1px solid #dce6eb;border-radius:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.bubble.answer{background:#eaf5f9;margin-left:auto}
+.bubble small{display:block;color:#607786;font-size:11px;font-weight:600;margin-bottom:4px}
 #detail{overflow-wrap:anywhere}.tools{display:flex;gap:8px;flex-wrap:wrap}
 .event{padding:9px;border-bottom:1px solid #edf0f2;font-size:13px}
 .event .note{white-space:pre-wrap;color:#364d5b}
@@ -68,6 +72,7 @@ label{font-weight:600;font-size:13px}
 </section>
 <section aria-label="Conversa selecionada"><h2>Detalhes e responsável</h2>
 <div id="detail" class="empty">Selecione uma conversa na fila.</div>
+<h3>Histórico da conversa</h3><div id="transcript" class="empty">Selecione uma conversa.</div>
 <div id="controls" hidden>
 <div class="tools">
 <button class="primary" id="claim">Assumir atendimento</button>
@@ -167,7 +172,7 @@ async function refreshOutbox(){
           elt("p","meta","ID da mensagem: "+item.message_id),
           elt("p","meta","Estado: "+item.status),
         );
-        activity();
+        activity();transcript();
       };
       $("outbox-operations").append(button);
     }
@@ -202,7 +207,26 @@ async function select(item) {
     elt("p","",item.external_ref||item.conversation_id),
     elt("p","meta","Canal: "+item.channel+" • Estado: "+item.status),
     elt("p","", "Responsável: "+(item.assigned_to||"aguardando")));
-  await load();await activity();
+  await load();await transcript();await activity();
+}
+async function transcript(){
+  if(!current)return;
+  try{
+    const messages=await api("/v1/inbox/"+encodeURIComponent(current)+"/transcript");
+    if(!Array.isArray(messages)||messages.length>200)throw Error("invalid_transcript");
+    const box=$("transcript");box.replaceChildren();
+    if(!messages.length){box.textContent="Ainda não há mensagens registradas.";return;}
+    for(const item of messages){
+      if(!item||typeof item.content!=="string"||
+        typeof item.role!=="string"||item.content.length>20000)continue;
+      const customer=item.role==="user";
+      const bubble=elt("div",customer?"bubble":"bubble answer");
+      bubble.append(elt("small","",customer?"Cliente":"Resposta"),
+        elt("div","",item.content));
+      box.append(bubble);
+    }
+    box.scrollTop=box.scrollHeight;
+  }catch{$("transcript").textContent="Histórico indisponível para esta sessão.";}
 }
 async function activity() {
   if(!current)return;
@@ -233,7 +257,7 @@ async function action(name,body=null){
     if(name==="reply"&&selectedChannel!=="whatsapp"){
       $("reply").value="";pendingReplyId=null;}
     busy=false;
-    await load();await activity();note(statusText);
+    await load();await transcript();await activity();note(statusText);
   }catch(error){note("Ação não concluída: "+error.message);}
   finally{busy=false;}
 }

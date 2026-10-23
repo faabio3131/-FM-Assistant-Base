@@ -643,6 +643,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 max_pending_per_connection=cfg.evolution_max_pending_per_connection,
             ),
             human_whatsapp_outbox=human_whatsapp_outbox,
+            human_inbox=human_inbox,
         )
         if evolution_onboarding is not None and cfg.evolution_webhook_signing_key
         else None
@@ -1465,6 +1466,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except HumanInboxDenied as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/inbox/{conversation_id}/transcript",
+        response_model=list[MessageResponse],
+    )
+    def human_inbox_transcript(
+        conversation_id: str,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
+    ) -> list[MessageResponse]:
+        """Signed human session, same tenant/unit, customer-visible history only."""
+        context = TenantContext(
+            tenant_id=principal.tenant_id,
+            unit_id=principal.unit_id,
+            credential_id=f"user:{principal.user_id}",
+        )
+        try:
+            messages = request.app.state.assistant_service.history(
+                context=context, conversation_id=conversation_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="conversation_not_found") from exc
+        return [_message_response(message) for message in messages]
 
     @app.get("/v1/inbox/{conversation_id}/activity")
     def human_inbox_activity(

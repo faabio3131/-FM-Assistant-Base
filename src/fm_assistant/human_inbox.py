@@ -7,6 +7,7 @@ eventos registra quem tomou a ação sem expor anotações privadas ao cliente.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from hashlib import sha256
 from uuid import uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, select, update
@@ -235,6 +236,58 @@ class HumanInbox:
             self._event(db, principal=principal, conversation_id=conversation_id,
                         action="note", assigned_to=state.assigned_to, note=value)
             return {"status": "saved", "conversation_id": conversation_id}
+
+    def record_verified_handoff_inbound(
+        self, *, tenant_id: str, unit_id: str, conversation_id: str,
+        connection_id: str, provider_message_id: str, content: str,
+    ) -> str:
+        """Preserve customer text during AI handoff, without generating an AI reply.
+
+        Called only after the Evolution authenticated webhook has bound the
+        sender to this conversation. Provider IDs are scoped and hashed so
+        rerun/recovery never duplicates the customer message.
+        """
+        if (
+            not isinstance(provider_message_id, str)
+            or not 1 <= len(provider_message_id) <= 160
+            or not isinstance(content, str)
+            or not 1 <= len(content.strip()) <= 20_000
+            or not isinstance(connection_id, str) or not connection_id
+        ):
+            raise HumanInboxDenied("inbox.inbound_invalid")
+        message_id = sha256(
+            f"fm.handoff.inbound.v1:{tenant_id}:{unit_id}:"
+            f"{connection_id}:{provider_message_id}".encode()
+        ).hexdigest()
+        with self._sessions.begin() as db:
+            conv = db.scalar(select(ConversationORM).where(
+                ConversationORM.conversation_id == conversation_id,
+                ConversationORM.tenant_id == tenant_id,
+                ConversationORM.unit_id == unit_id,
+                ConversationORM.channel == "whatsapp",
+            ).with_for_update())
+            if (
+                conv is None or conv.status != "human_handoff"
+                or not (conv.external_ref or "").startswith(f"wae:{connection_id}:")
+            ):
+                raise HumanInboxDenied("inbox.inbound_scope_or_state_changed")
+            prior = db.get(MessageORM, message_id)
+            if prior is not None:
+                if (
+                    prior.conversation_id != conversation_id
+                    or prior.tenant_id != tenant_id or prior.unit_id != unit_id
+                    or prior.role != "user" or prior.content != content.strip()
+                ):
+                    raise HumanInboxDenied("inbox.inbound_id_conflict")
+                return message_id
+            now = datetime.now(UTC)
+            db.add(MessageORM(
+                message_id=message_id, conversation_id=conversation_id,
+                tenant_id=tenant_id, unit_id=unit_id, role="user",
+                content=content.strip(), created_at=now,
+            ))
+            conv.updated_at = now
+        return message_id
 
     def reply(
         self, *, principal: SessionPrincipal, conversation_id: str,

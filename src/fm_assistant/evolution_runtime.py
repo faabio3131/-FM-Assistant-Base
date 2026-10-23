@@ -40,6 +40,7 @@ class EvolutionRuntime:
         verifier: EvolutionEventVerifier, sender_pepper: str,
         queue: EvolutionInboundQueue | None = None,
         human_whatsapp_outbox=None,
+        human_inbox=None,
     ) -> None:
         if not sender_pepper:
             raise ValueError("evolution_sender_pepper_required")
@@ -52,6 +53,7 @@ class EvolutionRuntime:
         self._pepper = sender_pepper.encode()
         self._queue = queue
         self._human_whatsapp_outbox = human_whatsapp_outbox
+        self._human_inbox = human_inbox
 
     def receive(
         self, *, connection_id: str, raw: bytes,
@@ -207,6 +209,13 @@ class EvolutionRuntime:
                         external_ref=conversation.external_ref or "",
                     )
                 if conversation.status is ConversationStatus.HUMAN_HANDOFF:
+                    if self._human_inbox is not None:
+                        self._human_inbox.record_verified_handoff_inbound(
+                            tenant_id=context.tenant_id, unit_id=context.unit_id,
+                            conversation_id=conversation.conversation_id,
+                            connection_id=connection_id,
+                            provider_message_id=item.message_id, content=item.text,
+                        )
                     self._inbox.complete(
                         channel_id=connection_id, message_id=item.message_id,
                         outbound_id=None,
@@ -361,6 +370,13 @@ class EvolutionRuntime:
                     external_ref=conversation.external_ref or "",
                 )
             if conversation.status is ConversationStatus.HUMAN_HANDOFF:
+                if self._human_inbox is not None:
+                    self._human_inbox.record_verified_handoff_inbound(
+                        tenant_id=context.tenant_id, unit_id=context.unit_id,
+                        conversation_id=conversation.conversation_id,
+                        connection_id=item.connection_id,
+                        provider_message_id=item.message_id, content=item.text,
+                    )
                 self._inbox.complete(
                     channel_id=item.connection_id, message_id=item.message_id,
                     outbound_id=None,
