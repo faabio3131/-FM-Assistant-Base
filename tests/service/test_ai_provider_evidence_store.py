@@ -121,6 +121,7 @@ def test_verified_signed_source_is_mandatory_before_gateway_acceptance(store):
         public_key=key.public_key().public_bytes(
             serialization.Encoding.Raw, serialization.PublicFormat.Raw,
         ),
+        allowed_providers=frozenset({"gemini"}),
     )
     now = datetime.now(UTC)
     raw = json.dumps({

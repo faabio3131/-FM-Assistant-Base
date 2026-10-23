@@ -23,6 +23,9 @@ from core.ai_verified_usage_receipt import VerifiedProviderUsageReceipt
 class ProviderSigningPolicy:
     issuer: str
     public_key: bytes
+    # A valid issuer signature is insufficient if its key is not authorized
+    # for the vendor named in the signed statement.
+    allowed_providers: frozenset[str]
     max_age_seconds: int = 300
 
     def __post_init__(self) -> None:
@@ -30,6 +33,13 @@ class ProviderSigningPolicy:
             not isinstance(self.issuer, str) or not 1 <= len(self.issuer) <= 128
             or not isinstance(self.public_key, bytes)
             or len(self.public_key) != 32
+            or not isinstance(self.allowed_providers, frozenset)
+            or not self.allowed_providers
+            or any(
+                not isinstance(provider, str) or not provider
+                or len(provider) > 128
+                for provider in self.allowed_providers
+            )
             or type(self.max_age_seconds) is not int
             or not 30 <= self.max_age_seconds <= 3600
         ):
@@ -69,6 +79,11 @@ def verified_signed_usage_source(
             data["request_id"], data["tenant_id"], data["unit_id"],
         ) != (expected_request_id, expected_tenant_id, expected_unit_id):
             raise ValueError("scope")
+        # Pin source identity to the provider, not just to the issuer's key.
+        # This prevents a valid signature for provider A from being treated
+        # as a financial statement for provider B.
+        if data["provider"] not in policy.allowed_providers:
+            raise ValueError("provider_scope")
         observed = data["observed_at"]
         if type(observed) is not int:
             raise ValueError("timestamp")

@@ -44,7 +44,10 @@ def signed_statement(*, overrides=None):
     public = private.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw,
     )
-    policy = ProviderSigningPolicy(issuer="provider-statement-fixture", public_key=public)
+    policy = ProviderSigningPolicy(
+        issuer="provider-statement-fixture", public_key=public,
+        allowed_providers=frozenset({"verified-provider"}),
+    )
     statement = {
         "issuer": policy.issuer, "request_id": "req-1", "tenant_id": "tenant-a",
         "unit_id": "unit-a", "provider": "verified-provider",
@@ -79,11 +82,19 @@ def test_exact_signed_source_can_match_single_attempt_without_asserting_invoice(
 
 @pytest.mark.parametrize("tamper", [
     {"input_tokens": 99}, {"output_tokens": 51},
-    {"model": "other-model"}, {"provider": "other-provider"},
+    {"model": "other-model"},
 ])
 def test_signed_but_inconsistent_statement_cannot_be_reconciled(ledger, tamper):
     policy, raw, signature, now = signed_statement(overrides=tamper)
     with pytest.raises(ControlPlaneError, match="provider_match_mismatch"):
+        check(ledger, policy, raw, signature, now)
+
+
+def test_signed_statement_from_unapproved_provider_is_denied_before_matching(ledger):
+    policy, raw, signature, now = signed_statement(
+        overrides={"provider": "other-provider"},
+    )
+    with pytest.raises(QuotaDenied, match="provider_source_statement_invalid"):
         check(ledger, policy, raw, signature, now)
 
 
