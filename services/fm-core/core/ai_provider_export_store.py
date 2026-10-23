@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 
-from sqlalchemy import DateTime, Index, String, UniqueConstraint, select
+from sqlalchemy import DateTime, Index, String, UniqueConstraint, and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
@@ -24,6 +24,7 @@ from core.ai_provider_billing_export import (
     ProviderExportRecord,
     readback_provider_export_attempt,
 )
+from core.ai_usage_ledger import AIUsageRecord
 
 
 class AIProviderExportRecord(ControlPlaneBase):
@@ -173,6 +174,178 @@ class PersistentProviderExportStore:
             except IntegrityError as exc:
                 raise ControlPlaneError("core_finops.export_duplicate_or_conflicting") from exc
         return "created"
+
+    def import_batch(
+        self, *, policy: ProviderExportPolicy,
+        records: tuple[ProviderExportRecord, ...],
+        principal: VerifiedCommandAdmin,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """One FM human authorization, one audit and one atomic transaction.
+
+        Mixed scope/provider batches, duplicate identities and conflicting
+        source provenance fail closed. Replay only reports already_imported.
+        No invoice or quota state is modified.
+        """
+        if (
+            type(records) is not tuple or not 1 <= len(records) <= 50
+            or not isinstance(policy, ProviderExportPolicy)
+        ):
+            raise ControlPlaneError("core_finops.export_batch_invalid")
+        at = now or datetime.now(UTC)
+        scope = (records[0].tenant_id, records[0].unit_id)
+        unique_attempts: set[tuple[str, str]] = set()
+        unique_sources: set[str] = set()
+        staged: list[tuple[ProviderExportRecord, str, str]] = []
+        for record in records:
+            if (record.tenant_id, record.unit_id) != scope:
+                raise ControlPlaneError("core_finops.export_batch_scope_mismatch")
+            digest, usage_json = _snapshot(policy, record)
+            physical_key = (record.request_id, record.attempt_id)
+            if physical_key in unique_attempts or record.source_ref in unique_sources:
+                raise ControlPlaneError("core_finops.export_batch_duplicate")
+            unique_attempts.add(physical_key)
+            unique_sources.add(record.source_ref)
+            readback_provider_export_attempt(
+                sessions=self._sessions, port=_SingleSource(record),
+                policy=policy, tenant_id=record.tenant_id, unit_id=record.unit_id,
+                request_id=record.request_id, attempt_id=record.attempt_id,
+                now=at,
+            )
+            staged.append((record, digest, usage_json))
+        created = 0
+        already = 0
+        with self._sessions.begin() as db:
+            for record, digest, usage_json in staged:
+                prior = db.scalar(select(AIProviderExportRecord).where(
+                    AIProviderExportRecord.tenant_id == record.tenant_id,
+                    AIProviderExportRecord.unit_id == record.unit_id,
+                    AIProviderExportRecord.request_id == record.request_id,
+                    AIProviderExportRecord.attempt_id == record.attempt_id,
+                ))
+                if prior is not None:
+                    if prior.digest != digest:
+                        raise ControlPlaneError("core_finops.export_conflicting_snapshot")
+                    already += 1
+                    continue
+                db.add(AIProviderExportRecord(
+                    digest=digest, tenant_id=record.tenant_id,
+                    unit_id=record.unit_id, request_id=record.request_id,
+                    attempt_id=record.attempt_id, provider=record.provider,
+                    model=record.model, adapter=policy.adapter,
+                    account_ref=record.account_ref, source_ref=record.source_ref,
+                    observed_at=_aware(record.observed_at),
+                    imported_at=_aware(at), usage_json=usage_json,
+                    cost_usd=record.cost_usd,
+                ))
+                created += 1
+            if created:
+                batch_digest = hashlib.sha256(
+                    ("fm.provider.batch.v1|" + "|".join(
+                        digest for _, digest, _ in staged
+                    )).encode("ascii")
+                ).hexdigest()
+                # One human step-up assertion authorizes this bounded batch.
+                stage_admin_mutation_audit(
+                    db, principal=principal,
+                    action="finops.provider_export.import_batch",
+                    resource_id=batch_digest,
+                    canonical_request=batch_digest.encode("ascii"),
+                )
+                try:
+                    db.flush()
+                except IntegrityError as exc:
+                    raise ControlPlaneError(
+                        "core_finops.export_duplicate_or_conflicting"
+                    ) from exc
+        return {"created": created, "already_recorded": already}
+
+    def coverage(
+        self, *, tenant_id: str, unit_id: str,
+        start_date: date, end_date: date,
+        page: int = 0, limit: int = 50,
+        only_missing: bool = False,
+    ) -> dict[str, object]:
+        """Bounded per-attempt coverage; observations are not invoice evidence.
+
+        Include failed and fallback attempts: dropping them could conceal a
+        vendor charge. Missing exports remain unknown, not cost zero.
+        """
+        if any(
+            type(v) is not str or not 1 <= len(v) <= 128
+            for v in (tenant_id, unit_id)
+        ) or (
+            type(start_date) is not date or type(end_date) is not date
+            or start_date > end_date or (end_date - start_date).days > 92
+            or type(page) is not int or not 0 <= page <= 20_000
+            or type(limit) is not int or not 1 <= limit <= 100
+            or type(only_missing) is not bool
+        ):
+            raise ControlPlaneError("core_finops.export_coverage_invalid")
+        start_at = datetime.combine(start_date, time.min, tzinfo=UTC)
+        end_at = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=UTC)
+        predicate = [
+            AIUsageRecord.tenant_id == tenant_id,
+            AIUsageRecord.unit_id == unit_id,
+            AIUsageRecord.event_time >= start_at,
+            AIUsageRecord.event_time < end_at,
+            AIUsageRecord.attempt_id.is_not(None),
+            AIUsageRecord.attempt_id != "",
+        ]
+        join = and_(
+            AIProviderExportRecord.tenant_id == AIUsageRecord.tenant_id,
+            AIProviderExportRecord.unit_id == AIUsageRecord.unit_id,
+            AIProviderExportRecord.request_id == AIUsageRecord.request_id,
+            AIProviderExportRecord.attempt_id == AIUsageRecord.attempt_id,
+        )
+        if only_missing:
+            predicate.append(AIProviderExportRecord.digest.is_(None))
+        with self._sessions() as db:
+            rows = db.execute(
+                select(AIUsageRecord, AIProviderExportRecord)
+                .outerjoin(AIProviderExportRecord, join)
+                .where(*predicate)
+                .order_by(
+                    AIUsageRecord.event_time, AIUsageRecord.event_id,
+                ).offset(page * limit).limit(limit + 1)
+            ).all()
+        items = []
+        for attempt, export in rows[:limit]:
+            result = (
+                self.compare(
+                    tenant_id=tenant_id, unit_id=unit_id,
+                    request_id=attempt.request_id,
+                    attempt_id=attempt.attempt_id,
+                ) if export is not None else None
+            )
+            items.append({
+                "request_id": attempt.request_id,
+                "attempt_id": attempt.attempt_id,
+                "event_id": attempt.event_id,
+                "provider": attempt.provider,
+                "model": attempt.model,
+                "outcome": attempt.outcome,
+                "fallback": bool(attempt.fallback_used),
+                "export_status": (
+                    result.status if result else "missing_provider_export"
+                ),
+                "source_ref": result.source_ref if result else None,
+                "usage_matches": result.usage_matches if result else None,
+                "cost_matches": result.cost_matches if result else None,
+                "needs_attention": result.needs_attention if result else True,
+                "provider_invoice_verified": False,
+                "quota_recovery_authorized": False,
+            })
+        return {
+            "tenant_id": tenant_id,
+            "unit_id": unit_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": items,
+            "next_page": page + 1 if len(rows) > limit else None,
+            "page_only": True,
+            "provider_invoice_verified": False,
+        }
 
     def compare(
         self, *, tenant_id: str, unit_id: str, request_id: str,
