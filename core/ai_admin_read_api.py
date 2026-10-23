@@ -23,8 +23,8 @@ from core.ai_control_plane import (
     AIProviderHealth,
     ControlPlaneError,
 )
-from core.ai_finops_alerts import evaluate_request_cost_alert
 from core.ai_finops_alert_outbox import PersistentFinOpsAlertOutbox
+from core.ai_finops_alerts import evaluate_request_cost_alert
 from core.ai_finops_policy_store import PersistentFinOpsAlertPolicies
 from core.ai_router import CapabilityIA
 from core.ai_usage_ledger import PersistentAIFinOps
