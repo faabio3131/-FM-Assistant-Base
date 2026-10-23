@@ -15,6 +15,25 @@ def _response(payload: dict) -> httpx.Response:
     )
 
 
+def _stub_core_client(monkeypatch, handler):
+    class StubClient:
+        def __init__(self, **kwargs):
+            assert kwargs["trust_env"] is False
+            assert kwargs["follow_redirects"] is False
+            self.timeout = kwargs["timeout"]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, **kwargs):
+            return handler(url, timeout=self.timeout, **kwargs)
+
+    monkeypatch.setattr("fm_assistant.core_client.httpx.Client", StubClient)
+
+
 def test_core_model_gateway_preserves_tenant_scope(monkeypatch):
     calls: list[dict] = []
 
@@ -33,7 +52,7 @@ def test_core_model_gateway_preserves_tenant_scope(monkeypatch):
             }
         )
 
-    monkeypatch.setattr("fm_assistant.core_client.httpx.post", fake_post)
+    _stub_core_client(monkeypatch, fake_post)
 
     client = CoreAIClient(
         base_url="https://core.invalid",
@@ -95,7 +114,7 @@ def test_core_audio_transcriber_preserves_scope_and_correlation(monkeypatch):
             }
         )
 
-    monkeypatch.setattr("fm_assistant.core_client.httpx.post", fake_post)
+    _stub_core_client(monkeypatch, fake_post)
 
     transcriber = CoreAudioTranscriber(
         CoreAIClient(
@@ -121,3 +140,15 @@ def test_core_audio_transcriber_preserves_scope_and_correlation(monkeypatch):
     assert call["json"]["correlation_id"] == "wamid-123"
     assert call["json"]["mime_type"] == "audio/ogg"
     assert call["json"]["audio_base64"]
+
+
+def test_core_client_rejects_foreign_origin_credentials_and_query():
+    import pytest
+
+    for unsafe in (
+        "ftp://core.invalid", "https://name:secret@core.invalid",
+        "https://core.invalid/path", "https://core.invalid?redirect=evil",
+        "https://core.invalid/#fragment",
+    ):
+        with pytest.raises(ValueError, match="core_base_url_invalid"):
+            CoreAIClient(base_url=unsafe, service_key="synthetic-key")
