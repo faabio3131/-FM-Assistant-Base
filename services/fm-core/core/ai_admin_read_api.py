@@ -199,6 +199,7 @@ def register_admin_read_routes(app: FastAPI) -> None:
         page: int = Query(default=0, ge=0, le=20000),
         limit: int = Query(default=50, ge=1, le=100),
         only_missing: bool = False,
+        provider: str | None = Query(default=None, min_length=1, max_length=128),
     ) -> JSONResponse:
         """Inventory physical attempts, missing exports and mismatches."""
         try:
@@ -206,6 +207,7 @@ def register_admin_read_routes(app: FastAPI) -> None:
                 tenant_id=tenant_id, unit_id=unit_id,
                 start_date=start_date, end_date=end_date,
                 page=page, limit=limit, only_missing=only_missing,
+                provider=provider,
             )
         except ControlPlaneError as exc:
             raise HTTPException(
