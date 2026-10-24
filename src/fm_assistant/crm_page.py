@@ -165,6 +165,7 @@ async function refresh() {
   renderOpportunities();
   renderFunnel(results[2]);
   await loadF7();
+  await loadAgenda();
   $("contact-more").textContent = results[0].next_page !== null ?
     "Mostrando 50 contatos; consulte as próximas páginas pela API." : "";
   $("opportunity-more").textContent = results[1].next_page !== null ?
@@ -469,6 +470,143 @@ $("cadence-run-form").addEventListener("submit",event=>{
   });
 });
 
+
+let agendaItems=[], pendingAgendaKey=null;
+function localDatetime(value) {
+  const date=new Date(value), offset=date.getTimezoneOffset()*60000;
+  return new Date(date.getTime()-offset).toISOString().slice(0,16);
+}
+function renderAgendaOpportunityChoices() {
+  const select=$("agenda-opportunity"), previous=select.value;
+  select.replaceChildren();
+  for(const opp of opportunities.filter(x=>x.contact_id===$("agenda-contact").value &&
+      !["won","lost"].includes(x.stage))){
+    const option=el("option",opp.title);
+    option.value=opp.opportunity_id;select.append(option);
+  }
+  if([...select.options].some(x=>x.value===previous))select.value=previous;
+}
+function renderAgenda(){
+  const contactSelect=$("agenda-contact"), previous=contactSelect.value;
+  contactSelect.replaceChildren();
+  for(const contact of contacts){
+    const option=el("option",contact.name);option.value=contact.contact_id;
+    contactSelect.append(option);
+  }
+  if(contacts.some(x=>x.contact_id===previous))contactSelect.value=previous;
+  renderAgendaOpportunityChoices();
+  const area=$("agenda-results");area.replaceChildren();
+  if(!agendaItems.length)area.append(el("p","Nenhum compromisso encontrado.","subtle"));
+  for(const item of agendaItems){
+    const card=el("article",undefined,"entry");
+    card.append(el("strong",item.title+" · "+item.status));
+    const contact=contacts.find(x=>x.contact_id===item.contact_id)?.name || "Contato";
+    card.append(el("small",contact+" · "+
+      new Date(item.starts_at).toLocaleString("pt-BR")+" a "+
+      new Date(item.ends_at).toLocaleString("pt-BR")+
+      " · revisão "+item.revision,"subtle"));
+    const actions=el("div",undefined,"actions");
+    const audit=el("button","Histórico");
+    audit.type="button";
+    audit.addEventListener("click",()=>guarded(async()=>{
+      const result=await api("/v1/followups/agenda/"+
+        encodeURIComponent(item.appointment_id)+"/events");
+      const log=el("div");
+      for(const x of result.items)log.append(el("small",x.action+" · "+
+        new Date(x.created_at).toLocaleString("pt-BR"),"subtle"));
+      card.append(log);
+    }));
+    actions.append(audit);
+    if(item.status==="scheduled"){
+      const start=el("input");
+      start.type="datetime-local";start.value=localDatetime(item.starts_at);
+      start.setAttribute("aria-label","Novo horário do compromisso "+item.title);
+      const duration=el("input");
+      duration.type="number";duration.min="15";duration.max="480";
+      duration.value=String(Math.round(
+        (new Date(item.ends_at)-new Date(item.starts_at))/60000));
+      duration.setAttribute("aria-label","Nova duração em minutos");
+      card.append(start,duration);
+      const reschedule=el("button","Remarcar");
+      reschedule.type="button";
+      reschedule.addEventListener("click",()=>guarded(async()=>{
+        const when=new Date(start.value);
+        if(!Number.isFinite(when.getTime()))throw Error("Data inválida.");
+        await api("/v1/followups/agenda/"+
+          encodeURIComponent(item.appointment_id)+"/reschedule","POST",{
+            expected_revision:item.revision,starts_at:when.toISOString(),
+            duration_minutes:Number(duration.value)
+          });
+        notice("Compromisso remarcado.");
+        await loadAgenda();
+      }));
+      actions.append(reschedule);
+      for(const [action,label] of [["cancel","Cancelar"],["complete","Concluir"]]){
+        const button=el("button",label);
+        button.type="button";
+        button.addEventListener("click",()=>guarded(async()=>{
+          await api("/v1/followups/agenda/"+
+            encodeURIComponent(item.appointment_id)+"/"+action,
+            "POST",{expected_revision:item.revision});
+          notice("Compromisso atualizado: "+label+".");
+          await loadAgenda();
+        }));
+        actions.append(button);
+      }
+    }
+    card.append(actions);area.append(card);
+  }
+}
+async function loadAgenda(){
+  const now=Date.now();
+  const from=new Date(now-86400000).toISOString();
+  const to=new Date(now+30*86400000).toISOString();
+  const result=await api("/v1/followups/agenda?start_at="+
+    encodeURIComponent(from)+"&end_at="+encodeURIComponent(to));
+  agendaItems=result.items;
+  $("agenda-more").textContent=result.has_more?
+    "Mostrando 100 compromissos. Consulte os demais pela API.":"";
+  renderAgenda();
+}
+$("agenda-contact").addEventListener("change",renderAgendaOpportunityChoices);
+$("agenda-refresh").addEventListener("click",()=>guarded(loadAgenda));
+$("agenda-form").addEventListener("submit",event=>{
+  event.preventDefault();
+  guarded(async()=>{
+    const start=new Date($("agenda-start").value);
+    if(!Number.isFinite(start.getTime()))throw Error("Data e horário inválidos.");
+    if(!pendingAgendaKey)pendingAgendaKey=crypto.randomUUID();
+    const saved=await api("/v1/followups/agenda","POST",{
+      contact_id:$("agenda-contact").value,
+      opportunity_id:$("agenda-opportunity").value,
+      title:$("agenda-title").value.trim(),
+      starts_at:start.toISOString(),
+      duration_minutes:Number($("agenda-duration").value),
+      remind_minutes:Number($("agenda-reminder").value),
+      idempotency_key:pendingAgendaKey
+    });
+    pendingAgendaKey=null;
+    notice("Compromisso agendado: "+saved.title+". Lembretes são tarefas internas.");
+    $("agenda-form").reset();
+    await loadAgenda();
+  });
+});
+$("agenda-slots").addEventListener("click",()=>guarded(async()=>{
+  const start=new Date($("agenda-start").value);
+  if(!Number.isFinite(start.getTime()))throw Error("Defina a data inicial.");
+  const end=new Date(start.getTime()+4*3600000);
+  const result=await api("/v1/followups/agenda/slots?start_at="+
+    encodeURIComponent(start.toISOString())+"&end_at="+
+    encodeURIComponent(end.toISOString())+"&duration_minutes="+
+    encodeURIComponent($("agenda-duration").value));
+  const area=$("agenda-slot-results");area.replaceChildren();
+  for(const slot of result.items){
+    area.append(el("small",new Date(slot.starts_at).toLocaleString("pt-BR")+
+      " · "+(slot.available?"Livre":"Ocupado"),"subtle"));
+  }
+}));
+$("agenda-start").value=localDatetime(new Date(Date.now()+3600000));
+
 const initial = new URLSearchParams(window.location.search).get("conversation");
 if(initial && initial.length<=64)$("link-conversation").value=initial;
 guarded(refresh);
@@ -593,6 +731,26 @@ Sem política configurada, o envio automatizado é bloqueado. Esta etapa não en
 <div class="actions"><button id="cadence-reload" type="button">Atualizar execuções</button></div>
 <div id="cadence-runs" aria-live="polite"></div>
 <p id="cadence-more" class="subtle"></p></section>
+<section class="wide"><h2>F7 · Agenda e compromissos internos</h2>
+<p class="subtle">Horários por usuário, prevenção de conflitos e lembretes como tarefas privadas no CRM. Sem mensagem automática ao cliente.</p>
+<form id="agenda-form">
+<label for="agenda-contact">Contato</label><select id="agenda-contact" required></select>
+<label for="agenda-opportunity">Oportunidade aberta</label>
+<select id="agenda-opportunity" required></select>
+<label for="agenda-title">Compromisso (privado)</label>
+<input id="agenda-title" maxlength="200" required>
+<label for="agenda-start">Início (horário local)</label>
+<input id="agenda-start" type="datetime-local" required>
+<label for="agenda-duration">Duração (minutos)</label>
+<input id="agenda-duration" type="number" min="15" max="480" step="1" value="60" required>
+<label for="agenda-reminder">Antecedência do lembrete interno (minutos; zero desativa)</label>
+<input id="agenda-reminder" type="number" min="0" max="10080" step="1" value="60" required>
+<div class="actions"><button class="primary" type="submit">Agendar compromisso</button>
+<button id="agenda-slots" type="button">Consultar horários próximos</button></div>
+</form><div id="agenda-slot-results" class="crm-stages" aria-live="polite"></div>
+<div class="actions"><button id="agenda-refresh" type="button">Atualizar agenda</button></div>
+<div id="agenda-results" aria-live="polite"></div><p id="agenda-more" class="subtle"></p>
+</section>
 <section class="wide"><h2>Relacionar conversa ao CRM</h2>
 <p class="subtle">Informe o identificador de uma conversa da sua unidade. O vínculo é auditado e pode ser revisado.</p>
 <form id="link-form"><label for="link-conversation">ID da conversa</label>
