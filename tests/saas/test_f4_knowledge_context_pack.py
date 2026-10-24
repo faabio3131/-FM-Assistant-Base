@@ -229,3 +229,25 @@ def test_legacy_knowledge_remains_selective_before_first_version(store):
     assert result.evidence[0].source_revision is None
     assert result.evidence[0].chunk_ordinal is None
     assert "Agenda Loja abre" in result.context
+
+
+def test_missing_final_chunk_cannot_silently_return_partial_version(store):
+    original = "Garantia integra " * 120
+    doc = KnowledgeRepository(store).add(
+        ctx(), title="Garantia Integral", content=original,
+    )
+    VersionedKnowledgeIngestion(store).index_text(
+        ctx(), document_id=doc, expected_revision=0,
+        title="Garantia Integral", content=original,
+    )
+    reader = BoundedKnowledgeRetrieval(store)
+    assert reader.query(ctx(), "garantia").grounded
+    with store.begin() as db:
+        rows = db.scalars(select(KnowledgeChunkORM).where(
+            KnowledgeChunkORM.document_id == doc,
+        ).order_by(KnowledgeChunkORM.ordinal)).all()
+        assert len(rows) > 1
+        db.delete(rows[-1])
+    result = reader.query(ctx(), "garantia")
+    assert result.grounded is False
+    assert result.context == ""
