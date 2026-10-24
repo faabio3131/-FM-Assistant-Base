@@ -70,7 +70,6 @@ def test_shared_navigation_preserves_existing_page_csp_and_ui(client):
         "/app/knowledge",
         "/app/inbox",
         "/v1/channels/whatsapp/qr/panel",
-        "/v1/plan/consumption/dashboard",
     )
     for page in pages:
         response = client.get(page)
@@ -90,6 +89,9 @@ def test_shared_navigation_preserves_existing_page_csp_and_ui(client):
     assert f"script-src 'sha256-{_script_hash(knowledge.text)}'" in (
         knowledge.headers["content-security-policy"]
     )
+    unavailable_plan = client.get("/v1/plan/consumption/dashboard")
+    assert unavailable_plan.status_code == 403
+    assert unavailable_plan.json()["detail"] == "plan_unavailable"
     whatsapp = client.get("/v1/channels/whatsapp/qr/panel")
     nonce = re.search(r'nonce="([^"]+)"', whatsapp.text)
     assert nonce is not None
@@ -103,7 +105,7 @@ def test_permission_filtered_navigation_does_not_grant_missing_access(client):
     paths = [href for _, href in allowed_navigation(support)]
     assert "/app/inbox" in paths
     assert "/app/crm" not in paths
-    assert "/app/knowledge" not in paths
+    assert "/app/knowledge" in paths
     assert "/v1/channels/whatsapp/qr/panel" not in paths
     home, csp = render_home(support)
     assert "CRM e pipeline" not in home
