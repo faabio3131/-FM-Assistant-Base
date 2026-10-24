@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
 from typing import Literal
 
 from sqlalchemy import DateTime, Index, String, UniqueConstraint, and_, select
@@ -24,7 +25,7 @@ from core.ai_provider_billing_export import (
     ProviderExportRecord,
     readback_provider_export_attempt,
 )
-from core.ai_usage_ledger import AIUsageRecord
+from core.ai_usage_ledger import AIUsageRecord, _observed_cost
 
 
 class AIProviderExportRecord(ControlPlaneBase):
@@ -351,6 +352,106 @@ class PersistentProviderExportStore:
             "next_page": page + 1 if len(rows) > limit else None,
             "page_only": True,
             "provider_invoice_verified": False,
+        }
+
+
+    def reconcile_request(
+        self, *, tenant_id: str, unit_id: str, request_id: str,
+    ) -> dict[str, object]:
+        """F3 diagnostic across *all* physical attempts and fallback providers.
+
+        Observational exports never mean a verified provider invoice, money
+        settlement or permission to release a tenant quota. A failed attempt
+        can still be billed. No cost is invented for absent provider reports.
+        """
+        if any(
+            type(part) is not str or not 1 <= len(part) <= 128
+            for part in (tenant_id, unit_id, request_id)
+        ):
+            raise ControlPlaneError("core_finops.request_scope_invalid")
+        with self._sessions() as db:
+            attempts = db.scalars(
+                select(AIUsageRecord).where(
+                    AIUsageRecord.tenant_id == tenant_id,
+                    AIUsageRecord.unit_id == unit_id,
+                    AIUsageRecord.request_id == request_id,
+                ).order_by(AIUsageRecord.event_time, AIUsageRecord.event_id)
+                .limit(101)
+            ).all()
+        if not attempts:
+            raise ControlPlaneError("core_finops.request_not_found")
+        if len(attempts) > 100:
+            raise ControlPlaneError("core_finops.request_unbounded_attempts")
+        seen: set[str] = set()
+        reports: dict[str, dict[str, object]] = {}
+        observations: list[dict[str, object]] = []
+        for attempt in attempts:
+            attempt_id = attempt.attempt_id
+            if not attempt_id or attempt_id in seen:
+                # Ambiguous physical attempt IDs prevent reliable comparison.
+                raise ControlPlaneError("core_finops.request_attempt_identity_invalid")
+            seen.add(attempt_id)
+            internal = _observed_cost(attempt.cost_decimal)
+            if internal is not None and attempt.currency != "USD":
+                raise ControlPlaneError("core_finops.request_currency_mismatch")
+            compared = self.compare(
+                tenant_id=tenant_id, unit_id=unit_id,
+                request_id=request_id, attempt_id=attempt_id,
+            )
+            provider = attempt.provider
+            summary = reports.setdefault(provider, {
+                "provider": provider, "attempts": 0, "fallback_attempts": 0,
+                "missing_exports": 0, "uncertain_attempts": 0,
+                "cost_disagreements": 0, "internal_known_cost_usd": Decimal(0),
+                "reported_known_cost_usd": Decimal(0),
+                "internal_unknown_costs": 0, "reported_unknown_costs": 0,
+            })
+            summary["attempts"] += 1
+            summary["fallback_attempts"] += int(bool(attempt.fallback_used))
+            summary["missing_exports"] += int(compared is None)
+            summary["internal_unknown_costs"] += int(internal is None)
+            if internal is not None:
+                summary["internal_known_cost_usd"] += internal
+            reported = compared.report_cost_usd if compared else None
+            summary["reported_unknown_costs"] += int(reported is None)
+            if reported is not None:
+                summary["reported_known_cost_usd"] += reported
+            discrepancy = bool(compared and compared.cost_matches is False)
+            summary["cost_disagreements"] += int(discrepancy)
+            attention = compared is None or compared.needs_attention or (
+                internal is None or reported is None
+            )
+            summary["uncertain_attempts"] += int(attention)
+            observations.append({
+                "attempt_id": attempt_id, "provider": provider,
+                "model": attempt.model, "outcome": attempt.outcome,
+                "fallback": bool(attempt.fallback_used),
+                "source_ref": compared.source_ref if compared else None,
+                "export_status": compared.status if compared else "missing_provider_export",
+                "usage_matches": compared.usage_matches if compared else None,
+                "cost_matches": compared.cost_matches if compared else None,
+                "needs_attention": attention,
+            })
+        per_provider = []
+        for provider in sorted(reports):
+            summary = reports[provider]
+            per_provider.append({
+                **summary,
+                "internal_known_cost_usd": str(summary["internal_known_cost_usd"]),
+                "reported_known_cost_usd": str(summary["reported_known_cost_usd"]),
+            })
+        return {
+            "tenant_id": tenant_id, "unit_id": unit_id, "request_id": request_id,
+            "attempts_observed": len(attempts),
+            "fallback_attempts": sum(int(bool(x.fallback_used)) for x in attempts),
+            "per_provider": per_provider, "attempts": observations,
+            "needs_attention": any(row["needs_attention"] for row in observations),
+            "all_observational_matches": all(
+                not row["needs_attention"] for row in observations
+            ),
+            "provider_invoice_verified": False,
+            "quota_recovery_authorized": False,
+            "real_provider_charges_certified": False,
         }
 
     def compare(
