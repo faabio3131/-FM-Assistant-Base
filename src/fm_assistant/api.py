@@ -41,6 +41,7 @@ from .credential_vault import FernetCredentialVault
 from .crm import CRMConflict, CRMNotFound, CRMService
 from .crm_page import render_crm_page
 from .crm_workflow import CRMWorkflow
+from .followup_cadences import CadenceEngine
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDenied
@@ -246,6 +247,31 @@ class CRMProposalStatusRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
     expected_revision: int = Field(ge=1, strict=True)
     status: str = Field(pattern="^(ready|withdrawn)$")
+
+
+class CadenceStepRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    delay_minutes: int = Field(ge=0, le=43200, strict=True)
+    task: str = Field(min_length=1, max_length=500)
+
+
+class CadenceDefinitionRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    name: str = Field(min_length=1, max_length=120)
+    channel: str = Field(pattern="^(whatsapp|email)$")
+    steps: list[CadenceStepRequest] = Field(min_length=1, max_length=8)
+    cadence_id: UUID4 | None = None
+    expected_version: int = Field(default=0, ge=0, strict=True)
+
+
+class CadenceScheduleRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    cadence_id: UUID4
+    version: int = Field(ge=1, strict=True)
+    contact_id: UUID4
+    opportunity_id: UUID4
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    start_at: datetime
 
 
 class FollowupPreferenceRequest(BaseModel):
@@ -740,6 +766,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     crm = CRMService(session_factory, vault, pepper=cfg.credential_pepper)
     crm_workflow = CRMWorkflow(session_factory, vault)
     followup_preferences = FollowupPreferences(session_factory)
+    cadence_engine = CadenceEngine(session_factory, vault)
     human_whatsapp_outbox = HumanWhatsAppOutbox(
         session_factory, vault, sender_pepper=cfg.credential_pepper,
     )
@@ -871,6 +898,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.crm = crm
         app.state.crm_workflow = crm_workflow
         app.state.followup_preferences = followup_preferences
+        app.state.cadence_engine = cadence_engine
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
         app.state.human_inbox_operations = human_inbox_operations
@@ -1359,6 +1387,87 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             enabled=payload.enabled,
         )
         return _persona_response(persona)
+
+    @app.post("/v1/followups/cadences", status_code=201)
+    def define_followup_cadence(
+        payload: CadenceDefinitionRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.cadence_engine.define(
+                principal, name=payload.name, channel=payload.channel,
+                steps=[step.model_dump() for step in payload.steps],
+                cadence_id=str(payload.cadence_id) if payload.cadence_id else None,
+                expected_version=payload.expected_version,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/followups/cadences")
+    def list_followup_cadences(
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        return request.app.state.cadence_engine.list_definitions(principal)
+
+    @app.post("/v1/followups/runs", status_code=201)
+    def schedule_followup_cadence(
+        payload: CadenceScheduleRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.cadence_engine.schedule(
+                principal, cadence_id=str(payload.cadence_id),
+                version=payload.version, contact_id=str(payload.contact_id),
+                opportunity_id=str(payload.opportunity_id),
+                idempotency_key=payload.idempotency_key,
+                start_at=payload.start_at,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/followups/runs/{run_id}")
+    def get_followup_run(
+        run_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.cadence_engine.get_run(
+                principal, run_id=run_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/followups/runs/{run_id}/cancel")
+    def cancel_followup_run(
+        run_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.cadence_engine.cancel(
+                principal, run_id=run_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/v1/followups/runs/{run_id}/events")
+    def followup_run_events(
+        run_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.cadence_engine.events(
+                principal, run_id=run_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/v1/followups/contacts/{contact_id}/preferences")
     def get_followup_preference(
