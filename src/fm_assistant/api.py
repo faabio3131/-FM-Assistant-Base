@@ -122,6 +122,28 @@ class KnowledgeResponse(BaseModel):
     document_id: str
 
 
+class KnowledgeContextPreviewRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    question: str = Field(min_length=2, max_length=500)
+
+
+class KnowledgeContextPreviewEvidence(BaseModel):
+    document_id: str
+    source_revision: int | None
+    chunk_ordinal: int | None
+    chunk_sha256: str | None
+    snippet: str
+    matched_terms: list[str]
+    current_source_verified: bool
+
+
+class KnowledgeContextPreviewResponse(BaseModel):
+    grounded: bool
+    corpus_truncated: bool
+    context: str
+    evidence: list[KnowledgeContextPreviewEvidence]
+
+
 class KnowledgeVersionRequest(BaseModel):
     expected_revision: int = Field(strict=True, ge=0, le=2_000_000_000)
     title: str = Field(min_length=1, max_length=255)
@@ -566,6 +588,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     human_inbox = HumanInbox(session_factory)
     human_inbox_operations = HumanInboxOperations(session_factory)
     knowledge = KnowledgeRepository(session_factory)
+    knowledge_retrieval = BoundedKnowledgeRetrieval(session_factory)
     knowledge_versioning = VersionedKnowledgeIngestion(session_factory)
     audit = SQLAuditSink(session_factory)
 
@@ -598,7 +621,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         model=model,
         capabilities=KnowledgeCapabilityProvider(
             knowledge,
-            retrieval=BoundedKnowledgeRetrieval(session_factory),
+            retrieval=knowledge_retrieval,
             retrieval_enabled=os.environ.get(
                 "FM_ASSISTANT_KNOWLEDGE_CONTEXT_PACK_ENABLED", "false"
             ).casefold() == "true",
@@ -733,6 +756,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.identity_repository = identity_repository
         app.state.identity_service = identity_service
         app.state.knowledge = knowledge
+        app.state.knowledge_retrieval = knowledge_retrieval
         app.state.knowledge_versioning = knowledge_versioning
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
@@ -1235,6 +1259,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content=payload.content,
         )
         return KnowledgeResponse(document_id=document_id)
+
+    @app.post(
+        "/v1/knowledge/context-preview",
+        response_model=KnowledgeContextPreviewResponse,
+    )
+    def preview_knowledge_context(
+        payload: KnowledgeContextPreviewRequest,
+        request: Request,
+        response: Response,
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_READ)),
+    ) -> KnowledgeContextPreviewResponse:
+        # The same opt-in governs both model use and human preview.
+        # This endpoint never calls the provider or accepts a caller's scope.
+        response.headers["Cache-Control"] = "no-store"
+        if os.environ.get(
+            "FM_ASSISTANT_KNOWLEDGE_CONTEXT_PACK_ENABLED", "false"
+        ).casefold() != "true":
+            raise HTTPException(status_code=503, detail="knowledge_retrieval_not_configured")
+        result = request.app.state.knowledge_retrieval.query(
+            context, payload.question,
+        )
+        return KnowledgeContextPreviewResponse(
+            grounded=result.grounded,
+            corpus_truncated=result.corpus_truncated,
+            context=result.context,
+            evidence=[
+                KnowledgeContextPreviewEvidence(
+                    document_id=item.document_id,
+                    source_revision=item.source_revision,
+                    chunk_ordinal=item.chunk_ordinal,
+                    chunk_sha256=item.chunk_sha256,
+                    snippet=item.snippet,
+                    matched_terms=list(item.matched_terms),
+                    current_source_verified=item.current_source_verified,
+                )
+                for item in result.evidence
+            ],
+        )
 
     @app.put("/v1/knowledge/{document_id}/version", response_model=KnowledgeVersionResponse)
     def version_knowledge_text(
