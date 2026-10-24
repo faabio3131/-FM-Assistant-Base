@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from test_identity_rbac import _bootstrap, _login
 
 from fm_assistant.crm import CRMAuditORM, CRMContactORM, CRMOpportunityORM
-from test_identity_rbac import _bootstrap, _login
 
 
 def _contact(client, email="Vendas@Empresa.com.br"):
