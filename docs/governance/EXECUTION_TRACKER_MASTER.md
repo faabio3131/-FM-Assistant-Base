@@ -1183,3 +1183,11 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - DB: migration aditiva 20261024_0025 e teste em banco descartável. Sem migração externa, credenciais reais, deploy ou cobrança.
 - Gate: testes de tenancy/PII/RBAC/CSRF/revisão/estados e 5 workflows aplicáveis no HEAD exato da PR #32. Merge somente após verde integral e revisão; CI pós-merge deve ser checada.
 - F6 total continua IN_PROGRESS: integração conversa→lead, qualificação, propostas, analytics e demais capacidades continuam pendentes.
+
+
+## 2026-10-24 — F6 CRM — vínculo conversacional, qualificação, propostas e atividades
+
+- Main base PR #32 `836715269f530e077a6ed0fb1dd3d82fd80b4765`, 5/5 gates pós-merge verificados.
+- PR #33: link conversa→contato/oportunidade por escopo e revisão CAS; score determinístico 0–100 separado de estágio; propostas cifradas com valor imutável herdado e aprovação interna sem envio/cobrança; timeline de ações cifradas e API/UI integradas.
+- Migração `20261024_0026` aditiva, teste com base descartável, testes de segurança/tenant/revisão no SHA da PR; F6 global continua IN_PROGRESS.
+- Somente merge com 5/5 CI verde no HEAD exato, revisão de diff e ausência de STOP; deploy, migração produtiva, homologação e credenciais reais permanecem diferidos.

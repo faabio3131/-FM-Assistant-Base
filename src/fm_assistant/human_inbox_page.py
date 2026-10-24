@@ -72,6 +72,7 @@ label{font-weight:600;font-size:13px}
 </section>
 <section aria-label="Conversa selecionada"><h2>Detalhes e responsável</h2>
 <div id="detail" class="empty">Selecione uma conversa na fila.</div>
+<p><a id="crm-link" href="/app/crm">Vincular conversa ao CRM</a></p>
 <h3>Histórico da conversa</h3><div id="transcript" class="empty">Selecione uma conversa.</div>
 <div id="controls" hidden>
 <div class="tools">
@@ -198,6 +199,7 @@ async function loadPolicy(){
 async function select(item) {
   current=item.conversation_id;pendingReplyId=null;$("controls").hidden=false;
   $("send-reply").disabled=false;$("uncertain-review").hidden=true;
+  $("crm-link").href="/app/crm?conversation="+encodeURIComponent(current);
   selectedChannel=item.channel;$("reply-panel").hidden=false;
   $("check-reply").hidden=true;
   $("reply-heading").textContent=item.channel==="whatsapp"?

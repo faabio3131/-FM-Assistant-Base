@@ -40,6 +40,7 @@ from .core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from .credential_vault import FernetCredentialVault
 from .crm import CRMConflict, CRMNotFound, CRMService
 from .crm_page import render_crm_page
+from .crm_workflow import CRMWorkflow
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDenied
@@ -215,6 +216,40 @@ class CRMStageTransitionRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
     expected_revision: int = Field(ge=1, strict=True)
     stage: str = Field(pattern="^(qualified|proposal|won|lost)$")
+
+
+class CRMConversationLinkRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    contact_id: UUID4
+    opportunity_id: UUID4 | None = None
+    expected_revision: int = Field(ge=0, le=2_000_000_000, strict=True)
+
+
+class CRMQualificationRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    expected_revision: int = Field(ge=0, le=2_000_000_000, strict=True)
+    need_confirmed: bool
+    budget_confirmed: bool
+    decision_maker_confirmed: bool
+    timeline_days: int | None = Field(default=None, ge=0, le=3650, strict=True)
+
+
+class CRMProposalCreateRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    title: str = Field(min_length=1, max_length=255)
+    terms: str = Field(min_length=1, max_length=4000)
+
+
+class CRMProposalStatusRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    expected_revision: int = Field(ge=1, strict=True)
+    status: str = Field(pattern="^(ready|withdrawn)$")
+
+
+class CRMActivityCreateRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    kind: str = Field(pattern="^(note|call|meeting|task)$")
+    details: str = Field(min_length=1, max_length=4000)
 
 
 class ConversationRequest(BaseModel):
@@ -691,6 +726,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     integration_repository = IntegrationRepository(session_factory)
     vault = FernetCredentialVault(cfg.channel_encryption_key)
     crm = CRMService(session_factory, vault, pepper=cfg.credential_pepper)
+    crm_workflow = CRMWorkflow(session_factory, vault)
     human_whatsapp_outbox = HumanWhatsAppOutbox(
         session_factory, vault, sender_pepper=cfg.credential_pepper,
     )
@@ -820,6 +856,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge_versioning = knowledge_versioning
         app.state.knowledge_sources = knowledge_sources
         app.state.crm = crm
+        app.state.crm_workflow = crm_workflow
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
         app.state.human_inbox_operations = human_inbox_operations
@@ -1373,6 +1410,153 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except CRMConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.put("/v1/crm/conversations/{conversation_id}/link")
+    def crm_link_conversation(
+        conversation_id: str, payload: CRMConversationLinkRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm_workflow.link_conversation(
+                principal, conversation_id=conversation_id,
+                contact_id=str(payload.contact_id),
+                opportunity_id=str(payload.opportunity_id) if payload.opportunity_id else None,
+                expected_revision=payload.expected_revision,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/crm/conversations/{conversation_id}/link")
+    def crm_get_conversation_link(
+        conversation_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.crm_workflow.get_link(
+                principal, conversation_id=conversation_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/v1/crm/opportunities/{opportunity_id}/conversations")
+    def crm_linked_conversations(
+        opportunity_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.crm_workflow.links_for_opportunity(
+                principal, opportunity_id=opportunity_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.put("/v1/crm/opportunities/{opportunity_id}/qualification")
+    def crm_qualify(
+        opportunity_id: str, payload: CRMQualificationRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm_workflow.qualify(
+                principal, opportunity_id=opportunity_id,
+                expected_revision=payload.expected_revision,
+                need=payload.need_confirmed, budget=payload.budget_confirmed,
+                decision=payload.decision_maker_confirmed,
+                timeline_days=payload.timeline_days,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/crm/opportunities/{opportunity_id}/qualification")
+    def crm_get_qualification(
+        opportunity_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.crm_workflow.get_qualification(
+                principal, opportunity_id=opportunity_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/crm/opportunities/{opportunity_id}/proposals", status_code=201)
+    def crm_create_proposal(
+        opportunity_id: str, payload: CRMProposalCreateRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm_workflow.create_proposal(
+                principal, opportunity_id=opportunity_id,
+                title=payload.title, terms=payload.terms,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/crm/opportunities/{opportunity_id}/proposals")
+    def crm_list_proposals(
+        opportunity_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        try:
+            return request.app.state.crm_workflow.list_proposals(
+                principal, opportunity_id=opportunity_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/crm/opportunities/{opportunity_id}/proposals/{proposal_id}/status")
+    def crm_change_proposal(
+        opportunity_id: str, proposal_id: str, payload: CRMProposalStatusRequest,
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm_workflow.change_proposal(
+                principal, opportunity_id=opportunity_id, proposal_id=proposal_id,
+                expected_revision=payload.expected_revision, status=payload.status,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/crm/opportunities/{opportunity_id}/activities", status_code=201)
+    def crm_add_activity(
+        opportunity_id: str, payload: CRMActivityCreateRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm_workflow.add_activity(
+                principal, opportunity_id=opportunity_id,
+                kind=payload.kind, details=payload.details,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/crm/opportunities/{opportunity_id}/activities")
+    def crm_list_activities(
+        opportunity_id: str, request: Request,
+        page: int = Query(default=0, ge=0, le=200),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        try:
+            return request.app.state.crm_workflow.activities(
+                principal, opportunity_id=opportunity_id, page=page,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/app/crm", response_class=HTMLResponse)
     def crm_workspace(
