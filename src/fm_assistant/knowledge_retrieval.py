@@ -16,6 +16,7 @@ from sqlalchemy import and_, func, select, tuple_
 
 from .db import KnowledgeChunkORM, KnowledgeDocumentORM, KnowledgeSourceVersionORM
 from .domain import TenantContext
+from .knowledge_privacy import redact_knowledge_evidence
 
 _STOP = frozenset({
     "a", "as", "o", "os", "um", "uma", "uns", "umas", "de", "da", "do", "das",
@@ -105,6 +106,10 @@ class BoundedKnowledgeRetrieval:
         for doc_id, title, content, updated_at in docs:
             if not title or not content or len(content) > _MAX_DOC_CHARS:
                 continue  # Oversized sources require a governed ingestion flow.
+            # Scan sanitized text only: restricted values cannot become search
+            # tokens, snippets, source titles, or Context Pack evidence.
+            title = redact_knowledge_evidence(title)
+            content = redact_knowledge_evidence(content)
             title_hits = _terms(title) & terms
             body_hits = _terms(content) & terms
             hits = title_hits | body_hits
@@ -112,7 +117,8 @@ class BoundedKnowledgeRetrieval:
                 continue
             # Deterministic ranking and tight snippet selection; no broad
             # context dump. Prefer title match and multiple distinct terms.
-            score = 4 * len(title_hits) + len(body_hits)
+            score = (20 * len(hits) + 7 * len(title_hits)
+                     + min(sum(_normalize(content).count(term) for term in hits), 10))
             snippet = _snippet(content, hits)
             if not snippet:
                 continue
@@ -189,11 +195,13 @@ class BoundedKnowledgeRetrieval:
                                != row.content_sha256
                                for number, row in enumerate(rows))):
                     continue
-                best = max(rows, key=lambda row: (
-                    len(_terms(row.content) & frozenset(hits)), -row.ordinal,
+                best = max(rows, key=lambda row: _chunk_rank(
+                    redact_knowledge_evidence(row.content), frozenset(hits),
+                    row.ordinal,
                 ))
-                snippet = _snippet(best.content, frozenset(hits)) or (
-                    best.content[:_MAX_SNIPPET].strip()
+                safe_content = redact_knowledge_evidence(best.content)
+                snippet = _snippet(safe_content, frozenset(hits)) or (
+                    safe_content[:_MAX_SNIPPET].strip()
                 )
                 ordinal, digest = best.ordinal, best.content_sha256
                 header = (
@@ -229,6 +237,27 @@ class BoundedKnowledgeRetrieval:
             context=warning + "\n\n".join(chunks),
             grounded=True,
         )
+
+
+def _chunk_rank(content: str, terms: frozenset[str], ordinal: int) -> tuple:
+    """Prefer coverage, then compact term co-occurrence, without an LLM call."""
+    tokens = re.findall(r"[a-z0-9]{2,40}", _normalize(content))
+    positions = [(index, token) for index, token in enumerate(tokens) if token in terms]
+    distinct = {token for _, token in positions}
+    nearest = len(tokens) + 1
+    if distinct:
+        start = 0
+        counts: dict[str, int] = {}
+        for end, (pos, token) in enumerate(positions):
+            counts[token] = counts.get(token, 0) + 1
+            while len(counts) == len(distinct) and start <= end:
+                nearest = min(nearest, pos - positions[start][0] + 1)
+                first = positions[start][1]
+                counts[first] -= 1
+                if counts[first] == 0:
+                    del counts[first]
+                start += 1
+    return (len(distinct), -nearest, min(len(positions), 12), -ordinal)
 
 
 def _snippet(content: str, terms: frozenset[str]) -> str:
