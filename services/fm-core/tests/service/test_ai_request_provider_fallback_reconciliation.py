@@ -138,6 +138,20 @@ def test_request_never_hides_mismatch_unknowns_and_tenant_scope(example):
         summary(store)
 
 
+def test_small_fractional_costs_keep_exact_decimal_not_exponent(example):
+    store, sessions, _engine = example
+    with sessions.begin() as db:
+        event = db.get(AIUsageRecord, "event-2")
+        event.cost_decimal = "0.000000001"
+    import_one(store, 2, "vendor-b", cost="0.000000001")
+    report = summary(store)
+    vendor = next(p for p in report["per_provider"] if p["provider"] == "vendor-b")
+    assert vendor["internal_known_cost_usd"] == "0.000000001"
+    assert vendor["reported_known_cost_usd"] == "0.000000001"
+    assert "E-" not in vendor["internal_known_cost_usd"]
+    assert report["provider_invoice_verified"] is False
+
+
 def test_fm_only_endpoint_rejects_missing_or_forged_identity(example):
     _store, _sessions, engine = example
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
