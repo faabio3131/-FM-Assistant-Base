@@ -54,7 +54,7 @@ def test_settings_requires_session_and_exposes_owner_actions(client):
     for expected in (
         'id="unit-form"', 'id="persona-form"', 'id="integration-form"',
         'id="team-form"', 'id="provider-fields"',
-        'type="password"', 'id="invite-token"',
+        'field.type="password"', 'id="invite-token"',
         'href="/app/crm"', 'href="/app/settings"',
         "tenant_managed", "/v1/integrations/catalog", "/v1/auth/switch-unit",
     ):
