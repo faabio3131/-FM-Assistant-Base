@@ -17,8 +17,8 @@ from fm_assistant.db import (
     KnowledgeSourceVersionORM,
 )
 from fm_assistant.domain import TenantContext
-from fm_assistant.knowledge_sources import GovernedKnowledgeSources, SourceImportDenied
 from fm_assistant.knowledge_retrieval import BoundedKnowledgeRetrieval
+from fm_assistant.knowledge_sources import GovernedKnowledgeSources, SourceImportDenied
 
 
 @pytest.fixture
