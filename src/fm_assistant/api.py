@@ -1434,6 +1434,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except CRMConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.get("/v1/followups/runs")
+    def list_followup_runs(
+        request: Request,
+        status: str | None = Query(
+            default=None,
+            pattern="^(active|completed|blocked|failed|cancelled)$",
+        ),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        return request.app.state.cadence_engine.list_runs(
+            principal, status=status,
+        )
+
     @app.get("/v1/followups/runs/{run_id}")
     def get_followup_run(
         run_id: str, request: Request,
