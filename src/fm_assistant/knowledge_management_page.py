@@ -61,7 +61,7 @@ async function sources(page=0){
           encodeURIComponent(item.document_id)+"/url","PUT",{
             expected_revision:item.revision,title:item.title,url:item.source_ref
           });
-        notice("Atualização concluída na revisão "+result.revision+".");
+        notice(result.indexed?"URL atualizada na revisão "+result.revision+".":"URL sem mudanças; revisão "+result.revision+" preservada.");
         await sources(page);
       }));
       card.append(refresh);
@@ -83,7 +83,7 @@ async function sources(page=0){
         payload.set("file",file);
         const result=await api("/v1/knowledge/sources/"+
           encodeURIComponent(item.document_id)+"/file","PUT",payload);
-        notice("Arquivo atualizado na revisão "+result.revision+".");
+        notice(result.indexed?"Arquivo atualizado na revisão "+result.revision+".":"Arquivo sem mudanças; revisão "+result.revision+" preservada.");
         await sources(page);
       }));
       card.append(label,picker,update);
