@@ -197,6 +197,7 @@ class SourceImportResult:
     content_sha256: str
     source_kind: str
     external_source_verified: bool = False
+    indexed: bool = True
 
 
 class GovernedKnowledgeSources:
@@ -237,6 +238,82 @@ class GovernedKnowledgeSources:
             raise SourceImportDenied("f4.url_type_denied")
         text = _decode(data, ext)
         return self._store(context, title=title, content=text, kind="url", ref=url)
+
+    def _current_source(
+        self, context: TenantContext, document_id: str,
+        expected_revision: int, kind: str, ref: str,
+    ) -> None:
+        """Cheap preflight prevents foreign/stale requests triggering URL fetches."""
+        if (not isinstance(document_id, str) or type(expected_revision) is not int
+                or expected_revision < 1):
+            raise SourceImportDenied("f4.source_not_found")
+        with self._sessions() as db:
+            doc = db.scalar(select(KnowledgeDocumentORM).where(
+                KnowledgeDocumentORM.document_id == document_id,
+                KnowledgeDocumentORM.tenant_id == context.tenant_id,
+                KnowledgeDocumentORM.unit_id == context.unit_id,
+                KnowledgeDocumentORM.active.is_(True),
+            ))
+            if doc is None:
+                raise SourceImportDenied("f4.source_not_found")
+            version = db.scalar(select(KnowledgeSourceVersionORM).where(
+                KnowledgeSourceVersionORM.document_id == document_id,
+                KnowledgeSourceVersionORM.tenant_id == context.tenant_id,
+                KnowledgeSourceVersionORM.unit_id == context.unit_id,
+            ).order_by(KnowledgeSourceVersionORM.revision.desc()).limit(1))
+            if (version is None or version.source_kind != kind
+                    or version.source_ref != ref):
+                raise SourceImportDenied("f4.source_not_found")
+            if version.revision != expected_revision:
+                raise SourceImportDenied("f4.stale_revision")
+
+    def replace_file(
+        self, context: TenantContext, *, document_id: str,
+        expected_revision: int, filename: str, media_type: str,
+        content: bytes, title: str,
+    ) -> SourceImportResult:
+        self._current_source(context, document_id, expected_revision, "file", filename)
+        if (not isinstance(filename, str) or not 1 <= len(filename) <= 160
+                or any(c in filename for c in ("/", "\\", ":", "\x00"))):
+            raise SourceImportDenied("f4.filename_invalid")
+        suffix = "." + filename.rsplit(".", 1)[-1].lower()
+        if suffix not in _TYPES or media_type not in _TYPES[suffix]:
+            raise SourceImportDenied("f4.file_type_denied")
+        text = _decode(content, suffix)
+        result = self._versioning.index_text(
+            context, document_id=document_id, expected_revision=expected_revision,
+            title=title, content=text, source_kind="file", source_ref=filename,
+        )
+        return SourceImportResult(result.document_id, result.revision,
+                                  result.chunks, result.content_sha256, "file",
+                                  indexed=result.indexed)
+
+    def refresh_url(
+        self, context: TenantContext, *, document_id: str,
+        expected_revision: int, url: str, title: str,
+    ) -> SourceImportResult:
+        self._current_source(context, document_id, expected_revision, "url", url)
+        configured = os.environ.get("FM_ASSISTANT_KNOWLEDGE_URL_ALLOWED_HOSTS", "")
+        hosts = frozenset(h.strip().lower() for h in configured.split(",") if h.strip())
+        if not all(_HOST.fullmatch(h) for h in hosts):
+            raise SourceImportDenied("f4.url_allowlist_invalid")
+        _, addresses = _checked_host(url, hosts, self._resolver)
+        data, content_type = self._fetcher(url, addresses)
+        ext = {
+            "text/plain": ".txt", "text/markdown": ".md",
+            "text/html": ".html", "text/csv": ".csv",
+            "application/pdf": ".pdf",
+        }.get(content_type)
+        if ext is None:
+            raise SourceImportDenied("f4.url_type_denied")
+        text = _decode(data, ext)
+        result = self._versioning.index_text(
+            context, document_id=document_id, expected_revision=expected_revision,
+            title=title, content=text, source_kind="url", source_ref=url,
+        )
+        return SourceImportResult(result.document_id, result.revision,
+                                  result.chunks, result.content_sha256, "url",
+                                  indexed=result.indexed)
 
     def _store(
         self, context: TenantContext, *, title: str, content: str,
