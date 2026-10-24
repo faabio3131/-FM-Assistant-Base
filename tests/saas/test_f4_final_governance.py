@@ -139,8 +139,6 @@ def test_http_restore_enforces_authority_revocation_and_scope(client, provision_
     owner = provision_credential(client, "tenant-alpha", "unit-alpha")
     foreign = provision_credential(client, "tenant-beta", "unit-alpha")
     auth = {"Authorization": f"Bearer {owner}"}
-    from fm_assistant.knowledge_versioning import VersionedKnowledgeIngestion
-
     doc = client.post("/v1/knowledge", headers=auth, json={
         "title": "Política Alpha", "content": "Alpha possui suporte de garantia.",
     }).json()["document_id"]
