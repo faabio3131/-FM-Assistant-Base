@@ -26,6 +26,11 @@ def seed(client):
         "contact_id": cid, "title": "Implantação SaaS", "amount_cents": 39900,
     })
     assert opportunity.status_code == 201, opportunity.text
+    persona = client.put("/v1/persona", json={
+        "public_name": "Assistente de teste", "language": "pt-BR",
+        "tone": "profissional", "instructions": "", "enabled": True,
+    })
+    assert persona.status_code == 200, persona.text
     conversation = client.post("/v1/conversations", json={"channel": "api"})
     assert conversation.status_code == 200, conversation.text
     return cid, opportunity.json()["opportunity_id"], conversation.json()["conversation_id"]
