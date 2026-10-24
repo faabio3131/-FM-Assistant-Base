@@ -123,7 +123,7 @@ def test_urls_allowlist_https_public_dns_no_query_no_redirect(monkeypatch, store
     visited = []
     service = GovernedKnowledgeSources(store,
         resolver=lambda host,port: ["93.184.216.34"],
-        fetcher=lambda url: (visited.append(url) or
+        fetcher=lambda url, _addresses: (visited.append(url) or
             (b"<p>Atendimento de suporte VIP.</p><script>SECRET_JS</script>", "text/html")),
     )
     result = service.import_url(ctx(), url="https://docs.example.com/planos",
@@ -148,7 +148,7 @@ def test_urls_allowlist_https_public_dns_no_query_no_redirect(monkeypatch, store
             service.import_url(ctx(), url=url, title="Denied")
     assert len(visited) == 1
     private = GovernedKnowledgeSources(store, resolver=lambda _h,_p: ["10.0.0.5"],
-                                      fetcher=lambda url: pytest.fail(url))
+                                      fetcher=lambda url, _addresses: pytest.fail(url))
     with pytest.raises(SourceImportDenied, match="url_dns_denied"):
         private.import_url(ctx(), url="https://docs.example.com/planos", title="Denied")
     monkeypatch.delenv("FM_ASSISTANT_KNOWLEDGE_URL_ALLOWED_HOSTS")
