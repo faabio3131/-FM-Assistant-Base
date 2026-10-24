@@ -22,7 +22,12 @@ async def run(*, batch: int, sleep: float, once: bool) -> None:
             result = await asyncio.to_thread(
                 app.state.cadence_engine.tick, batch=batch,
             )
-            _LOG.info("f7_internal_cadences batch=%s", result)
+            appointments = await asyncio.to_thread(
+                app.state.agenda_engine.reminders, limit=batch,
+            )
+            _LOG.info(
+                "f7_internal_cadences batch=%s agenda=%s", result, appointments,
+            )
             if once:
                 break
             await asyncio.sleep(sleep)
