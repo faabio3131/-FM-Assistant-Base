@@ -45,6 +45,33 @@ const labels = {
   new:"Novo", qualified:"Qualificado", proposal:"Proposta",
   won:"Ganho", lost:"Perdido"
 };
+const currency = cents => (cents/100).toLocaleString("pt-BR",{
+  style:"currency",currency:"BRL"
+});
+function renderFunnel(data) {
+  const summary=$("crm-funnel-summary"), funnel=$("crm-funnel-stages");
+  summary.replaceChildren();funnel.replaceChildren();
+  const metrics=[
+    ["Contatos",data.contacts_total],
+    ["Oportunidades",data.opportunities_total],
+    ["Em aberto",data.open_opportunities],
+    ["Funil aberto",currency(data.open_pipeline_cents)],
+    ["Ganhas",data.won_opportunities],
+    ["Valor ganho",currency(data.won_opportunity_value_cents)],
+    ["Perdidas",data.lost_opportunities],
+    ["Conversão de encerradas",data.win_rate_basis_points===null?
+      "Sem encerradas":(data.win_rate_basis_points/100).toFixed(2)+"%"]
+  ];
+  for(const [label,value] of metrics){
+    const card=el("article",undefined,"entry");
+    card.append(el("small",label,"subtle"),el("strong",value));summary.append(card);
+  }
+  for(const stage of ["new","qualified","proposal","won","lost"]){
+    const row=data.stages[stage], entry=el("span",
+      labels[stage]+": "+row.count+" · "+currency(row.amount_cents),"subtle");
+    funnel.append(entry);
+  }
+}
 function renderContacts() {
   const area = $("contacts");
   const selector = $("opportunity-contact");
@@ -93,12 +120,23 @@ function renderOpportunities() {
     row.append(el("small",name+" · "+(item.amount_cents/100).toLocaleString("pt-BR",{
       style:"currency",currency:"BRL"})+" · "+labels[item.stage],"subtle"));
     const actions = el("div",undefined,"actions");
+    let reason=null;
+    if ((stages[item.stage] || []).some(next=>["won","lost"].includes(next))) {
+      reason=el("input");
+      reason.type="text";reason.maxLength=500;
+      reason.placeholder="Motivo do resultado (opcional; privado)";
+      reason.setAttribute("aria-label","Motivo do resultado comercial");
+      row.append(reason);
+    }
     for (const next of stages[item.stage] || []) {
       const button=el("button","Mover para "+labels[next]);
       button.type="button";
       button.addEventListener("click",() => guarded(async () => {
+        const outcome_reason=["won","lost"].includes(next) && reason?
+          reason.value.trim() || null:null;
         await api("/v1/crm/opportunities/"+encodeURIComponent(item.opportunity_id)+
-          "/transition","POST",{expected_revision:item.revision,stage:next});
+          "/transition","POST",{expected_revision:item.revision,stage:next,
+            outcome_reason});
         notice("Etapa atualizada: "+labels[next]+".");
         await refresh();
       }));
@@ -111,12 +149,14 @@ function renderOpportunities() {
 async function refresh() {
   const results = await Promise.all([
     api("/v1/crm/contacts"),
-    api("/v1/crm/opportunities?stage="+encodeURIComponent($("stage-filter").value))
+    api("/v1/crm/opportunities?stage="+encodeURIComponent($("stage-filter").value)),
+    api("/v1/crm/analytics")
   ]);
   contacts=results[0].items;
   opportunities=results[1].items;
   renderContacts();
   renderOpportunities();
+  renderFunnel(results[2]);
   $("contact-more").textContent = results[0].next_page !== null ?
     "Mostrando 50 contatos; consulte as próximas páginas pela API." : "";
   $("opportunity-more").textContent = results[1].next_page !== null ?
@@ -295,6 +335,9 @@ input[type=checkbox]{display:inline;width:auto;margin-right:6px}
 .entry{border:1px solid #e1e7ed;border-radius:10px;padding:14px;
 margin:10px 0;display:grid;gap:4px;overflow-wrap:anywhere}
 .actions{display:flex;gap:8px;flex-wrap:wrap}.subtle{color:#556d7c}
+.crm-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px}
+.crm-metrics .entry{margin:0}
+.crm-stages{display:flex;flex-wrap:wrap;gap:15px;margin-top:16px}
 #notice{min-height:24px;font-weight:600;color:#195b72}
 @media(max-width:750px){main{grid-template-columns:1fr}.wide{grid-column:auto}}
 </style></head><body>
@@ -318,6 +361,10 @@ margin:10px 0;display:grid;gap:4px;overflow-wrap:anywhere}
 <input id="amount-cents" type="number" min="0" max="2000000000" step="1" required>
 <button class="primary" type="submit">Abrir oportunidade</button></form>
 </section>
+<section class="wide"><h2>Indicadores comerciais da unidade</h2>
+<p class="subtle">Valores de oportunidades, não faturamento, pagamentos ou receita contábil.</p>
+<div id="crm-funnel-summary" class="crm-metrics"></div>
+<div id="crm-funnel-stages" class="crm-stages"></div></section>
 <section class="wide"><h2>Pipeline comercial</h2>
 <label for="stage-filter">Filtrar por etapa</label><select id="stage-filter">
 <option value="">Todas</option><option value="new">Novas</option>
