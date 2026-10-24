@@ -25,7 +25,6 @@ from .knowledge_versioning import KnowledgeVersionResult, VersionedKnowledgeInge
 _MAX_UPLOAD = 1_500_000
 _MAX_TEXT = 24_000
 _HOST = re.compile(r"^[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63})+$")
-_FILENAME = re.compile(r"^[A-Za-z0-9_ .()\\-]{1,160}$")
 _TYPES = {
     ".txt": ("text/plain",),
     ".md": ("text/markdown", "text/plain"),
@@ -74,7 +73,15 @@ def _decode(data: bytes, suffix: str) -> str:
             pdf = PdfReader(BytesIO(data), strict=True)
             if pdf.is_encrypted or not 1 <= len(pdf.pages) <= 30:
                 raise SourceImportDenied("f4.pdf_invalid")
-            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            extracted = []
+            chars = 0
+            for page in pdf.pages:
+                page_text = page.extract_text() or ""
+                chars += len(page_text)
+                if chars > _MAX_TEXT:
+                    raise SourceImportDenied("f4.extracted_content_limit")
+                extracted.append(page_text)
+            text = "\n".join(extracted)
         except SourceImportDenied:
             raise
         except Exception as exc:
@@ -106,7 +113,7 @@ def _checked_host(url: str, hosts: frozenset[str], resolver) -> str:
                 or parsed.query or parsed.fragment or parsed.port not in (None, 443)
                 or not _HOST.fullmatch(host) or host not in hosts
                 or parsed.netloc != host and parsed.netloc != host + ":443"
-                or not parsed.path.startswith(("/", ""))):
+                or not (parsed.path == "" or parsed.path.startswith("/"))):
             raise SourceImportDenied("f4.url_denied")
         addresses = resolver(host, 443)
         if not addresses or len(addresses) > 16:
@@ -133,20 +140,19 @@ def _fetch_https(url: str) -> tuple[bytes, str]:
         with httpx.Client(
             timeout=httpx.Timeout(6.0, connect=3.0), follow_redirects=False,
             trust_env=False,
-        ) as client:
-            with client.stream("GET", url, headers={
-                "Accept": "text/plain,text/markdown,text/csv,text/html,application/pdf",
-                "User-Agent": "VendeAtendeIA-Knowledge/1.0",
-            }) as response:
-                if response.status_code != 200 or response.is_redirect:
-                    raise SourceImportDenied("f4.url_response_denied")
-                ctype = response.headers.get("content-type", "").split(";")[0].lower().strip()
-                body = bytearray()
-                for part in response.iter_bytes():
-                    body.extend(part)
-                    if len(body) > _MAX_UPLOAD:
-                        raise SourceImportDenied("f4.url_too_large")
-                return bytes(body), ctype
+        ) as client, client.stream("GET", url, headers={
+            "Accept": "text/plain,text/markdown,text/csv,text/html,application/pdf",
+            "User-Agent": "VendeAtendeIA-Knowledge/1.0",
+        }) as response:
+            if response.status_code != 200 or response.is_redirect:
+                raise SourceImportDenied("f4.url_response_denied")
+            ctype = response.headers.get("content-type", "").split(";")[0].lower().strip()
+            body = bytearray()
+            for part in response.iter_bytes():
+                body.extend(part)
+                if len(body) > _MAX_UPLOAD:
+                    raise SourceImportDenied("f4.url_too_large")
+            return bytes(body), ctype
     except SourceImportDenied:
         raise
     except (httpx.HTTPError, OSError) as exc:
@@ -174,7 +180,9 @@ class GovernedKnowledgeSources:
         self, context: TenantContext, *, filename: str,
         media_type: str, content: bytes, title: str,
     ) -> SourceImportResult:
-        if not isinstance(filename, str) or not _FILENAME.fullmatch(filename):
+        if (not isinstance(filename, str) or not 1 <= len(filename) <= 160
+                or not filename.isprintable() or filename in (".", "..")
+                or any(char in filename for char in ("/", "\\", ":", "\x00"))):
             raise SourceImportDenied("f4.filename_invalid")
         suffix = "." + filename.rsplit(".", 1)[-1].lower()
         if (suffix not in _TYPES or media_type not in _TYPES[suffix]):
