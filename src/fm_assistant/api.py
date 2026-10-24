@@ -177,6 +177,7 @@ class KnowledgeSourceImportResponse(BaseModel):
     content_sha256: str
     source_kind: str
     external_source_verified: bool
+    indexed: bool = True
 
 
 class KnowledgeVersionRequest(BaseModel):
