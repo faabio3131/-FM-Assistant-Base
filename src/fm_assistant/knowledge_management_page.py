@@ -53,6 +53,17 @@ async function sources(page=0){
     if(item.source_ref)card.append(element("small","Origem: "+item.source_ref,"muted"));
     if(item.content_sha256)card.append(element("small",
       "SHA-256: "+item.content_sha256,"hash"));
+    if(!item.active&&Number.isInteger(item.revision)&&item.revision>=1){
+      const restore=element("button","Reativar fonte verificada");
+      restore.addEventListener("click",()=>withBusy(async()=>{
+        if(!window.confirm("Reativar esta fonte para a IA?"))return;
+        await api("/v1/knowledge/"+encodeURIComponent(item.document_id)+
+          "/reactivate?expected_revision="+item.revision,"POST");
+        notice("Fonte reativada após verificação de integridade.");
+        await sources(page);
+      }));
+      card.append(restore);
+    }
     if(item.active&&Number.isInteger(item.revision)&&item.revision>=1&&
        item.source_kind==="url"&&item.source_ref){
       const refresh=element("button","Atualizar conteúdo desta URL");
