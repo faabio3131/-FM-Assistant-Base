@@ -6,9 +6,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.capabilities import KnowledgeCapabilityProvider
-from fm_assistant.db import Base, KnowledgeDocumentORM
+from fm_assistant.db import Base, KnowledgeDocumentORM, KnowledgeChunkORM
 from fm_assistant.domain import Message, MessageRole, TenantContext
 from fm_assistant.knowledge_retrieval import BoundedKnowledgeRetrieval
+from fm_assistant.knowledge_versioning import VersionedKnowledgeIngestion
 from fm_assistant.repositories import KnowledgeRepository
 
 
@@ -132,3 +133,99 @@ def test_opt_in_runtime_uses_retrieval_not_legacy_all_document_dump(store):
     )
     assert "Zeta tem restricoes" in legacy
     assert "Alpha inclui atendimento" in legacy
+
+
+def test_versioned_context_pack_uses_latest_chunks_and_immutable_provenance(store):
+    repo = KnowledgeRepository(store)
+    doc = repo.add(ctx(), title="Atendimento Alpha",
+                   content="Alpha antes tinha atendimento apenas por email.")
+    writer = VersionedKnowledgeIngestion(store)
+    first = writer.index_text(ctx(), document_id=doc, expected_revision=0,
+                              title="Atendimento Alpha",
+                              content="Alpha antes tinha atendimento apenas por email.")
+    assert first.revision == 1
+    second = writer.index_text(ctx(), document_id=doc, expected_revision=1,
+                               title="Atendimento Alpha",
+                               content="Alpha agora possui atendimento prioritario e chat.")
+    assert second.revision == 2
+    got = BoundedKnowledgeRetrieval(store).query(ctx(), "atendimento prioritario Alpha")
+    assert got.grounded and len(got.evidence) == 1
+    evidence = got.evidence[0]
+    assert evidence.source_revision == 2
+    assert evidence.chunk_ordinal == 0
+    assert len(evidence.chunk_sha256) == 64
+    assert f"revisao=2, trecho=0, sha256={evidence.chunk_sha256}" in got.context
+    assert "prioritario" in got.context
+    assert "apenas por email" not in got.context
+    assert "Alpha" in got.context
+    assert not BoundedKnowledgeRetrieval(store).query(
+        ctx(tenant="foreign"), "atendimento prioritario Alpha",
+    ).grounded
+    assert not BoundedKnowledgeRetrieval(store).query(
+        ctx(unit="foreign"), "atendimento prioritario Alpha",
+    ).grounded
+
+
+def test_versioned_retrieval_picks_relevant_chunk_not_whole_document(store):
+    doc_text = ("Contexto introdutorio irrelevante. " * 27) + (
+        "Renovacao antecipada garante acesso ao suporte de contas empresariais. "
+    ) + ("Sem mais detalhes tecnicos. " * 35)
+    doc = KnowledgeRepository(store).add(
+        ctx(), title="Politicas Alpha", content=doc_text,
+    )
+    VersionedKnowledgeIngestion(store).index_text(
+        ctx(), document_id=doc, expected_revision=0,
+        title="Politicas Alpha", content=doc_text,
+    )
+    answer = BoundedKnowledgeRetrieval(store).query(
+        ctx(), "renovacao antecipada contas empresariais",
+    )
+    assert answer.grounded
+    assert answer.evidence[0].source_revision == 1
+    assert answer.evidence[0].chunk_ordinal is not None
+    assert answer.evidence[0].chunk_ordinal >= 1
+    assert "Renovacao antecipada" in answer.context
+    assert len(answer.context) < len(doc_text)
+    assert len(answer.context) <= 4800
+
+
+def test_versioned_corruption_fails_closed_without_fallback_to_raw_document(store):
+    doc = KnowledgeRepository(store).add(
+        ctx(), title="Garantia Prime", content="Garantia Prime por sessenta dias.",
+    )
+    VersionedKnowledgeIngestion(store).index_text(
+        ctx(), document_id=doc, expected_revision=0,
+        title="Garantia Prime", content="Garantia Prime por sessenta dias.",
+    )
+    reader = BoundedKnowledgeRetrieval(store)
+    assert reader.query(ctx(), "Garantia Prime").grounded
+    with store.begin() as db:
+        chunk = db.scalar(select(KnowledgeChunkORM).where(
+            KnowledgeChunkORM.document_id == doc,
+        ))
+        chunk.content = "EXFILTRACAO DE OUTRO TENANT"
+    denied = reader.query(ctx(), "Garantia Prime")
+    assert denied.grounded is False
+    assert denied.context == ""
+    with store.begin() as db:
+        chunk = db.scalar(select(KnowledgeChunkORM).where(
+            KnowledgeChunkORM.document_id == doc,
+        ))
+        chunk.content = "Garantia Prime por sessenta dias."
+        document = db.get(KnowledgeDocumentORM, doc)
+        document.content = "Garantia Prime adulterada sem versao."
+    denied = reader.query(ctx(), "Garantia Prime")
+    assert denied.grounded is False
+    assert "adulterada" not in denied.context
+
+
+def test_legacy_knowledge_remains_selective_before_first_version(store):
+    doc = KnowledgeRepository(store).add(
+        ctx(), title="Agenda Loja", content="Agenda Loja abre segunda e sexta.",
+    )
+    result = BoundedKnowledgeRetrieval(store).query(ctx(), "agenda segunda")
+    assert result.grounded
+    assert result.evidence[0].document_id == doc
+    assert result.evidence[0].source_revision is None
+    assert result.evidence[0].chunk_ordinal is None
+    assert "Agenda Loja abre" in result.context
