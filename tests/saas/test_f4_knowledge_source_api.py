@@ -48,7 +48,7 @@ def test_url_import_requires_exact_allowlist_and_does_not_touch_network_when_den
     sink = client.app.state.knowledge_sources
     calls = []
     monkeypatch.setattr(sink, "_resolver", lambda host,port: ["93.184.216.34"])
-    monkeypatch.setattr(sink, "_fetcher", lambda url: (
+    monkeypatch.setattr(sink, "_fetcher", lambda url, _addresses: (
         calls.append(url) or (b"<h1>Prazo Alpha</h1><p>Entrega em 12 dias.</p>",
                                "text/html"),
     ))
