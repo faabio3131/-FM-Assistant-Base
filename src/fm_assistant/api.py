@@ -47,6 +47,7 @@ from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDen
 from .evolution_onboarding import EvolutionOnboarding
 from .evolution_queue import EvolutionInboundQueue, EvolutionQueueCapacityExceeded
 from .evolution_runtime import EvolutionRuntime
+from .followups import FollowupPreferences
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .human_inbox import HumanInbox, HumanInboxDenied
 from .human_inbox_operations import HumanInboxOperations
@@ -245,6 +246,16 @@ class CRMProposalStatusRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
     expected_revision: int = Field(ge=1, strict=True)
     status: str = Field(pattern="^(ready|withdrawn)$")
+
+
+class FollowupPreferenceRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    channel: str = Field(pattern="^(whatsapp|email)$")
+    expected_revision: int = Field(ge=0, le=2_000_000_000, strict=True)
+    opted_out: bool
+    timezone: str = Field(min_length=1, max_length=64)
+    quiet_start: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    quiet_end: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
 
 class CRMActivityCreateRequest(BaseModel):
@@ -728,6 +739,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     vault = FernetCredentialVault(cfg.channel_encryption_key)
     crm = CRMService(session_factory, vault, pepper=cfg.credential_pepper)
     crm_workflow = CRMWorkflow(session_factory, vault)
+    followup_preferences = FollowupPreferences(session_factory)
     human_whatsapp_outbox = HumanWhatsAppOutbox(
         session_factory, vault, sender_pepper=cfg.credential_pepper,
     )
@@ -858,6 +870,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge_sources = knowledge_sources
         app.state.crm = crm
         app.state.crm_workflow = crm_workflow
+        app.state.followup_preferences = followup_preferences
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
         app.state.human_inbox_operations = human_inbox_operations
@@ -1346,6 +1359,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             enabled=payload.enabled,
         )
         return _persona_response(persona)
+
+    @app.get("/v1/followups/contacts/{contact_id}/preferences")
+    def get_followup_preference(
+        contact_id: str, request: Request,
+        channel: str = Query(default="whatsapp", pattern="^(whatsapp|email)$"),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.followup_preferences.get(
+                principal, contact_id=contact_id, channel=channel,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.put("/v1/followups/contacts/{contact_id}/preferences")
+    def set_followup_preference(
+        contact_id: str, payload: FollowupPreferenceRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.followup_preferences.configure(
+                principal, contact_id=contact_id, channel=payload.channel,
+                expected_revision=payload.expected_revision,
+                opted_out=payload.opted_out, timezone=payload.timezone,
+                quiet_start=payload.quiet_start, quiet_end=payload.quiet_end,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/crm/contacts", status_code=201)
     def create_crm_contact(
