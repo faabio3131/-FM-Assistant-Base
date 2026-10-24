@@ -405,7 +405,7 @@ class CadenceEngine:
                     state="leased", claim_generation=generation,
                     attempt_count=job.attempt_count + 1,
                     lease_until=instant + _LEASE, updated_at=instant,
-                )).rowcount
+                ).execution_options(synchronize_session=False)).rowcount
             except OperationalError:
                 db.rollback()
                 return None
@@ -561,7 +561,8 @@ class CadenceEngine:
                 CadenceJobORM.state == "leased",
                 CadenceJobORM.claim_generation == generation,
                 CadenceJobORM.lease_until > instant,
-            ).values(state="completed", lease_until=None, updated_at=instant)).rowcount
+            ).values(state="completed", lease_until=None, updated_at=instant)
+                .execution_options(synchronize_session=False)).rowcount
             if changed != 1:
                 raise CRMConflict("cadence.lease_expired_or_fenced")
             db.add(CRMActivityORM(
