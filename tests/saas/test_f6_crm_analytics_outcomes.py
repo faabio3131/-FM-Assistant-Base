@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from test_identity_rbac import _bootstrap, _login
 
 from fm_assistant.crm import CRMAuditORM, CRMOpportunityORM
 from fm_assistant.crm_workflow import CRMActivityORM
-from test_identity_rbac import _bootstrap, _login
 
 
 def contact(client, name="Lead"):
