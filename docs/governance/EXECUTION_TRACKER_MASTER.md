@@ -1174,3 +1174,12 @@ Reutilização canônica KnowledgeDocumentORM/KnowledgeRepository + capability d
 ### 2026-10-22 — F4/WP2 versionamento de fontes e chunks
 
 Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com versões e chunks imutáveis por tenant/unidade, conteúdo original preservado por bootstrap obrigatório, ingestão textual versionada por CAS, API permissionada e flag OFF, testes Alembic/SQLAlchemy/HTTP negativos. Gate CI no SHA da PR; nenhuma migration real. F4 permanece IN_PROGRESS: retrieval por chunks, ingestão de arquivos/URLs, UI, fontes versionadas externamente e busca híbrida ainda faltam. Não promover PR monolítica #1 indevidamente.
+
+
+## 2026-10-24 — F6 / CRM operacional — WP inicial PR #32
+
+- Base: Assistant+Core unificados na main após F4 PR #31 merge 09e89bc50f55943fee4a7542359a0504af37ca76; nenhuma reconstrução de F4/F5.
+- Construção: contatos com e-mail cifrado e deduplicação por HMAC em tenant/unidade; oportunidades em centavos e pipeline transacional CAS com auditoria; APIs humanas RBAC e interface /app/crm com CSP, no-store e navegação.
+- DB: migration aditiva 20261024_0025 e teste em banco descartável. Sem migração externa, credenciais reais, deploy ou cobrança.
+- Gate: testes de tenancy/PII/RBAC/CSRF/revisão/estados e 5 workflows aplicáveis no HEAD exato da PR #32. Merge somente após verde integral e revisão; CI pós-merge deve ser checada.
+- F6 total continua IN_PROGRESS: integração conversa→lead, qualificação, propostas, analytics e demais capacidades continuam pendentes.
