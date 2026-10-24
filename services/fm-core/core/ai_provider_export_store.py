@@ -437,8 +437,8 @@ class PersistentProviderExportStore:
             summary = reports[provider]
             per_provider.append({
                 **summary,
-                "internal_known_cost_usd": str(summary["internal_known_cost_usd"]),
-                "reported_known_cost_usd": str(summary["reported_known_cost_usd"]),
+                "internal_known_cost_usd": format(summary["internal_known_cost_usd"], "f"),
+                "reported_known_cost_usd": format(summary["reported_known_cost_usd"], "f"),
             })
         return {
             "tenant_id": tenant_id, "unit_id": unit_id, "request_id": request_id,
