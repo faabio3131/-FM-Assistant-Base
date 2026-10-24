@@ -63,11 +63,29 @@ function renderContacts() {
     selector.append(option);
   }
   if (contacts.some(c => c.contact_id === current)) selector.value=current;
+  const linkContact=$("link-contact"), prior=linkContact.value;
+  linkContact.replaceChildren();
+  for(const contact of contacts){
+    const option=el("option",contact.name);option.value=contact.contact_id;
+    linkContact.append(option);
+  }
+  if(contacts.some(c=>c.contact_id===prior))linkContact.value=prior;
 }
 function renderOpportunities() {
   const area = $("opportunities");
   area.replaceChildren();
   if (!opportunities.length) area.append(el("p","Nenhuma oportunidade neste filtro.","subtle"));
+  const select=$("workflow-opportunity"), current=select.value;
+  const linkOpp=$("link-opportunity"), prior=linkOpp.value;
+  select.replaceChildren();linkOpp.replaceChildren();
+  const blank=el("option","Sem oportunidade vinculada");blank.value="";
+  linkOpp.append(blank);
+  for(const opp of opportunities){
+    const option=el("option",opp.title);option.value=opp.opportunity_id;select.append(option);
+    const candidate=el("option",opp.title);candidate.value=opp.opportunity_id;linkOpp.append(candidate);
+  }
+  if(opportunities.some(x=>x.opportunity_id===current))select.value=current;
+  if(opportunities.some(x=>x.opportunity_id===prior))linkOpp.value=prior;
   for (const item of opportunities) {
     const row = el("article",undefined,"entry");
     row.append(el("strong",item.title));
@@ -131,6 +149,117 @@ $("opportunity-form").addEventListener("submit", event => {
 });
 $("stage-filter").addEventListener("change",() => guarded(refresh));
 $("refresh").addEventListener("click",() => guarded(refresh));
+
+function activeOpportunity(){
+  const id=$("workflow-opportunity").value;
+  if(!id)throw Error("Selecione uma oportunidade.");
+  return "/v1/crm/opportunities/"+encodeURIComponent(id);
+}
+$("link-form").addEventListener("submit",event=>{
+  event.preventDefault();guarded(async()=>{
+    const id=$("link-conversation").value.trim();
+    if(!id)throw Error("Informe o ID da conversa.");
+    const path="/v1/crm/conversations/"+encodeURIComponent(id)+"/link";
+    const prior=await api(path).catch(err=>{
+      if(String(err.message).includes("crm.link_not_found"))return {revision:0};
+      throw err;
+    });
+    const payload={
+      contact_id:$("link-contact").value,
+      opportunity_id:$("link-opportunity").value || null,
+      expected_revision:prior.revision
+    };
+    const result=await api(path,"PUT",payload);
+    notice("Conversa vinculada à revisão "+result.revision+".");
+  });
+});
+$("qualification-form").addEventListener("submit",event=>{
+  event.preventDefault();guarded(async()=>{
+    const root=activeOpportunity(),path=root+"/qualification";
+    const prior=await api(path).catch(err=>{
+      if(String(err.message).includes("crm.qualification_not_found"))return {revision:0};
+      throw err;
+    });
+    const days=$("timeline-days").value;
+    const result=await api(path,"PUT",{
+      expected_revision:prior.revision,
+      need_confirmed:$("need-confirmed").checked,
+      budget_confirmed:$("budget-confirmed").checked,
+      decision_maker_confirmed:$("decision-confirmed").checked,
+      timeline_days:days===""?null:Number(days)
+    });
+    notice("Qualificação registrada: "+result.score+"/100; nenhuma mudança automática de etapa.");
+    await showWorkflow();
+  });
+});
+$("proposal-form").addEventListener("submit",event=>{
+  event.preventDefault();guarded(async()=>{
+    const root=activeOpportunity();
+    const result=await api(root+"/proposals","POST",{
+      title:$("proposal-title").value,terms:$("proposal-terms").value
+    });
+    $("proposal-form").reset();
+    notice("Proposta interna criada: "+result.title+". Nenhum envio foi realizado.");
+    await showWorkflow();
+  });
+});
+$("activity-form").addEventListener("submit",event=>{
+  event.preventDefault();guarded(async()=>{
+    await api(activeOpportunity()+"/activities","POST",{
+      kind:$("activity-kind").value,details:$("activity-details").value
+    });
+    $("activity-details").value="";
+    notice("Atividade registrada.");
+    await showWorkflow();
+  });
+});
+async function showWorkflow(){
+  const root=activeOpportunity();
+  const [qualification,proposals,activities,links]=await Promise.all([
+    api(root+"/qualification").catch(e=>{
+      if(String(e.message).includes("crm.qualification_not_found"))return null;
+      throw e;
+    }),api(root+"/proposals"),api(root+"/activities"),api(root+"/conversations")
+  ]);
+  $("qualification-summary").textContent=qualification?
+    "Pontuação: "+qualification.score+"/100 · revisão "+qualification.revision:
+    "Sem qualificação registrada.";
+  $("linked-summary").textContent=links.items.length+
+    " conversa(s) vinculada(s) à oportunidade.";
+  const quoteArea=$("proposal-results");quoteArea.replaceChildren();
+  if(!proposals.items.length)quoteArea.append(el("p","Sem propostas internas.","subtle"));
+  for(const proposal of proposals.items){
+    const card=el("article",undefined,"entry");
+    card.append(el("strong",proposal.title));
+    card.append(el("small","Status: "+proposal.status+" · "+(proposal.amount_cents/100)
+      .toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),"subtle"));
+    card.append(el("p",proposal.terms));
+    if(proposal.status==="draft"){
+      for(const state of ["ready","withdrawn"]){
+        const btn=el("button",state==="ready"?"Aprovar internamente":"Retirar proposta");
+        btn.addEventListener("click",()=>guarded(async()=>{
+          await api(root+"/proposals/"+encodeURIComponent(proposal.proposal_id)+"/status",
+            "POST",{expected_revision:proposal.revision,status:state});
+          notice("Estado atualizado; nenhuma mensagem enviada ao cliente.");
+          await showWorkflow();
+        }));
+        card.append(btn);
+      }
+    }
+    quoteArea.append(card);
+  }
+  const area=$("activities"), items=activities.items;area.replaceChildren();
+  if(!items.length)area.append(el("p","Nenhuma atividade registrada.","subtle"));
+  for(const a of items){
+    const entry=el("article",undefined,"entry");
+    entry.append(el("strong",a.kind+" · "+new Date(a.created_at).toLocaleString("pt-BR")));
+    if(a.details)entry.append(el("p",a.details));
+    if(a.related_id)entry.append(el("small","Referência "+a.related_id,"subtle"));
+    area.append(entry);
+  }
+}
+$("show-workflow").addEventListener("click",()=>guarded(showWorkflow));
+
 guarded(refresh);
 })();
 """
@@ -159,6 +288,8 @@ border:1px solid #aabfcc;min-width:0}
 button{margin-top:12px;border:1px solid #286681;color:#16516c;background:#fff;
 padding:9px 15px;border-radius:8px;font:inherit;cursor:pointer}
 button.primary{background:#155c7c;color:#fff}button:disabled{opacity:.55;cursor:not-allowed}
+textarea{display:block;width:100%;min-height:90px;padding:11px;border:1px solid #aabfcc;border-radius:8px;font:inherit}
+input[type=checkbox]{display:inline;width:auto;margin-right:6px}
 .entry{border:1px solid #e1e7ed;border-radius:10px;padding:14px;
 margin:10px 0;display:grid;gap:4px;overflow-wrap:anywhere}
 .actions{display:flex;gap:8px;flex-wrap:wrap}.subtle{color:#556d7c}
@@ -195,5 +326,49 @@ margin:10px 0;display:grid;gap:4px;overflow-wrap:anywhere}
 <div id="opportunities"></div><small id="opportunity-more" class="subtle"></small>
 </section><section class="wide"><h2>Contatos cadastrados</h2>
 <div id="contacts"></div><small id="contact-more" class="subtle"></small></section>
+
+<section class="wide"><h2>Relacionar conversa ao CRM</h2>
+<p class="subtle">Informe o identificador de uma conversa da sua unidade. O vínculo é auditado e pode ser revisado.</p>
+<form id="link-form"><label for="link-conversation">ID da conversa</label>
+<input id="link-conversation" maxlength="64" required>
+<label for="link-contact">Contato</label><select id="link-contact" required></select>
+<label for="link-opportunity">Oportunidade (opcional)</label>
+<select id="link-opportunity"></select>
+<button class="primary" type="submit">Vincular conversa</button></form></section>
+<section class="wide"><h2>Qualificação, propostas e histórico</h2>
+<label for="workflow-opportunity">Oportunidade selecionada</label>
+<select id="workflow-opportunity" required></select>
+<button id="show-workflow">Consultar histórico</button>
+<p id="qualification-summary" class="subtle"></p>
+<p id="linked-summary" class="subtle"></p></section>
+<section><h2>Qualificação comercial</h2>
+<form id="qualification-form">
+<label><input type="checkbox" id="need-confirmed"> Necessidade confirmada</label>
+<label><input type="checkbox" id="budget-confirmed"> Orçamento confirmado</label>
+<label><input type="checkbox" id="decision-confirmed"> Decisor identificado</label>
+<label for="timeline-days">Prazo de decisão (dias, opcional)</label>
+<input type="number" id="timeline-days" min="0" max="3650" step="1">
+<button class="primary" type="submit">Salvar qualificação</button></form>
+<p class="subtle">Pontuação objetiva de 0 a 100; não altera a etapa automaticamente.</p>
+</section>
+<section><h2>Preparar proposta comercial</h2>
+<form id="proposal-form"><label for="proposal-title">Título</label>
+<input id="proposal-title" maxlength="255" required>
+<label for="proposal-terms">Condições</label>
+<textarea id="proposal-terms" maxlength="4000" required></textarea>
+<button class="primary" type="submit">Criar proposta interna</button></form>
+<p class="subtle">O valor é o da oportunidade. Aprovação interna não envia nem cobra.</p>
+</section>
+<section><h2>Registrar atividade</h2><form id="activity-form">
+<label for="activity-kind">Tipo</label><select id="activity-kind">
+<option value="note">Nota</option><option value="call">Ligação</option>
+<option value="meeting">Reunião</option><option value="task">Tarefa</option></select>
+<label for="activity-details">Descrição privada</label>
+<textarea id="activity-details" maxlength="4000" required></textarea>
+<button class="primary" type="submit">Registrar atividade</button></form>
+</section>
+<section><h2>Propostas internas</h2><div id="proposal-results"></div></section>
+<section class="wide"><h2>Linha do tempo comercial</h2>
+<div id="activities"></div></section>
 </main><script>""" + script + """</script></body></html>"""
     return markup, csp
