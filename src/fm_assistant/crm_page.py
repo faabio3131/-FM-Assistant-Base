@@ -164,6 +164,7 @@ async function refresh() {
   renderContacts();
   renderOpportunities();
   renderFunnel(results[2]);
+  await loadF7();
   $("contact-more").textContent = results[0].next_page !== null ?
     "Mostrando 50 contatos; consulte as próximas páginas pela API." : "";
   $("opportunity-more").textContent = results[1].next_page !== null ?
@@ -342,6 +343,132 @@ async function showWorkflow(){
 }
 $("show-workflow").addEventListener("click",()=>guarded(showWorkflow));
 
+
+let cadenceDefinitions=[], cadenceRuns=[], pendingRunKey=null;
+function renderF7Selectors() {
+  const contact=$("cadence-contact"), selected=contact.value;
+  contact.replaceChildren();
+  for(const item of contacts){
+    const option=el("option",item.name);option.value=item.contact_id;contact.append(option);
+  }
+  if(contacts.some(x=>x.contact_id===selected))contact.value=selected;
+  renderF7OpportunityChoices();
+}
+function renderF7OpportunityChoices() {
+  const select=$("cadence-opportunity"), current=select.value;
+  select.replaceChildren();
+  for(const opp of opportunities.filter(o=>o.contact_id===$("cadence-contact").value &&
+      !["won","lost"].includes(o.stage))){
+    const option=el("option",opp.title);option.value=opp.opportunity_id;select.append(option);
+  }
+  if([...select.options].some(o=>o.value===current))select.value=current;
+}
+function renderF7() {
+  const definitions=$("cadence-definitions"), runs=$("cadence-runs");
+  const selector=$("cadence-choice"), old=selector.value;
+  definitions.replaceChildren();runs.replaceChildren();selector.replaceChildren();
+  const latest=new Map();
+  for(const item of cadenceDefinitions){
+    if(!latest.has(item.cadence_id))latest.set(item.cadence_id,item);
+  }
+  for(const item of latest.values()){
+    const option=el("option",item.name+" · v"+item.version+" · "+item.channel);
+    option.value=item.cadence_id+":"+item.version;selector.append(option);
+    definitions.append(el("p",item.name+" · versão "+item.version+" · "+item.channel,"subtle"));
+  }
+  if([...selector.options].some(o=>o.value===old))selector.value=old;
+  if(!selector.options.length)definitions.append(el("p","Crie uma cadência primeiro.","subtle"));
+  if(!cadenceRuns.length)runs.append(el("p","Nenhuma execução encontrada.","subtle"));
+  for(const run of cadenceRuns){
+    const card=el("article",undefined,"entry");
+    const title=latest.get(run.cadence_id)?.name || "Cadência";
+    card.append(el("strong",title+" · "+run.status));
+    const contact=contacts.find(x=>x.contact_id===run.contact_id)?.name || "Contato";
+    card.append(el("small",contact+" · "+run.jobs.length+" etapas · "+
+      run.run_id.slice(0,8),"subtle"));
+    for(const job of run.jobs){
+      card.append(el("small","Etapa "+(job.step_index+1)+": "+job.state+
+        " · "+new Date(job.due_at).toLocaleString("pt-BR")+
+        " · tentativas "+job.attempt_count,"subtle"));
+    }
+    const actions=el("div",undefined,"actions");
+    const events=el("button","Ver auditoria");
+    events.type="button";
+    events.addEventListener("click",()=>guarded(async()=>{
+      const data=await api("/v1/followups/runs/"+encodeURIComponent(run.run_id)+"/events");
+      const log=el("div");
+      for(const item of data.items){
+        log.append(el("small",new Date(item.created_at).toLocaleString("pt-BR")+
+          " · "+item.action+(item.reason?" · "+item.reason:""),"subtle"));
+      }
+      if(!data.items.length)log.append(el("small","Sem eventos.","subtle"));
+      card.append(log);
+    }));
+    actions.append(events);
+    if(run.status==="active"){
+      const cancel=el("button","Cancelar cadência");
+      cancel.type="button";
+      cancel.addEventListener("click",()=>guarded(async()=>{
+        await api("/v1/followups/runs/"+encodeURIComponent(run.run_id)+"/cancel","POST");
+        notice("Cadência cancelada; nenhum envio externo foi executado.");
+        await loadF7();
+      }));
+      actions.append(cancel);
+    }
+    card.append(actions);runs.append(card);
+  }
+  $("cadence-more").textContent=cadenceHasMore?
+    "Mostrando 50 execuções; consulte as demais via API.":"";
+}
+let cadenceHasMore=false;
+async function loadF7(){
+  const [defs,runs]=await Promise.all([
+    api("/v1/followups/cadences"),api("/v1/followups/runs")
+  ]);
+  cadenceDefinitions=defs.items;
+  cadenceRuns=runs.items;
+  cadenceHasMore=runs.has_more;
+  renderF7Selectors();
+  renderF7();
+}
+$("cadence-contact").addEventListener("change",renderF7OpportunityChoices);
+$("cadence-reload").addEventListener("click",()=>guarded(loadF7));
+$("cadence-definition-form").addEventListener("submit",event=>{
+  event.preventDefault();
+  guarded(async()=>{
+    const steps=[{delay_minutes:0,task:$("cadence-task1").value.trim()}];
+    const task2=$("cadence-task2").value.trim();
+    if(task2){
+      steps.push({delay_minutes:Number($("cadence-delay2").value),task:task2});
+    }
+    const created=await api("/v1/followups/cadences","POST",{
+      name:$("cadence-name").value.trim(),channel:$("cadence-channel").value,steps
+    });
+    notice("Cadência criada na versão "+created.version+".");
+    $("cadence-definition-form").reset();
+    await loadF7();
+  });
+});
+$("cadence-run-form").addEventListener("submit",event=>{
+  event.preventDefault();
+  guarded(async()=>{
+    const [cadence_id,version]=$("cadence-choice").value.split(":");
+    const start=new Date($("cadence-start").value);
+    if(!Number.isFinite(start.getTime()))throw Error("Data e horário inválidos.");
+    if(!pendingRunKey)pendingRunKey=crypto.randomUUID();
+    const result=await api("/v1/followups/runs","POST",{
+      cadence_id,version:Number(version),
+      contact_id:$("cadence-contact").value,
+      opportunity_id:$("cadence-opportunity").value,
+      idempotency_key:pendingRunKey,start_at:start.toISOString()
+    });
+    pendingRunKey=null;
+    notice("Execução "+result.run_id.slice(0,8)+" criada com "+
+      result.jobs.length+" tarefas internas. Sem disparos externos.");
+    await loadF7();
+  });
+});
+
 const initial = new URLSearchParams(window.location.search).get("conversation");
 if(initial && initial.length<=64)$("link-conversation").value=initial;
 guarded(refresh);
@@ -437,6 +564,35 @@ Sem política configurada, o envio automatizado é bloqueado. Esta etapa não en
 <div class="actions"><button id="followup-load" type="button">Consultar preferência</button>
 <button class="primary" type="submit">Salvar preferência</button></div>
 </form><p id="followup-status" class="subtle" role="status"></p></section>
+<section class="wide"><h2>F7 · Cadências comerciais</h2>
+<p class="subtle">Regras versionadas e tarefas internas. Nenhuma mensagem é enviada automaticamente.</p>
+<form id="cadence-definition-form">
+<label for="cadence-name">Nome da cadência</label>
+<input id="cadence-name" maxlength="120" required>
+<label for="cadence-channel">Canal de consentimento</label>
+<select id="cadence-channel"><option value="whatsapp">WhatsApp</option>
+<option value="email">E-mail</option></select>
+<label for="cadence-task1">Primeira tarefa interna (imediata)</label>
+<textarea id="cadence-task1" maxlength="500" required></textarea>
+<label for="cadence-task2">Segunda tarefa interna (opcional)</label>
+<textarea id="cadence-task2" maxlength="500"></textarea>
+<label for="cadence-delay2">Minutos até a segunda tarefa</label>
+<input id="cadence-delay2" type="number" value="60" min="1" max="43200" step="1">
+<button class="primary" type="submit">Criar regra versionada</button>
+</form>
+<div id="cadence-definitions" aria-live="polite"></div></section>
+<section class="wide"><h2>Agendamento e acompanhamento de cadências</h2>
+<form id="cadence-run-form">
+<label for="cadence-choice">Cadência e versão</label><select id="cadence-choice" required></select>
+<label for="cadence-contact">Contato</label><select id="cadence-contact" required></select>
+<label for="cadence-opportunity">Oportunidade aberta</label>
+<select id="cadence-opportunity" required></select>
+<label for="cadence-start">Início (horário local)</label>
+<input id="cadence-start" type="datetime-local" required>
+<button class="primary" type="submit">Agendar tarefas internas</button></form>
+<div class="actions"><button id="cadence-reload" type="button">Atualizar execuções</button></div>
+<div id="cadence-runs" aria-live="polite"></div>
+<p id="cadence-more" class="subtle"></p></section>
 <section class="wide"><h2>Relacionar conversa ao CRM</h2>
 <p class="subtle">Informe o identificador de uma conversa da sua unidade. O vínculo é auditado e pode ser revisado.</p>
 <form id="link-form"><label for="link-conversation">ID da conversa</label>
