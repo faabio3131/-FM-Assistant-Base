@@ -256,7 +256,8 @@ class CadenceStepRequest(BaseModel):
 
 
 class CadenceDefinitionRequest(BaseModel):
-    model_config = {"extra": "forbid", "strict": True}
+    # JSON UUID/datetime strings are allowed; numeric fields stay strict.
+    model_config = {"extra": "forbid"}
     name: str = Field(min_length=1, max_length=120)
     channel: str = Field(pattern="^(whatsapp|email)$")
     steps: list[CadenceStepRequest] = Field(min_length=1, max_length=8)
@@ -265,7 +266,8 @@ class CadenceDefinitionRequest(BaseModel):
 
 
 class CadenceScheduleRequest(BaseModel):
-    model_config = {"extra": "forbid", "strict": True}
+    # JSON UUID/datetime strings are allowed; numeric fields stay strict.
+    model_config = {"extra": "forbid"}
     cadence_id: UUID4
     version: int = Field(ge=1, strict=True)
     contact_id: UUID4
