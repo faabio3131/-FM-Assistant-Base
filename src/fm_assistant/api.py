@@ -166,6 +166,10 @@ class KnowledgeURLImportRequest(BaseModel):
     url: str = Field(min_length=12, max_length=512)
 
 
+class KnowledgeURLRefreshRequest(KnowledgeURLImportRequest):
+    expected_revision: int = Field(strict=True, ge=1, le=2_000_000_000)
+
+
 class KnowledgeSourceImportResponse(BaseModel):
     document_id: str
     revision: int
@@ -1336,6 +1340,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except (SourceImportDenied, KnowledgeVersionDenied) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return KnowledgeSourceImportResponse(**vars(result))
+
+    @app.put("/v1/knowledge/sources/{document_id}/file",
+             response_model=KnowledgeSourceImportResponse)
+    async def replace_knowledge_file(
+        document_id: str, request: Request,
+        title: str = Form(..., min_length=1, max_length=255),
+        expected_revision: int = Form(..., ge=1, le=2_000_000_000),
+        file: UploadFile = File(...),
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_MANAGE)),
+    ) -> KnowledgeSourceImportResponse:
+        _deny_cross_origin_knowledge_mutation(request)
+        if os.environ.get("FM_ASSISTANT_KNOWLEDGE_SOURCES_ENABLED", "false").casefold() != "true":
+            raise HTTPException(status_code=503, detail="knowledge_import_disabled")
+        try:
+            data = await file.read(1_500_001)
+            result = request.app.state.knowledge_sources.replace_file(
+                context, document_id=document_id, expected_revision=expected_revision,
+                filename=file.filename or "",
+                media_type=(file.content_type or "").split(";")[0].lower(),
+                content=data, title=title,
+            )
+        except SourceImportDenied as exc:
+            code = 404 if str(exc) == "f4.source_not_found" else (
+                409 if str(exc) == "f4.stale_revision" else 422
+            )
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        except KnowledgeVersionDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            await file.close()
+        return KnowledgeSourceImportResponse(**vars(result))
+
+    @app.put("/v1/knowledge/sources/{document_id}/url",
+             response_model=KnowledgeSourceImportResponse)
+    def refresh_knowledge_url(
+        document_id: str, payload: KnowledgeURLRefreshRequest,
+        request: Request,
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_MANAGE)),
+    ) -> KnowledgeSourceImportResponse:
+        _deny_cross_origin_knowledge_mutation(request)
+        if os.environ.get("FM_ASSISTANT_KNOWLEDGE_SOURCES_ENABLED", "false").casefold() != "true":
+            raise HTTPException(status_code=503, detail="knowledge_import_disabled")
+        try:
+            result = request.app.state.knowledge_sources.refresh_url(
+                context, document_id=document_id, expected_revision=payload.expected_revision,
+                title=payload.title, url=payload.url,
+            )
+        except SourceImportDenied as exc:
+            code = 404 if str(exc) == "f4.source_not_found" else (
+                409 if str(exc) == "f4.stale_revision" else 422
+            )
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        except KnowledgeVersionDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return KnowledgeSourceImportResponse(**vars(result))
 
     @app.post("/v1/knowledge", response_model=KnowledgeResponse)
