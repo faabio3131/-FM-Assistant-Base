@@ -165,6 +165,12 @@ class VersionedKnowledgeIngestion:
                 raise KnowledgeVersionDenied("f4.source_provenance_mismatch")
             if latest is None and source_kind != "text":
                 raise KnowledgeVersionDenied("f4.source_missing")
+            if latest is not None and source_kind != "text" and (
+                latest.content_sha256 != hashlib.sha256(
+                    doc.content.encode("utf-8")
+                ).hexdigest() or doc.title != latest.title
+            ):
+                raise KnowledgeVersionDenied("f4.source_integrity_mismatch")
             if latest is None and (
                 title != doc.title or content != doc.content.strip()
             ):
@@ -193,6 +199,18 @@ class VersionedKnowledgeIngestion:
                     tenant_id=context.tenant_id, unit_id=context.unit_id,
                     start_offset=begin, end_offset=end, content=chunk,
                     content_sha256=hashlib.sha256(chunk.encode("utf-8")).hexdigest(),
+                    created_at=now,
+                ))
+            if source_kind != "text":
+                db.add(AuditEventORM(
+                    audit_id=str(uuid4()), tenant_id=context.tenant_id,
+                    unit_id=context.unit_id, credential_id=context.credential_id,
+                    action="assistant.knowledge.source_revision",
+                    resource_type="assistant_knowledge", resource_id=document_id,
+                    outcome="success",
+                    metadata_json=(
+                        f'{{"source_kind":"{source_kind}","revision":{version}}}'
+                    ),
                     created_at=now,
                 ))
             # Preserve the canonical existing document repository and its
