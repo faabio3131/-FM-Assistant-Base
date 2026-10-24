@@ -98,7 +98,7 @@ def test_reschedule_cancel_complete_and_cross_unit(client):
     assert client.get("/v1/followups/agenda", params=_window(start)).json()["items"] == []
 
     assert client.post("/v1/auth/switch-unit", json={
-        "unit_id": "default",
+        "unit_id": "unit-a",
     }).status_code == 200
 
 
@@ -135,8 +135,8 @@ def test_due_reminder_creates_exactly_one_encrypted_internal_task(client):
         },
     )
     assert change.status_code == 200, change.text
-    assert engine.reminders(now=start + timedelta(hours=22))["reminded"] == 1
-    assert engine.reminders(now=start + timedelta(hours=22))["reminded"] == 0
+    assert engine.reminders(now=start + timedelta(hours=23))["reminded"] == 1
+    assert engine.reminders(now=start + timedelta(hours=23))["reminded"] == 0
 
 
 def test_cancelled_and_expired_meetings_never_project_tasks(client):
