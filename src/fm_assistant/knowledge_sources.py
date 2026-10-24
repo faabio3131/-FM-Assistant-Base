@@ -25,7 +25,7 @@ from .knowledge_versioning import KnowledgeVersionResult, VersionedKnowledgeInge
 
 _MAX_UPLOAD = 1_500_000
 _MAX_TEXT = 24_000
-_HOST = re.compile(r"^[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63})+$")
+_HOST = re.compile(r"^[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})+$")
 _TYPES = {
     ".txt": ("text/plain",),
     ".md": ("text/markdown", "text/plain"),
