@@ -16,6 +16,7 @@ from .identity_repository import SessionPrincipal
 
 _NAVIGATION = (
     ("Visão geral", "/app", None),
+    ("Configurações", "/app/settings", Permission.TENANT_READ),
     ("Atendimento", "/app/inbox", Permission.CONVERSATION_READ),
     ("CRM e pipeline", "/app/crm", Permission.CRM_READ),
     ("Agenda", "/app/crm#agenda-workspace", Permission.CRM_READ),
