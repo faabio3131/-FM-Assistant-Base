@@ -41,13 +41,13 @@ from .credential_vault import FernetCredentialVault
 from .crm import CRMConflict, CRMNotFound, CRMService
 from .crm_page import render_crm_page
 from .crm_workflow import CRMWorkflow
-from .followup_cadences import CadenceEngine
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDenied
 from .evolution_onboarding import EvolutionOnboarding
 from .evolution_queue import EvolutionInboundQueue, EvolutionQueueCapacityExceeded
 from .evolution_runtime import EvolutionRuntime
+from .followup_cadences import CadenceEngine
 from .followups import FollowupPreferences
 from .gateways import CoreModelGateway, DevelopmentModelGateway, OpenAICompatibleGateway
 from .human_inbox import HumanInbox, HumanInboxDenied
