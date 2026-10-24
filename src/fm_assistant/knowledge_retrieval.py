@@ -176,10 +176,14 @@ class BoundedKnowledgeRetrieval:
                 rows = indexed_chunks.get(doc_id, [])
                 if (version_title != doc_title or current_hash != content_hash
                         or not rows or len(rows) > 64
+                        or rows[0].start_offset != 0
+                        or rows[-1].end_offset != len(doc_content)
                         or any(row.ordinal != number
                                or row.start_offset < 0
                                or row.end_offset > len(doc_content)
                                or row.end_offset <= row.start_offset
+                               or (number > 0 and
+                                   row.start_offset > rows[number - 1].end_offset)
                                or doc_content[row.start_offset:row.end_offset] != row.content
                                or hashlib.sha256(row.content.encode("utf-8")).hexdigest()
                                != row.content_sha256
@@ -221,7 +225,7 @@ class BoundedKnowledgeRetrieval:
         return KnowledgeContextPack(
             tenant_id=context.tenant_id, unit_id=context.unit_id,
             query_terms=tuple(sorted(terms)), evidence=tuple(selected),
-            corpus_truncated=truncated,
+            corpus_truncated=truncated or len(candidates) > _MAX_VERSION_CANDIDATES,
             context=warning + "\n\n".join(chunks),
             grounded=True,
         )
