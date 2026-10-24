@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from fm_assistant.capabilities import KnowledgeCapabilityProvider
-from fm_assistant.db import Base, KnowledgeDocumentORM, KnowledgeChunkORM
+from fm_assistant.db import Base, KnowledgeChunkORM, KnowledgeDocumentORM
 from fm_assistant.domain import Message, MessageRole, TenantContext
 from fm_assistant.knowledge_retrieval import BoundedKnowledgeRetrieval
 from fm_assistant.knowledge_versioning import VersionedKnowledgeIngestion
