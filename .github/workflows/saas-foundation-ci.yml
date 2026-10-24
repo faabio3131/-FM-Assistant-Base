@@ -1,0 +1,38 @@
+name: SaaS Foundation CI
+
+on:
+  push:
+    branches:
+      - main
+      - feat/**
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Pip check
+        run: pip check
+      - name: Ruff
+        run: >
+          ruff check
+          src
+          tests/saas
+          alembic/versions/20261017_0003_identity_tenant_rbac.py
+          alembic/versions/20261018_0004_integration_control_plane.py
+          alembic/versions/20261018_0005_core_service_identity.py
+          alembic/versions/20261018_0006_command_bridge_control.py
+          alembic/versions/20261018_0009_plan_limit_catalog.py
+          alembic/versions/20261018_0010_plan_sync_nonce.py
+          alembic/versions/20261018_0011_plan_binding_audit.py
+      - name: Pytest
+        run: pytest tests/saas
+      - name: Validate pinned Evolution Compose (no containers started)
+        run: docker compose --env-file deploy/evolution/.env.example -f deploy/evolution/docker-compose.yml config --quiet

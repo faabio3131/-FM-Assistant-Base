@@ -1,0 +1,497 @@
+"""Synthetic QR onboarding; no VPS, WhatsApp account or real credentials."""
+from __future__ import annotations
+
+import base64
+
+import httpx
+import pytest
+
+from fm_assistant.channels.whatsapp_evolution import (
+    EvolutionClient,
+    EvolutionSettings,
+    EvolutionUnavailable,
+)
+from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+
+def _headers(key):
+    return {"Authorization": f"Bearer {key}"}
+
+
+def _transport(on_request):
+    client = httpx.Client(transport=httpx.MockTransport(on_request))
+    return EvolutionClient(
+        EvolutionSettings(
+            origin="https://evolution.example.test",
+            global_key="synthetic-fm-admin-key-" + "x" * 32,
+        ),
+        client=client,
+    )
+
+
+def test_https_and_separate_global_key_required():
+    assert "x" * 40 not in repr(EvolutionSettings(
+        origin="https://evolution.example.test", global_key="x" * 40,
+    ))
+    for origin in (
+        "http://evolution.example.test", "https://localhost",
+        "https://user:pass@evolution.example.test",
+        "https://evolution.example.test/admin",
+        "https://evolution.example.test:8080",
+    ):
+        with pytest.raises(ValueError, match="evolution_settings_invalid"):
+            EvolutionSettings(origin=origin, global_key="x" * 40)
+
+
+def test_qr_adapter_never_sends_master_key_in_body():
+    qr = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 128).decode()
+    seen = []
+
+    def handler(request):
+        assert request.headers["apikey"].startswith("synthetic-fm-admin-key-")
+        assert request.url.host == "evolution.example.test"
+        assert "synthetic-fm-admin-key" not in request.content.decode()
+        seen.append(request.url.path)
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {"token": "individual-token"}})
+        return httpx.Response(200, json={"base64": "data:image/png;base64," + qr})
+
+    adapter = _transport(handler)
+    assert adapter.create("fm_" + "f" * 32) == "individual-token"
+    assert adapter.connect("fm_" + "f" * 32) == "data:image/png;base64," + qr
+    assert seen == [
+        "/instance/create", "/instance/connect/fm_" + "f" * 32,
+    ]
+
+
+def test_bad_qr_and_ambiguous_remote_failure_fail_closed():
+    def bad_qr(_):
+        return httpx.Response(200, json={"base64": "not-valid-base64"})
+
+    with pytest.raises(EvolutionUnavailable, match="evolution_qr_invalid"):
+        _transport(bad_qr).connect("fm_" + "f" * 32)
+    with pytest.raises(EvolutionUnavailable, match="evolution_gateway_unavailable"):
+        _transport(lambda _: httpx.Response(503)).create("fm_" + "f" * 32)
+
+
+def test_tenant_scoped_api_provision_and_qr(client, provision_credential):
+    key_a = provision_credential(client, "tenant-a", "unit-a")
+    key_b = provision_credential(client, "tenant-b", "unit-b")
+    assert client.post("/v1/channels/whatsapp/qr/provision").status_code == 401
+    assert client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key_a),
+    ).status_code == 503
+
+    qr = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 128).decode()
+
+    def handler(request):
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {"token": "test-token-secret"}})
+        return httpx.Response(200, json={"base64": qr})
+
+    original = client.app.state.integration_repository
+    from fm_assistant.credential_vault import FernetCredentialVault
+
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=original,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(handler),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key_a),
+    )
+    assert created.status_code == 200, created.text
+    payload = created.json()
+    assert payload["provider_key"] == "whatsapp_evolution"
+    assert payload["status"] == "draft"
+    assert "test-token-secret" not in created.text
+    cid = payload["connection_id"]
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(client.app.state.settings.database_url)
+    with engine.connect() as db:
+        row = db.execute(text(
+            "SELECT ciphertext FROM assistant_integration_secret_versions "
+            "WHERE connection_id = :id AND secret_name = :name"
+        ), {"id": cid, "name": "instance_token"}).scalar_one()
+        assert row != "test-token-secret"
+        assert "test-token-secret" not in row
+    engine.dispose()
+
+    other = client.get(
+        f"/v1/channels/whatsapp/qr/{cid}", headers=_headers(key_b),
+    )
+    assert other.status_code == 404
+    result = client.get(
+        f"/v1/channels/whatsapp/qr/{cid}", headers=_headers(key_a),
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["status"] == "connecting"
+    assert result.json()["qr_data_url"].startswith("data:image/png;base64,")
+    assert result.headers["cache-control"] == "no-store"
+    repeat = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key_a),
+    )
+    assert repeat.status_code == 409
+    forbidden_config_change = client.put(
+        f"/v1/integrations/{cid}/config", headers=_headers(key_a),
+        json={"config": {"instance_name": "attacker-supplied"}},
+    )
+    assert forbidden_config_change.status_code == 409
+    invalid_generic = client.post(
+        "/v1/integrations", headers=_headers(key_a),
+        json={
+            "provider_key": "whatsapp_evolution",
+            "config": {"instance_name": "arbitrary"},
+            "secrets": {"instance_token": "tenant-controlled"},
+        },
+    )
+    assert invalid_generic.status_code == 400
+
+
+def test_remote_ambiguous_create_never_retries_or_exposes_secret(
+    client, provision_credential,
+):
+    key = provision_credential(client, "tenant-uncertain", "unit-a")
+    attempts = []
+
+    def handler(request):
+        attempts.append(request.url.path)
+        return httpx.Response(503, json={"secret": "should-never-echo"})
+
+    from fm_assistant.credential_vault import FernetCredentialVault
+
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=client.app.state.integration_repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(handler),
+    )
+    first = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert first.status_code == 409
+    assert "should-never-echo" not in first.text
+    again = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert again.status_code == 409
+    assert attempts == ["/instance/create"]
+
+
+def test_catalog_registers_qr_provider_without_requiring_user_tokens(
+    client, provision_credential,
+):
+    key = provision_credential(client, "tenant-a", "unit-a")
+    result = client.get("/v1/integrations/catalog", headers=_headers(key))
+    assert result.status_code == 200
+    entry = next(
+        x for x in result.json()
+        if x["provider_key"] == "whatsapp_evolution"
+    )
+    assert "whatsapp.qr" in entry["capabilities"]
+    assert entry["integration_type"] == "whatsapp"
+
+
+def test_qr_panel_is_human_session_only_and_has_strict_csp(client, provision_credential):
+    key = provision_credential(client, "tenant-a", "unit-a")
+    assert client.get("/v1/channels/whatsapp/qr/panel").status_code == 401
+    # Machine credentials are not equivalent to an owner session.
+    assert client.get(
+        "/v1/channels/whatsapp/qr/panel", headers=_headers(key),
+    ).status_code == 401
+    from test_identity_rbac import _bootstrap, _login
+
+    _bootstrap(client, tenant_id="tenant-owner-qr", unit_id="unit-owner-qr",
+               email="qr-owner@example.com")
+    _login(client, tenant_id="tenant-owner-qr", email="qr-owner@example.com")
+    html = client.get("/v1/channels/whatsapp/qr/panel")
+    assert html.status_code == 200, html.text
+    assert "Conecte seu WhatsApp" in html.text
+    assert "script-src 'nonce-" in html.headers["content-security-policy"]
+    assert html.headers["cache-control"] == "no-store"
+    assert "frame-ancestors 'none'" in html.headers["content-security-policy"]
+    # A customer can access their panel even before the FM transport is activated,
+    # while API calls remain explicitly unavailable instead of using fake QR codes.
+    assert client.get("/v1/channels/whatsapp/qr/current").status_code == 503
+
+
+def test_qr_current_is_scoped_and_never_returns_secrets(
+    client, provision_credential,
+):
+    api_key = provision_credential(client, "tenant-read-qr", "unit-read-qr")
+    assert client.get(
+        "/v1/channels/whatsapp/qr/current", headers=_headers(api_key),
+    ).status_code == 503
+
+
+def test_instance_outbound_uses_individual_token_not_fm_master_key():
+    requests = []
+
+    def send(request):
+        requests.append(request)
+        assert request.headers["apikey"] == "synthetic-instance-token-value"
+        assert request.headers["apikey"] != "synthetic-fm-admin-key-" + "x" * 32
+        assert request.url.path == "/message/sendText/fm_" + "f" * 32
+        assert request.content == b'{"number":"5511999999999","text":"Resposta segura"}'
+        return httpx.Response(200, json={"key": {"id": "WA-OUT-1"}})
+
+    sender = _transport(send)
+    assert sender.send_text(
+        "fm_" + "f" * 32, instance_token="synthetic-instance-token-value",
+        recipient="5511999999999", message="Resposta segura",
+    ) == "WA-OUT-1"
+    assert len(requests) == 1
+
+
+def test_outbound_network_ambiguity_is_never_a_success():
+    sender = _transport(lambda _: httpx.Response(503))
+    with pytest.raises(EvolutionUnavailable, match="gateway_unavailable"):
+        sender.send_text(
+            "fm_" + "f" * 32, instance_token="synthetic-instance-token-value",
+            recipient="5511999999999", message="Resposta segura",
+        )
+    with pytest.raises(ValueError, match="outbound_invalid"):
+        sender.send_text(
+            "fm_" + "f" * 32, instance_token="synthetic-instance-token-value",
+            recipient="123", message="Resposta segura",
+        )
+
+
+def test_owner_scoped_pause_blocks_qr_and_is_idempotent(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key_a = provision_credential(client, "tenant-pause-a", "unit-pause-a")
+    key_b = provision_credential(client, "tenant-pause-b", "unit-pause-b")
+    calls = []
+
+    def remote(request):
+        calls.append(request.url.path)
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {"token": "test-instance-token"}})
+        return httpx.Response(503)
+
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=client.app.state.integration_repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key_a),
+    )
+    assert created.status_code == 200, created.text
+    cid = created.json()["connection_id"]
+    endpoint = f"/v1/channels/whatsapp/qr/{cid}/pause"
+    assert client.post(endpoint).status_code == 401
+    assert client.post(endpoint, headers=_headers(key_b)).status_code == 404
+    paused = client.post(endpoint, headers=_headers(key_a))
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "disabled"
+    assert paused.json()["revision"] == 2
+    again = client.post(endpoint, headers=_headers(key_a))
+    assert again.status_code == 200
+    assert again.json()["revision"] == 2
+    assert client.get(
+        f"/v1/channels/whatsapp/qr/{cid}", headers=_headers(key_a),
+    ).status_code == 409
+    assert client.get(
+        "/v1/channels/whatsapp/qr/current", headers=_headers(key_a),
+    ).json()["status"] == "disabled"
+    # Local pause never claims the phone was remotely logged out.
+    assert calls == ["/instance/create"]
+
+
+def test_pause_rejects_wrong_provider_even_with_valid_scope(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key = provision_credential(client, "tenant-pause-other", "unit-pause-other")
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=client.app.state.integration_repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(lambda _: httpx.Response(503)),
+    )
+    assert client.post(
+        "/v1/channels/whatsapp/qr/not-a-connection/pause",
+        headers=_headers(key),
+    ).status_code == 404
+
+
+def test_remote_logout_revokes_secret_after_provider_confirmation(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key = provision_credential(client, "remote-logout-a", "unit-logout-a")
+    attacker = provision_credential(client, "remote-logout-b", "unit-logout-b")
+    calls = []
+
+    def remote(request):
+        calls.append((request.method, request.url.path, request.headers["apikey"]))
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {
+                "token": "synthetic-instance-logout-token",
+            }})
+        if request.url.path.startswith("/instance/logout/"):
+            assert request.headers["apikey"] == "synthetic-instance-logout-token"
+            return httpx.Response(200, json={"message": "success"})
+        return httpx.Response(503)
+
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    endpoint = f"/v1/channels/whatsapp/qr/{cid}/logout"
+    assert client.post(endpoint).status_code == 401
+    assert client.post(endpoint, headers=_headers(attacker)).status_code == 404
+    response = client.post(endpoint, headers=_headers(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "revoked"
+    assert repository.active_secret_ciphertexts(cid) == {}
+    assert client.get(
+        f"/v1/channels/whatsapp/qr/{cid}", headers=_headers(key),
+    ).status_code == 409
+    again = client.post(endpoint, headers=_headers(key))
+    assert again.status_code == 200
+    assert len([p for _, p, _ in calls if p.startswith("/instance/logout/")]) == 1
+
+
+def test_remote_logout_failure_never_revokes_unverified_remote_session(
+    client, provision_credential,
+):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    key = provision_credential(client, "logout-ambiguous", "unit-ambiguous")
+    calls = []
+
+    def remote(request):
+        calls.append(request.url.path)
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {
+                "token": "synthetic-remote-logout-secret",
+            }})
+        return httpx.Response(503)
+
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(key),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    response = client.post(
+        f"/v1/channels/whatsapp/qr/{cid}/logout", headers=_headers(key),
+    )
+    assert response.status_code == 409
+    from fm_assistant.domain import TenantContext
+
+    scoped = TenantContext(
+        tenant_id="logout-ambiguous", unit_id="unit-ambiguous", credential_id=key,
+    )
+    assert repository.get(scoped, cid).status.value == "disabled"
+    assert "instance_token" in repository.active_secret_ciphertexts(cid)
+    assert calls == ["/instance/create", "/instance/logout/" + created.json()["config"]["instance_name"]]
+
+
+def test_resume_requires_remote_open_and_rejects_foreign_scope(client, provision_credential):
+    from fm_assistant.credential_vault import FernetCredentialVault
+    from fm_assistant.evolution_onboarding import EvolutionOnboarding
+
+    owner = provision_credential(client, "resume-tenant", "resume-unit")
+    foreign = provision_credential(client, "resume-foreign", "resume-foreign-unit")
+    states = ["close", "open"]
+    calls = []
+
+    def remote(request):
+        calls.append((request.url.path, request.headers["apikey"]))
+        if request.url.path == "/instance/create":
+            return httpx.Response(201, json={"hash": {
+                "token": "synthetic-individual-resume-token",
+            }})
+        if request.url.path.startswith("/instance/connectionState/"):
+            assert request.headers["apikey"] == "synthetic-individual-resume-token"
+            return httpx.Response(200, json={"instance": {"state": states.pop(0)}})
+        return httpx.Response(503)
+
+    repository = client.app.state.integration_repository
+    client.app.state.evolution_onboarding = EvolutionOnboarding(
+        repository=repository,
+        vault=FernetCredentialVault(client.app.state.settings.channel_encryption_key),
+        transport=_transport(remote),
+    )
+    created = client.post(
+        "/v1/channels/whatsapp/qr/provision", headers=_headers(owner),
+    )
+    assert created.status_code == 200
+    cid = created.json()["connection_id"]
+    endpoint = f"/v1/channels/whatsapp/qr/{cid}/resume"
+    assert client.post(
+        f"/v1/channels/whatsapp/qr/{cid}/pause", headers=_headers(owner),
+    ).status_code == 200
+    assert client.post(endpoint).status_code == 401
+    assert client.post(endpoint, headers=_headers(foreign)).status_code == 404
+    closed = client.post(endpoint, headers=_headers(owner))
+    assert closed.status_code == 409
+    assert client.get(
+        "/v1/channels/whatsapp/qr/current", headers=_headers(owner),
+    ).json()["status"] == "disabled"
+    reopened = client.post(endpoint, headers=_headers(owner))
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["status"] == "active"
+    assert client.post(endpoint, headers=_headers(owner)).status_code == 200
+    assert len([path for path, _ in calls if path.startswith(
+        "/instance/connectionState/"
+    )]) == 2
+
+
+def test_v237_webhook_nested_confirmation_and_config_validation():
+    from fm_assistant.channels.whatsapp_evolution import EvolutionClient
+
+    instance = "fm_" + "c" * 32
+    url = "https://hooks.example.test/webhooks/evolution-native/" + "a" * 36
+    token = "test-fm-source-secret-" + "z" * 40
+    assert EvolutionClient.CONTRACT_BASELINE == "v2.3.7"
+
+    def reply(request):
+        assert request.method == "POST"
+        assert request.url.path == "/webhook/set/" + instance
+        body = request.content.decode()
+        assert token in body
+        return httpx.Response(201, json={"webhook": {
+            "instanceName": instance,
+            "webhook": {"enabled": True, "url": url},
+        }})
+
+    adapter = _transport(reply)
+    adapter.set_native_webhook(
+        instance, instance_token="synthetic-instance-token-value",
+        url=url, auth_token=token,
+    )
+    with pytest.raises(ValueError, match="evolution_native_hook_invalid"):
+        adapter.set_native_webhook(
+            instance, instance_token="synthetic-instance-token-value",
+            url="https://localhost/webhooks/evolution-native/test",
+            auth_token=token,
+        )
+
+    def tampered(_request):
+        return httpx.Response(201, json={"webhook": {
+            "enabled": True, "url": "https://attacker.example/",
+        }})
+
+    with pytest.raises(EvolutionUnavailable, match="evolution_native_hook_unconfirmed"):
+        _transport(tampered).set_native_webhook(
+            instance, instance_token="synthetic-instance-token-value",
+            url=url, auth_token=token,
+        )

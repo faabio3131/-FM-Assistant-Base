@@ -1,0 +1,456 @@
+"""FM authenticated Evolution bridge to existing Assistant conversation runtime.
+
+One inbound message ID is claimed in the existing channel inbox before model
+or outbound execution. Ambiguous results require manual reconciliation.
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from .channels.evolution_events import EvolutionEventVerifier
+from .channels.whatsapp_evolution import EvolutionClient
+from .credential_vault import CredentialVault
+from .domain import Channel, ConversationStatus, TenantContext
+from .evolution_queue import EvolutionInboundQueue, QueuedInbound
+from .integration import IntegrationStatus
+from .integration_repository import IntegrationRepository
+from .service import AssistantService
+from .whatsapp_repository import WhatsAppInboundRepository
+
+
+@dataclass(frozen=True, kw_only=True)
+class EvolutionDeliveryResult:
+    processed: int = 0
+    duplicates: int = 0
+    reconcile_required: int = 0
+    queued: int = 0
+
+
+class EvolutionRuntime:
+    def __init__(
+        self, *, integrations: IntegrationRepository,
+        inbox: WhatsAppInboundRepository, assistant: AssistantService,
+        vault: CredentialVault, transport: EvolutionClient,
+        verifier: EvolutionEventVerifier, sender_pepper: str,
+        queue: EvolutionInboundQueue | None = None,
+        human_whatsapp_outbox=None,
+        human_inbox=None,
+    ) -> None:
+        if not sender_pepper:
+            raise ValueError("evolution_sender_pepper_required")
+        self._integrations = integrations
+        self._inbox = inbox
+        self._assistant = assistant
+        self._vault = vault
+        self._transport = transport
+        self._verifier = verifier
+        self._pepper = sender_pepper.encode()
+        self._queue = queue
+        self._human_whatsapp_outbox = human_whatsapp_outbox
+        self._human_inbox = human_inbox
+
+    def receive(
+        self, *, connection_id: str, raw: bytes,
+        signature: str | None, timestamp: str | None,
+        at: datetime | None = None,
+    ) -> EvolutionDeliveryResult:
+        connection = self._integrations.get_unscoped(connection_id)
+        if connection is None or connection.provider_key != "whatsapp_evolution":
+            raise LookupError("evolution_connection_not_found")
+        if connection.status is IntegrationStatus.REVOKED:
+            raise PermissionError("evolution_connection_inactive")
+        instance = connection.config.get("instance_name")
+        if not isinstance(instance, str):
+            raise PermissionError("evolution_connection_invalid")
+        messages = self._verifier.parse(
+            connection_id=connection_id, expected_instance=instance,
+            raw=raw, signature=signature, timestamp=timestamp,
+            now=at or datetime.now(UTC),
+        )
+        payload = json.loads(raw)
+        if (
+            connection.status is IntegrationStatus.DISABLED
+            and payload.get("event") != "messages.update"
+        ):
+            raise PermissionError("evolution_connection_inactive")
+        context = TenantContext(
+            tenant_id=connection.tenant_id, unit_id=connection.unit_id,
+            credential_id="channel:" + connection_id,
+        )
+        if payload.get("event") == "connection.update":
+            # Deduplicate the authenticated delivery before state changes.
+            # Include the signed time to distinguish independent lifecycle
+            # notifications sharing the same body.
+            receipt_digest = hashlib.sha256(
+                (timestamp or "").encode("ascii") + b"\\n" + raw
+            ).hexdigest()
+            if not self._integrations.claim_evolution_webhook(
+                connection_id=connection_id, digest=receipt_digest,
+            ):
+                return EvolutionDeliveryResult()
+            state = payload.get("data")
+            state = state.get("state") if isinstance(state, dict) else None
+            if state == "open" and connection.status is not IntegrationStatus.ACTIVE:
+                if "instance_token" not in self._integrations.active_secret_ciphertexts(
+                    connection_id
+                ):
+                    raise PermissionError("evolution_connection_unprovisioned")
+                self._integrations.update_connection(
+                    context, connection_id, status=IntegrationStatus.ACTIVE,
+                )
+                self._integrations.record_event(
+                    context, connection_id, event_type="evolution.connected",
+                )
+            elif state == "close" and connection.status is IntegrationStatus.ACTIVE:
+                self._integrations.update_connection(
+                    context, connection_id, status=IntegrationStatus.DEGRADED,
+                )
+                self._integrations.record_event(
+                    context, connection_id, event_type="evolution.disconnected",
+                )
+            return EvolutionDeliveryResult()
+        if payload.get("event") == "messages.update":
+            # Verified by the existing signed FM broker before parsing payload.
+            # Authenticated native ingress already checks its per-instance secret.
+            # Status must describe our own outbound reference, never inbound.
+            if self._queue is None or connection.status not in {
+                IntegrationStatus.ACTIVE, IntegrationStatus.DISABLED,
+            }:
+                raise PermissionError("evolution_delivery_correlation_unavailable")
+            updates = payload.get("data")
+            updates = updates if isinstance(updates, list) else [updates]
+            if len(updates) > 32:
+                raise PermissionError("evolution_delivery_batch_invalid")
+            for update in updates:
+                if not isinstance(update, dict):
+                    continue
+                key = update.get("key")
+                if not isinstance(key, dict) or key.get("fromMe") is not True:
+                    continue
+                outbound_reference = key.get("id")
+                state = update.get("update")
+                state = state.get("status") if isinstance(state, dict) else update.get("status")
+                states = {1: "sent", 2: "sent", 3: "delivered", 4: "read",
+                          "SENT": "sent", "DELIVERY_ACK": "delivered",
+                          "DELIVERED": "delivered", "READ": "read"}
+                try:
+                    normalized = states.get(state)
+                except TypeError:
+                    continue
+                if not isinstance(outbound_reference, str) or normalized is None:
+                    continue
+                if not 1 <= len(outbound_reference) <= 160:
+                    continue
+                # Hash the authenticated raw bytes; retain proof of source
+                # authentication from the per-connection broker contract,
+                # never the private payload or sender JID.
+                evidence = hashlib.sha256(raw).hexdigest()
+                self._queue.correlate_delivery_status(
+                    connection_id=connection_id,
+                    outbound_reference=outbound_reference,
+                    status=normalized, evidence_sha256=evidence,
+                )
+                if self._human_whatsapp_outbox is not None:
+                    self._human_whatsapp_outbox.correlate_authenticated_status(
+                        connection_id=connection_id,
+                        provider_reference=outbound_reference,
+                        delivery_status=normalized, evidence_sha256=evidence,
+                    )
+            return EvolutionDeliveryResult()
+        if connection.status is not IntegrationStatus.ACTIVE:
+            raise PermissionError("evolution_connection_inactive")
+        secret = self._integrations.active_secret_ciphertexts(connection_id).get(
+            "instance_token"
+        )
+        if secret is None:
+            raise PermissionError("evolution_connection_unprovisioned")
+        if self._queue is not None:
+            queued = duplicates = 0
+            for item in messages:
+                if self._queue.enqueue(
+                    connection_id=connection_id, message_id=item.message_id,
+                    sender=item.sender, text=item.text,
+                ):
+                    queued += 1
+                else:
+                    duplicates += 1
+            return EvolutionDeliveryResult(
+                processed=0, duplicates=duplicates,
+                reconcile_required=0, queued=queued,
+            )
+        processed = duplicates = reconcile = 0
+        for item in messages:
+            sender_hash = hmac.new(
+                self._pepper, f"{connection_id}:{item.sender}".encode(),
+                hashlib.sha256,
+            ).hexdigest()
+            if not self._inbox.claim(
+                channel_id=connection_id, message_id=item.message_id,
+                sender_hash=sender_hash, message_type="text",
+            ):
+                duplicates += 1
+                continue
+            try:
+                conversation = self._assistant.get_or_create_external_conversation(
+                    context=context, channel=Channel.WHATSAPP,
+                    external_ref=f"wae:{connection_id}:{sender_hash}",
+                )
+                if self._human_whatsapp_outbox is not None:
+                    self._human_whatsapp_outbox.bind_verified_inbound(
+                        tenant_id=context.tenant_id, unit_id=context.unit_id,
+                        conversation_id=conversation.conversation_id,
+                        connection_id=connection_id, sender=item.sender,
+                        external_ref=conversation.external_ref or "",
+                    )
+                if conversation.status is ConversationStatus.HUMAN_HANDOFF:
+                    if self._human_inbox is not None:
+                        self._human_inbox.record_verified_handoff_inbound(
+                            tenant_id=context.tenant_id, unit_id=context.unit_id,
+                            conversation_id=conversation.conversation_id,
+                            connection_id=connection_id,
+                            provider_message_id=item.message_id, content=item.text,
+                        )
+                    self._inbox.complete(
+                        channel_id=connection_id, message_id=item.message_id,
+                        outbound_id=None,
+                    )
+                else:
+                    reply = self._assistant.send_message(
+                        context=context,
+                        conversation_id=conversation.conversation_id,
+                        content=item.text,
+                    )
+                    outbound_id = self._transport.send_text(
+                        instance, instance_token=self._vault.decrypt(secret),
+                        recipient=item.sender, message=reply.content,
+                    )
+                    self._inbox.complete(
+                        channel_id=connection_id, message_id=item.message_id,
+                        outbound_id=outbound_id,
+                    )
+                processed += 1
+            except Exception:  # noqa: BLE001 - quarantine any ambiguous side effect
+                # A message may already have been committed or sent. Do not
+                # retry from a duplicate webhook without operator review.
+                self._inbox.mark_reconcile(
+                    channel_id=connection_id, message_id=item.message_id,
+                    error_code="evolution_outcome_uncertain",
+                )
+                reconcile += 1
+        return EvolutionDeliveryResult(
+            processed=processed, duplicates=duplicates,
+            reconcile_required=reconcile,
+        )
+
+    @contextmanager
+    def _lease_heartbeat(self, item: QueuedInbound):
+        """Renew the current generation during long-running model/provider work."""
+        if self._queue is None:
+            yield None
+            return
+        stop = threading.Event()
+        lost = threading.Event()
+
+        def refresh() -> None:
+            while not stop.wait(30):
+                try:
+                    self._queue.renew_claim(
+                        connection_id=item.connection_id, message_id=item.message_id,
+                        claim_generation=item.claim_generation,
+                    )
+                except Exception:  # noqa: BLE001 - heartbeat fails closed on any DB failure
+                    lost.set()
+                    return
+
+        thread = threading.Thread(target=refresh, daemon=True)
+        thread.start()
+        try:
+            yield lost
+        finally:
+            stop.set()
+            thread.join(timeout=2)
+
+    def recover_stale(self, *, older_than_seconds: int = 300) -> int:
+        """Quarantine expired worker claims; never replay uncertain side effects."""
+        if self._queue is None:
+            raise RuntimeError("evolution_queue_not_configured")
+        return self._queue.quarantine_stale(
+            older_than_seconds=older_than_seconds,
+        )
+
+    def process_pending(self, *, limit: int = 10) -> EvolutionDeliveryResult:
+        """Internal worker batch. No HTTP route or automatic background side effects."""
+        if self._queue is None:
+            raise RuntimeError("evolution_queue_not_configured")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("evolution_worker_limit_invalid")
+        processed = duplicates = reconcile = 0
+        for _ in range(limit):
+            item = self._queue.claim()
+            if item is None:
+                break
+            try:
+                with self._lease_heartbeat(item) as lease_lost:
+                    completed = self._process_queued(item, lease_lost=lease_lost)
+                    if lease_lost is not None and lease_lost.is_set():
+                        raise RuntimeError("evolution_worker_lease_lost")
+                if completed:
+                    processed += 1
+                else:
+                    duplicates += 1
+                self._queue.finish(
+                    connection_id=item.connection_id, message_id=item.message_id,
+                    reconciled=False,
+                    claim_generation=item.claim_generation,
+                )
+            except Exception:  # noqa: BLE001 - quarantine uncertain AI/provider side effects
+                # A concurrent sweeper may already have quarantined this job.
+                # Never reopen it or replay a provider send.
+                if self._queue.state(
+                    connection_id=item.connection_id, message_id=item.message_id,
+                ) in {"processing", "sending"}:
+                    try:
+                        self._queue.finish(
+                            connection_id=item.connection_id, message_id=item.message_id,
+                            reconciled=True, code="evolution_worker_uncertain",
+                            claim_generation=item.claim_generation,
+                        )
+                    except RuntimeError:
+                        # A competing sweeper or generation change won the race.
+                        pass
+                reconcile += 1
+        return EvolutionDeliveryResult(
+            processed=processed, duplicates=duplicates, reconcile_required=reconcile,
+        )
+
+    def _process_queued(self, item: QueuedInbound, *, lease_lost=None) -> bool:
+        connection = self._integrations.get_unscoped(item.connection_id)
+        if (
+            connection is None or connection.provider_key != "whatsapp_evolution"
+            or connection.status is not IntegrationStatus.ACTIVE
+        ):
+            raise PermissionError("evolution_connection_inactive")
+        instance = connection.config.get("instance_name")
+        if not isinstance(instance, str):
+            raise PermissionError("evolution_instance_invalid")
+        token = self._integrations.active_secret_ciphertexts(
+            item.connection_id
+        ).get("instance_token")
+        if token is None:
+            raise PermissionError("evolution_instance_secret_unavailable")
+        sender_hash = hmac.new(
+            self._pepper, f"{item.connection_id}:{item.sender}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        if not self._inbox.claim(
+            channel_id=item.connection_id, message_id=item.message_id,
+            sender_hash=sender_hash, message_type="text",
+        ):
+            return False
+        context = TenantContext(
+            tenant_id=connection.tenant_id, unit_id=connection.unit_id,
+            credential_id="channel:" + item.connection_id,
+        )
+        try:
+            conversation = self._assistant.get_or_create_external_conversation(
+                context=context, channel=Channel.WHATSAPP,
+                external_ref=f"wae:{item.connection_id}:{sender_hash}",
+            )
+            if self._human_whatsapp_outbox is not None:
+                self._human_whatsapp_outbox.bind_verified_inbound(
+                    tenant_id=context.tenant_id, unit_id=context.unit_id,
+                    conversation_id=conversation.conversation_id,
+                    connection_id=item.connection_id, sender=item.sender,
+                    external_ref=conversation.external_ref or "",
+                )
+            if conversation.status is ConversationStatus.HUMAN_HANDOFF:
+                if self._human_inbox is not None:
+                    self._human_inbox.record_verified_handoff_inbound(
+                        tenant_id=context.tenant_id, unit_id=context.unit_id,
+                        conversation_id=conversation.conversation_id,
+                        connection_id=item.connection_id,
+                        provider_message_id=item.message_id, content=item.text,
+                    )
+                self._inbox.complete(
+                    channel_id=item.connection_id, message_id=item.message_id,
+                    outbound_id=None,
+                )
+            else:
+                reply = self._assistant.send_message(
+                    context=context,
+                    conversation_id=conversation.conversation_id,
+                    content=item.text,
+                )
+                # Recheck after potentially long AI execution: if the owner
+                # paused/revoked the channel meanwhile, do not initiate send.
+                latest = self._integrations.get_unscoped(item.connection_id)
+                if (
+                    latest is None or latest.status is not IntegrationStatus.ACTIVE
+                    or latest.revision != connection.revision
+                ):
+                    raise PermissionError("evolution_connection_changed_during_processing")
+                # A long model request may outlive the claim timeout.
+                # Refuse provider send if another worker quarantined the job.
+                if self._queue is not None:
+                    self._queue.assert_claim_current(
+                        connection_id=item.connection_id, message_id=item.message_id,
+                        claim_generation=item.claim_generation,
+                    )
+                if lease_lost is not None and lease_lost.is_set():
+                    raise RuntimeError("evolution_worker_lease_lost")
+                operation_id = self._queue.begin_outbound(
+                    connection_id=item.connection_id, message_id=item.message_id,
+                    claim_generation=item.claim_generation,
+                ) if self._queue is not None else None
+                # A concurrent pause/revocation may commit while the
+                # outbound intent is persisted. Recheck right before HTTP;
+                # a failed recheck retains the intent for manual reconciliation.
+                latest_before_send = self._integrations.get_unscoped(item.connection_id)
+                if (
+                    latest_before_send is None
+                    or latest_before_send.status is not IntegrationStatus.ACTIVE
+                    or latest_before_send.revision != connection.revision
+                    or (lease_lost is not None and lease_lost.is_set())
+                ):
+                    raise PermissionError("evolution_connection_changed_before_send")
+                # The lock is held through HTTP, serializing against
+                # pause/revoke state mutations on PostgreSQL.
+                if self._queue is not None:
+                    with self._queue.outbound_connection_guard(
+                        connection_id=item.connection_id,
+                        expected_revision=connection.revision,
+                    ):
+                        if lease_lost is not None and lease_lost.is_set():
+                            raise RuntimeError("evolution_worker_lease_lost")
+                        outbound_id = self._transport.send_text(
+                            instance, instance_token=self._vault.decrypt(token),
+                            recipient=item.sender, message=reply.content,
+                        )
+                else:
+                    outbound_id = self._transport.send_text(
+                        instance, instance_token=self._vault.decrypt(token),
+                        recipient=item.sender, message=reply.content,
+                    )
+                if self._queue is not None and operation_id is not None:
+                    self._queue.record_outbound_result(
+                        connection_id=item.connection_id, message_id=item.message_id,
+                        claim_generation=item.claim_generation,
+                        operation_id=operation_id, outbound_reference=outbound_id,
+                    )
+                self._inbox.complete(
+                    channel_id=item.connection_id, message_id=item.message_id,
+                    outbound_id=outbound_id,
+                )
+        except Exception:  # quarantine unknown committed side effects
+            self._inbox.mark_reconcile(
+                channel_id=item.connection_id, message_id=item.message_id,
+                error_code="evolution_worker_uncertain",
+            )
+            raise
+        return True
