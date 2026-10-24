@@ -24,6 +24,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import UUID4, BaseModel, Field, SecretStr, ValidationError
 
+from .agenda import AgendaEngine
 from .capabilities import KnowledgeCapabilityProvider
 from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerifier
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
@@ -247,6 +248,29 @@ class CRMProposalStatusRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
     expected_revision: int = Field(ge=1, strict=True)
     status: str = Field(pattern="^(ready|withdrawn)$")
+
+
+class AgendaCreateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    contact_id: UUID4
+    opportunity_id: UUID4
+    title: str = Field(min_length=1, max_length=200)
+    starts_at: datetime
+    duration_minutes: int = Field(ge=15, le=480, strict=True)
+    remind_minutes: int = Field(default=0, ge=0, le=10080, strict=True)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class AgendaRescheduleRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    expected_revision: int = Field(ge=1, strict=True)
+    starts_at: datetime
+    duration_minutes: int = Field(ge=15, le=480, strict=True)
+
+
+class AgendaRevisionRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    expected_revision: int = Field(ge=1, strict=True)
 
 
 class CadenceStepRequest(BaseModel):
@@ -769,6 +793,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     crm_workflow = CRMWorkflow(session_factory, vault)
     followup_preferences = FollowupPreferences(session_factory)
     cadence_engine = CadenceEngine(session_factory, vault)
+    agenda_engine = AgendaEngine(session_factory, vault)
     human_whatsapp_outbox = HumanWhatsAppOutbox(
         session_factory, vault, sender_pepper=cfg.credential_pepper,
     )
@@ -901,6 +926,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.crm_workflow = crm_workflow
         app.state.followup_preferences = followup_preferences
         app.state.cadence_engine = cadence_engine
+        app.state.agenda_engine = agenda_engine
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
         app.state.human_inbox_operations = human_inbox_operations
@@ -1389,6 +1415,115 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             enabled=payload.enabled,
         )
         return _persona_response(persona)
+
+    @app.get("/v1/followups/agenda/slots")
+    def agenda_slots(
+        request: Request,
+        start_at: datetime, end_at: datetime,
+        duration_minutes: int = Query(default=30, ge=15, le=480),
+        step_minutes: int = Query(default=30, ge=15, le=240),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.agenda_engine.slots(
+                principal, start_at=start_at, end_at=end_at,
+                duration_minutes=duration_minutes, step_minutes=step_minutes,
+            )
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/followups/agenda")
+    def agenda_list(
+        request: Request, start_at: datetime, end_at: datetime,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.agenda_engine.list(
+                principal, start_at=start_at, end_at=end_at,
+            )
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/followups/agenda", status_code=201)
+    def agenda_create(
+        payload: AgendaCreateRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.agenda_engine.create(
+                principal, contact_id=str(payload.contact_id),
+                opportunity_id=str(payload.opportunity_id),
+                title=payload.title, starts_at=payload.starts_at,
+                duration_minutes=payload.duration_minutes,
+                remind_minutes=payload.remind_minutes,
+                idempotency_key=payload.idempotency_key,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/followups/agenda/{appointment_id}/reschedule")
+    def agenda_reschedule(
+        appointment_id: str, payload: AgendaRescheduleRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.agenda_engine.mutate(
+                principal, appointment_id=appointment_id,
+                expected_revision=payload.expected_revision, action="reschedule",
+                starts_at=payload.starts_at, duration_minutes=payload.duration_minutes,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/followups/agenda/{appointment_id}/cancel")
+    def agenda_cancel(
+        appointment_id: str, payload: AgendaRevisionRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.agenda_engine.mutate(
+                principal, appointment_id=appointment_id,
+                expected_revision=payload.expected_revision, action="cancel",
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/followups/agenda/{appointment_id}/complete")
+    def agenda_complete(
+        appointment_id: str, payload: AgendaRevisionRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.agenda_engine.mutate(
+                principal, appointment_id=appointment_id,
+                expected_revision=payload.expected_revision, action="complete",
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/followups/agenda/{appointment_id}/events")
+    def agenda_events(
+        appointment_id: str, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.agenda_engine.events(
+                principal, appointment_id=appointment_id,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/v1/followups/cadences", status_code=201)
     def define_followup_cadence(

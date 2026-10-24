@@ -1198,3 +1198,10 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - PR #37 integrada à main em `c1ee4162e29f141e561e2089881a68cc97aa11a5`: agendamento persistente, worker idempotente, lease/fencing, retry, DLQ, cancelamento e auditoria; 5/5 workflows pós-merge verdes.
 - PR #38 acrescenta leitura limitada e isolada de execuções e UI comercial para definir cadências, agendar tarefas, acompanhar, cancelar e auditar. Testes internos e CI obrigatórios antes de merge.
 - F7 permanece `IN_PROGRESS`: slots, compromissos e lembretes operacionais ainda devem ser construídos; nenhum envio externo, deploy ou homologação real foi executado.
+
+
+## 2026-10-24 — F7 agenda e lembretes (candidato)
+
+- Após integração da PR #38, construir agenda comercial por usuário com horários livres/ocupados, compromisso cifrado, conflito de reservas, remarcação CAS, cancelamento/conclusão, auditoria e UI do CRM.
+- Lembrete privado em atividade do CRM é atômico/idempotente por revisão da agenda; não envia WhatsApp, e-mail ou push ao cliente.
+- Migração aditiva `20261024_0029`, rollback em banco descartável, gates do novo HEAD obrigatórios antes de merge; nenhuma migração ou ativação em produção.
