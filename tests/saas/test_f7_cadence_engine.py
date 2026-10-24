@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
-
 import pytest
 from sqlalchemy import select
 from test_identity_rbac import _bootstrap, _login
 
 from fm_assistant.crm_workflow import CRMActivityORM
-from fm_assistant.followup_cadences import CadenceEventORM, CadenceJobORM
+from fm_assistant.followup_cadences import CadenceJobORM
 
 
 def _setup(client):
