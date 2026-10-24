@@ -1212,3 +1212,9 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Entrada única autenticada `/app`, cards consultados pelas APIs reais e exibidos com estado parcial/indisponível, navegação unificada e filtrada por RBAC no servidor, links operacionais CRM/agenda/cadências/inbox/conhecimento/WhatsApp/consumo. Mantidas páginas e controladores existentes; sem segundo frontend ou domínio de negócio.
 - Testes de sessão, permissão, isolamento por unidade via APIs assinadas, XSS, script CSP, no-store e navegação. Nenhuma alteração no visual, Docker ou infraestrutura do FM Command; sem deploy nem homologação externa.
 - F8 global permanece `IN_PROGRESS`: interfaces comerciais de integração, equipe, persona e configurações, acessibilidade e E2E de jornada ainda precisam de avanço.
+
+## 2026-10-24 — F8/WP2 configurações comerciais (candidato)
+
+- Tela `/app/settings` sob sessão humana: persona com nome por tenant/unidade, conexões e catálogo de integrações governadas, seleção de unidade com revalidação da sessão e convites da equipe.
+- Recursos/formulários expostos por permissão do servidor e efetivamente protegidos pelos endpoints RBAC existentes. Campos secretos são transitórios, não são lidos da API, armazenados em browser storage nem devolvidos ao cliente.
+- Sem configurações externas reais, deploy ou alterações do Command. F8 permanece em andamento até UX/E2E finais. Gate atual será testado no SHA da PR.
