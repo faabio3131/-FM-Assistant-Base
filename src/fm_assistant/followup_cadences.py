@@ -18,11 +18,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    exists,
     select,
     update,
 )
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, aliased, mapped_column
 
 from .crm import CRMConflict, CRMContactORM, CRMNotFound, CRMOpportunityORM
 from .crm_workflow import CRMActivityORM
@@ -127,8 +128,12 @@ def _utc(now: datetime | None) -> datetime:
 
 
 def _db_time(dt: datetime) -> datetime:
-    """Naive UTC for SQLite/PG comparison; all stored timestamps mean UTC."""
-    return dt.astimezone(UTC).replace(tzinfo=None)
+    """UTC-aware at the database boundary; SQLite may deserialize naive UTC."""
+    return dt.astimezone(UTC)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
 def _view_task(row: CadenceJobORM) -> dict:
@@ -269,7 +274,7 @@ class CadenceEngine:
                     if (prior.cadence_id != cadence_id or prior.cadence_version != version
                         or prior.contact_id != contact_id
                         or prior.opportunity_id != opportunity_id
-                        or _db_time(starting) != prior.start_at):
+                        or starting != _as_utc(prior.start_at)):
                         raise CRMConflict("cadence.idempotency_mismatch")
                     return self._run_view(db, prior)
                 definition = self._definition(
@@ -370,12 +375,19 @@ class CadenceEngine:
     def claim(self, *, now: datetime | None = None) -> tuple[str, int] | None:
         instant = _db_time(_utc(now))
         with self._sessions.begin() as db:
+            # Enforce cadence order: a later step cannot overtake the prior step.
+            previous = aliased(CadenceJobORM)
             query = select(CadenceJobORM).join(
                 CadenceRunORM, CadenceJobORM.run_id == CadenceRunORM.run_id,
             ).where(
                 CadenceJobORM.state == "pending",
                 CadenceJobORM.available_at <= instant,
                 CadenceRunORM.status == "active",
+                ~exists(select(previous.job_id).where(
+                    previous.run_id == CadenceJobORM.run_id,
+                    previous.step_index < CadenceJobORM.step_index,
+                    previous.state != "completed",
+                )),
             ).order_by(CadenceJobORM.available_at, CadenceJobORM.job_id).limit(1)
             if db.bind is not None and db.bind.dialect.name == "postgresql":
                 query = query.with_for_update(of=CadenceJobORM, skip_locked=True)
@@ -405,24 +417,47 @@ class CadenceEngine:
             return job.job_id, generation
 
     def _leased(self, db, job_id: str, generation: int, instant: datetime):
+        initial = db.get(CadenceJobORM, job_id)
+        if initial is None:
+            raise CRMConflict("cadence.lease_expired_or_fenced")
+        # Lock order matches human cancellation: run first, then job.
+        run = db.scalar(select(CadenceRunORM).where(
+            CadenceRunORM.run_id == initial.run_id,
+        ).with_for_update())
         job = db.scalar(select(CadenceJobORM).where(
             CadenceJobORM.job_id == job_id,
         ).with_for_update())
         if (job is None or job.state != "leased"
             or job.claim_generation != generation
-            or job.lease_until is None or job.lease_until <= instant):
+            or job.lease_until is None
+            or _as_utc(job.lease_until) <= _as_utc(instant)):
             raise CRMConflict("cadence.lease_expired_or_fenced")
-        run = db.scalar(select(CadenceRunORM).where(
-            CadenceRunORM.run_id == job.run_id,
-        ).with_for_update())
         if run is None or run.status != "active":
             raise CRMConflict("cadence.run_inactive")
         return job, run
+
+    def _block_followers(self, db, run: CadenceRunORM, job: CadenceJobORM,
+                         instant: datetime, code: str) -> None:
+        # Terminalize unexecuted downstream steps atomically.
+        followers = db.scalars(select(CadenceJobORM).where(
+            CadenceJobORM.run_id == run.run_id,
+            CadenceJobORM.step_index > job.step_index,
+            CadenceJobORM.state == "pending",
+        ).with_for_update()).all()
+        for follower in followers:
+            follower.state = "blocked"
+            follower.last_error = code
+            follower.updated_at = instant
+            self._event(db, run, "blocked", actor="f7-worker",
+                        job_id=follower.job_id, code=code,
+                        now=_as_utc(instant))
 
     def _retry_locked(self, db, job: CadenceJobORM, run: CadenceRunORM,
                       instant: datetime, code: str) -> str:
         if job.attempt_count >= _MAX_ATTEMPTS:
             job.state, job.lease_until = "dead", None
+            run.status = "failed"
+            self._block_followers(db, run, job, instant, "prior_step_dead")
             action = "dead_lettered"
         else:
             job.state, job.lease_until = "pending", None
@@ -494,13 +529,15 @@ class CadenceEngine:
                 FollowupPreferenceORM.unit_id == run.unit_id,
                 FollowupPreferenceORM.contact_id == run.contact_id,
                 FollowupPreferenceORM.channel == definition.channel,
-            ))
+            ).with_for_update())
             if (opp is None or opp.stage in {"won", "lost"}
                 or policy is None or policy.opted_out):
                 code = ("opportunity_closed" if opp is not None
                         and opp.stage in {"won", "lost"} else "contact_suppressed")
                 job.state, job.lease_until = "blocked", None
                 job.last_error, job.updated_at = code, instant
+                run.status = "blocked"
+                self._block_followers(db, run, job, instant, "prior_step_blocked")
                 self._event(db, run, "blocked", actor="f7-worker",
                             job_id=job.job_id, code=code, now=instant_utc)
                 return "blocked"
@@ -536,6 +573,15 @@ class CadenceEngine:
             ))
             self._event(db, run, "completed", actor="f7-worker",
                         job_id=job.job_id, now=instant_utc)
+            unfinished = db.scalar(select(CadenceJobORM.job_id).where(
+                CadenceJobORM.run_id == run.run_id,
+                CadenceJobORM.job_id != job_id,
+                CadenceJobORM.state != "completed",
+            ).limit(1))
+            if unfinished is None:
+                run.status = "completed"
+                self._event(db, run, "run_completed", actor="f7-worker",
+                            now=instant_utc)
             return "completed"
 
     def tick(self, *, now: datetime | None = None, batch: int = 10) -> dict:
