@@ -127,7 +127,7 @@ def test_request_never_hides_mismatch_unknowns_and_tenant_scope(example):
         store.reconcile_request(tenant_id="tenant-a", unit_id="unit-a", request_id="")
     with sessions.begin() as db:
         db.add(AIUsageRecord(
-            event_id="event-3", attempt_id="physical-2",
+            event_id="event-3", attempt_id=None,
             tenant_id="tenant-a", unit_id="unit-a", request_id="request-a",
             correlation_id="trace-a", capability="text",
             provider="vendor-b", model="model-2", route_reason="retry",
