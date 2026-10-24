@@ -5,10 +5,12 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
+import fm_assistant.agenda  # noqa: F401 - register F7 agenda metadata
 import fm_assistant.command_bridge_control_models
 import fm_assistant.crm  # noqa: F401 - register F6 metadata for migrations
 import fm_assistant.crm_workflow  # noqa: F401 - register F6 workflow metadata
 import fm_assistant.core_bridge_models
+import fm_assistant.followup_cadences  # noqa: F401 - register F7 cadence metadata
 import fm_assistant.human_inbox
 import fm_assistant.human_inbox_operations
 import fm_assistant.human_whatsapp_outbox  # noqa: F401 - bind human outbox metadata
