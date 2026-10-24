@@ -35,6 +35,7 @@ from .commercial_license_transition import (
     SignedCommercialLicenseTransition,
 )
 from .commercial_shell import attach_navigation, render_home
+from .commercial_settings_page import render_settings
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
 from .core_client import CoreAIClient, CoreAudioTranscriber
@@ -1879,6 +1880,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         principal: SessionPrincipal = Depends(current_session),
     ) -> HTMLResponse:
         markup, csp = render_home(principal)
+        return HTMLResponse(markup, headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
+
+    @app.get("/app/settings", response_class=HTMLResponse)
+    def commercial_settings(
+        principal: SessionPrincipal = Depends(current_session),
+    ) -> HTMLResponse:
+        markup, csp = render_settings(principal)
         return HTMLResponse(markup, headers={
             "Cache-Control": "no-store", "Content-Security-Policy": csp,
             "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
