@@ -96,6 +96,13 @@ class ProviderExportBatchPayload(BaseModel):
     records: list[ProviderExportImportPayload] = Field(min_length=1, max_length=50)
 
 
+class ProviderRequestReadPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tenant_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    unit_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    request_id: str = Field(min_length=1, max_length=128)
+
+
 def finops_alert_policy_router(
     *, trust: CommandTrustPolicy, transport_key: str,
 ) -> APIRouter:
@@ -386,5 +393,36 @@ def finops_alert_policy_router(
             "provider": first.provider, "provider_invoice_verified": False,
             "quota_recovery_authorized": False,
         }
+
+
+    @router.post("/ai/finops/provider-export/request-reconciliation")
+    def provider_request_reconciliation(
+        payload: ProviderRequestReadPayload,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_fm_recovery_service_key: str | None = Header(
+            default=None, alias="X-FM-Recovery-Service-Key",
+        ),
+    ) -> dict[str, object]:
+        """FM-only read: every fallback/provider; no invoice or quota settlement."""
+        require_fm_admin(authorization, x_fm_recovery_service_key)
+        engine = getattr(request.app.state, "control_plane_engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="core_finops.export_unavailable")
+        try:
+            return PersistentProviderExportStore(
+                sessionmaker(engine, expire_on_commit=False),
+            ).reconcile_request(
+                tenant_id=payload.tenant_id, unit_id=payload.unit_id,
+                request_id=payload.request_id,
+            )
+        except ControlPlaneError as exc:
+            raise HTTPException(
+                status_code=409, detail=str(exc),
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503, detail="core_finops.export_unavailable",
+            ) from exc
 
     return router

@@ -257,6 +257,7 @@ def create_app(
             "/internal/v1/command/ai/finops/provider-export",
             "/internal/v1/command/ai/finops/provider-export/batch",
             "/internal/v1/command/ai/finops/provider-export/sync",
+            "/internal/v1/command/ai/finops/provider-export/request-reconciliation",
         }
         actual_paths = {getattr(route, "path", None) for route in policy_router.routes}
         if (
