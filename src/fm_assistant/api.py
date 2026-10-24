@@ -30,11 +30,11 @@ from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerif
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
 from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
-from .commercial_shell import attach_navigation, render_home
 from .commercial_license_transition import (
     CommercialLicenseTransitionDenied,
     SignedCommercialLicenseTransition,
 )
+from .commercial_shell import attach_navigation, render_home
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
 from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
 from .core_client import CoreAIClient, CoreAudioTranscriber
