@@ -28,16 +28,21 @@ async function api(path,method="GET",body=null) {
   if(!res.ok)throw Error(data.detail||"Operação não disponível.");
   return data;
 }
-let busy=false;
+let busy=false,currentPage=0,nextPage=null;
 async function withBusy(work){
   if(busy)return;busy=true;for(const btn of document.querySelectorAll("button"))
     btn.disabled=true;
   try{await work();}catch(e){notice("Operação não concluída: "+e.message);}
-  finally{busy=false;for(const btn of document.querySelectorAll("button"))
-    btn.disabled=false;}
+  finally{
+    busy=false;
+    for(const btn of document.querySelectorAll("button"))btn.disabled=false;
+    $("previous").disabled=currentPage===0;
+    $("next").disabled=nextPage===null;
+  }
 }
 async function sources(page=0){
   const res=await api("/v1/knowledge/sources?page="+page);
+  currentPage=page;nextPage=res.next_page;
   $("sources").replaceChildren();
   if(!res.items.length)$("sources").append(element("p","Nenhuma fonte nesta página.","muted"));
   for(const item of res.items){
@@ -48,6 +53,41 @@ async function sources(page=0){
     if(item.source_ref)card.append(element("small","Origem: "+item.source_ref,"muted"));
     if(item.content_sha256)card.append(element("small",
       "SHA-256: "+item.content_sha256,"hash"));
+    if(item.active&&Number.isInteger(item.revision)&&item.revision>=1&&
+       item.source_kind==="url"&&item.source_ref){
+      const refresh=element("button","Atualizar conteúdo desta URL");
+      refresh.addEventListener("click",()=>withBusy(async()=>{
+        const result=await api("/v1/knowledge/sources/"+
+          encodeURIComponent(item.document_id)+"/url","PUT",{
+            expected_revision:item.revision,title:item.title,url:item.source_ref
+          });
+        notice("Atualização concluída na revisão "+result.revision+".");
+        await sources(page);
+      }));
+      card.append(refresh);
+    }
+    if(item.active&&Number.isInteger(item.revision)&&item.revision>=1&&
+       item.source_kind==="file"&&item.source_ref){
+      const label=element("label","Substituir arquivo: "+item.source_ref);
+      const picker=document.createElement("input");
+      picker.type="file";picker.accept=".txt,.md,.csv,.html,.htm,.pdf";
+      const update=element("button","Substituir mantendo histórico");
+      update.addEventListener("click",()=>withBusy(async()=>{
+        const file=picker.files?.[0];
+        if(!file||file.name!==item.source_ref||file.size===0||
+           file.size>1500000)throw Error(
+          "Escolha o arquivo com o mesmo nome e até 1,5 MB.");
+        const payload=new FormData();
+        payload.set("title",item.title);
+        payload.set("expected_revision",String(item.revision));
+        payload.set("file",file);
+        const result=await api("/v1/knowledge/sources/"+
+          encodeURIComponent(item.document_id)+"/file","PUT",payload);
+        notice("Arquivo atualizado na revisão "+result.revision+".");
+        await sources(page);
+      }));
+      card.append(label,picker,update);
+    }
     if(item.active){
       const btn=element("button","Revogar fonte","danger");
       btn.addEventListener("click",()=>withBusy(async()=>{
@@ -60,8 +100,8 @@ async function sources(page=0){
     }
     $("sources").append(card);
   }
-  $("previous").disabled=page===0;
-  $("next").disabled=res.next_page===null;
+  $("previous").disabled=currentPage===0;
+  $("next").disabled=nextPage===null;
   $("previous").onclick=()=>withBusy(()=>sources(page-1));
   $("next").onclick=()=>withBusy(()=>sources(res.next_page));
 }
