@@ -6,14 +6,15 @@ Absence of relevant evidence returns an empty pack, never invented knowledge.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select, tuple_
 
-from .db import KnowledgeDocumentORM
+from .db import KnowledgeChunkORM, KnowledgeDocumentORM, KnowledgeSourceVersionORM
 from .domain import TenantContext
 
 _STOP = frozenset({
@@ -28,6 +29,7 @@ _MAX_DOCUMENTS = 500
 _MAX_DOC_CHARS = 24_000
 _MAX_SNIPPET = 1000
 _MAX_PACK_CHARS = 4400
+_MAX_VERSION_CANDIDATES = 50
 
 
 def _normalize(value: str) -> str:
@@ -49,6 +51,9 @@ class ContextEvidence:
     matched_terms: tuple[str, ...]
     source_type: str = "existing_tenant_knowledge"
     current_source_verified: bool = False
+    source_revision: int | None = None
+    chunk_ordinal: int | None = None
+    chunk_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,17 +121,95 @@ class BoundedKnowledgeRetrieval:
         if not candidates:
             return empty(truncated)
         candidates.sort(key=lambda c: (-c[0], -c[1].timestamp(), c[2]))
+        # Only current immutable revisions are eligible: no stale fallback.
+        ids = tuple(row[2] for row in candidates[:_MAX_VERSION_CANDIDATES])
+        versions = {}
+        indexed_chunks: dict[str, list[KnowledgeChunkORM]] = {}
+        if ids:
+            with self._sessions() as session:
+                latest = (
+                    select(KnowledgeSourceVersionORM.document_id,
+                           func.max(KnowledgeSourceVersionORM.revision).label("revision"))
+                    .where(KnowledgeSourceVersionORM.tenant_id == context.tenant_id,
+                           KnowledgeSourceVersionORM.unit_id == context.unit_id,
+                           KnowledgeSourceVersionORM.document_id.in_(ids))
+                    .group_by(KnowledgeSourceVersionORM.document_id).subquery()
+                )
+                source_rows = session.scalars(
+                    select(KnowledgeSourceVersionORM).join(
+                        latest, and_(
+                            KnowledgeSourceVersionORM.document_id == latest.c.document_id,
+                            KnowledgeSourceVersionORM.revision == latest.c.revision,
+                        )
+                    ).where(
+                        KnowledgeSourceVersionORM.tenant_id == context.tenant_id,
+                        KnowledgeSourceVersionORM.unit_id == context.unit_id,
+                    )
+                ).all()
+                versions = {row.document_id: (
+                    row.revision, row.title, row.content_sha256,
+                ) for row in source_rows}
+                keys = tuple((row.document_id, row.revision) for row in source_rows)
+                if keys:
+                    chunk_rows = session.scalars(
+                        select(KnowledgeChunkORM).where(
+                            KnowledgeChunkORM.tenant_id == context.tenant_id,
+                            KnowledgeChunkORM.unit_id == context.unit_id,
+                            tuple_(KnowledgeChunkORM.document_id,
+                                   KnowledgeChunkORM.revision).in_(keys),
+                        ).order_by(KnowledgeChunkORM.document_id,
+                                   KnowledgeChunkORM.ordinal)
+                        .limit(_MAX_VERSION_CANDIDATES * 64 + 1)
+                    ).all()
+                    for row in chunk_rows:
+                        indexed_chunks.setdefault(row.document_id, []).append(row)
+        original = {doc_id: (title, content) for doc_id, title, content, _ in docs}
         selected: list[ContextEvidence] = []
         chunks = []
         used = 0
-        for _, dt, doc_id, title, snippet, hits in candidates:
-            header = f"[Fonte id={doc_id}, versao={dt.isoformat()}]\n{title.strip()}\n"
+        for _, dt, doc_id, title, snippet, hits in candidates[:_MAX_VERSION_CANDIDATES]:
+            revision = ordinal = digest = None
+            if doc_id in versions:
+                revision, version_title, content_hash = versions[doc_id]
+                doc_title, doc_content = original[doc_id]
+                current_hash = hashlib.sha256(doc_content.encode("utf-8")).hexdigest()
+                rows = indexed_chunks.get(doc_id, [])
+                if (version_title != doc_title or current_hash != content_hash
+                        or not rows or len(rows) > 64
+                        or rows[0].start_offset != 0
+                        or rows[-1].end_offset != len(doc_content)
+                        or any(row.ordinal != number
+                               or row.start_offset < 0
+                               or row.end_offset > len(doc_content)
+                               or row.end_offset <= row.start_offset
+                               or (number > 0 and
+                                   row.start_offset > rows[number - 1].end_offset)
+                               or doc_content[row.start_offset:row.end_offset] != row.content
+                               or hashlib.sha256(row.content.encode("utf-8")).hexdigest()
+                               != row.content_sha256
+                               for number, row in enumerate(rows))):
+                    continue
+                best = max(rows, key=lambda row: (
+                    len(_terms(row.content) & frozenset(hits)), -row.ordinal,
+                ))
+                snippet = _snippet(best.content, frozenset(hits)) or (
+                    best.content[:_MAX_SNIPPET].strip()
+                )
+                ordinal, digest = best.ordinal, best.content_sha256
+                header = (
+                    f"[Fonte id={doc_id}, revisao={revision}, trecho={ordinal}, "
+                    f"sha256={digest}, versao={dt.isoformat()}]\n{title.strip()}\n"
+                )
+            else:
+                header = f"[Fonte id={doc_id}, versao={dt.isoformat()}]\n{title.strip()}\n"
             chunk = header + snippet
             if used + len(chunk) + 2 > _MAX_PACK_CHARS:
                 continue
             selected.append(ContextEvidence(
                 document_id=doc_id, document_updated_at=dt,
                 title=title.strip(), snippet=snippet, matched_terms=hits,
+                source_revision=revision, chunk_ordinal=ordinal,
+                chunk_sha256=digest,
             ))
             chunks.append(chunk)
             used += len(chunk) + 2
@@ -142,7 +225,7 @@ class BoundedKnowledgeRetrieval:
         return KnowledgeContextPack(
             tenant_id=context.tenant_id, unit_id=context.unit_id,
             query_terms=tuple(sorted(terms)), evidence=tuple(selected),
-            corpus_truncated=truncated,
+            corpus_truncated=truncated or len(candidates) > _MAX_VERSION_CANDIDATES,
             context=warning + "\n\n".join(chunks),
             grounded=True,
         )
