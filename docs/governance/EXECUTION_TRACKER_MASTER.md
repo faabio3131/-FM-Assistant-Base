@@ -1218,3 +1218,9 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Tela `/app/settings` sob sessão humana: persona com nome por tenant/unidade, conexões e catálogo de integrações governadas, seleção de unidade com revalidação da sessão e convites da equipe.
 - Recursos/formulários expostos por permissão do servidor e efetivamente protegidos pelos endpoints RBAC existentes. Campos secretos são transitórios, não são lidos da API, armazenados em browser storage nem devolvidos ao cliente.
 - Sem configurações externas reais, deploy ou alterações do Command. F8 permanece em andamento até UX/E2E finais. Gate atual será testado no SHA da PR.
+
+## 2026-10-24 — F8/WP3 login/logout comercial (candidato)
+
+- Tela pública `/app/login` com organização, e-mail, senha e unidade opcional, usando a sessão assinada `/v1/auth/login` já existente e cookie HttpOnly; sem backend paralelo e sem browser storage.
+- Saída em `/app` via `/v1/auth/logout`, com limpeza de sessão pelo serviço existente. JS protegido por CSP hash e sem injeção de HTML.
+- Smoke HTTP e regressão de cookie/401. Sem deploy, homologação externa ou alteração FM Command. F8 ainda IN_PROGRESS para jornadas E2E/UX/estados finais.

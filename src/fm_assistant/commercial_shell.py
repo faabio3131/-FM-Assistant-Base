@@ -132,6 +132,7 @@ const specs = __SOURCES__;
 const root = document.getElementById("fm-overview");
 const globalStatus = document.getElementById("fm-status");
 const refresh = document.getElementById("fm-reload");
+const logout = document.getElementById("fm-logout");
 const dom = (tag, value, className) => {
   const node = document.createElement(tag);
   if (value !== undefined) node.textContent = String(value);
@@ -198,6 +199,20 @@ async function load() {
   loading = false;
 }
 refresh.addEventListener("click", load);
+logout.addEventListener("click", async () => {
+  logout.disabled = true;
+  try {
+    const result = await fetch("/v1/auth/logout", {
+      method:"POST", credentials:"same-origin", cache:"no-store",
+      headers:{"Accept":"application/json"}
+    });
+    if (!result.ok) throw Error("Não foi possível encerrar a sessão.");
+    window.location.assign("/app/login");
+  } catch {
+    globalStatus.textContent = "Falha ao encerrar a sessão.";
+    logout.disabled = false;
+  }
+});
 load();
 })();
 """.replace("__SOURCES__", source_json)
@@ -246,7 +261,7 @@ load();
         '<p class="fm-lede">Área comercial do VendeAtendeIA. '
         'Informações consultadas apenas para sua unidade ativa, '
         'sem presumir resultados ausentes.</p>'
-        '<div><button type="button" id="fm-reload">Atualizar indicadores</button></div>'
+        '<div><button type="button" id="fm-reload">Atualizar indicadores</button> <button type="button" id="fm-logout">Sair da conta</button></div>'
         '<p id="fm-status" role="status" aria-live="polite">Carregando...</p>'
         '<section aria-label="Indicadores comerciais">'
         '<div id="fm-overview" class="fm-grid" aria-live="polite"></div></section>'
