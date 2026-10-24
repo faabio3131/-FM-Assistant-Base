@@ -97,6 +97,13 @@ function renderContacts() {
     linkContact.append(option);
   }
   if(contacts.some(c=>c.contact_id===prior))linkContact.value=prior;
+  const policyContact=$("followup-contact"), remembered=policyContact.value;
+  policyContact.replaceChildren();
+  for(const contact of contacts){
+    const option=el("option",contact.name);option.value=contact.contact_id;
+    policyContact.append(option);
+  }
+  if(contacts.some(c=>c.contact_id===remembered))policyContact.value=remembered;
 }
 function renderOpportunities() {
   const area = $("opportunities");
@@ -162,6 +169,41 @@ async function refresh() {
   $("opportunity-more").textContent = results[1].next_page !== null ?
     "Mostrando 50 oportunidades; consulte as próximas páginas pela API." : "";
 }
+async function loadFollowupPolicy(){
+  const contactId=$("followup-contact").value, channel=$("followup-channel").value;
+  if(!contactId){$("followup-status").textContent="Cadastre um contato primeiro.";return;}
+  const data=await api("/v1/followups/contacts/"+
+    encodeURIComponent(contactId)+"/preferences?channel="+encodeURIComponent(channel));
+  $("followup-status").textContent=data.configured?
+    "Política ativa · revisão "+data.revision+" · "+data.reason:
+    "Sem política: envio automatizado bloqueado por padrão.";
+  $("followup-optout").checked=data.opted_out===true;
+  if(data.timezone)$("followup-timezone").value=data.timezone;
+  if(data.quiet_start)$("followup-start").value=data.quiet_start;
+  if(data.quiet_end)$("followup-end").value=data.quiet_end;
+}
+$("followup-contact").addEventListener("change",()=>guarded(loadFollowupPolicy));
+$("followup-channel").addEventListener("change",()=>guarded(loadFollowupPolicy));
+$("followup-load").addEventListener("click",()=>guarded(loadFollowupPolicy));
+$("followup-form").addEventListener("submit",event=>{
+  event.preventDefault();guarded(async()=>{
+    const contactId=$("followup-contact").value;
+    if(!contactId)throw Error("Selecione um contato.");
+    const root="/v1/followups/contacts/"+encodeURIComponent(contactId)+"/preferences";
+    const channel=$("followup-channel").value;
+    const before=await api(root+"?channel="+encodeURIComponent(channel));
+    const result=await api(root,"PUT",{
+      channel,expected_revision:before.revision,
+      opted_out:$("followup-optout").checked,
+      timezone:$("followup-timezone").value,
+      quiet_start:$("followup-start").value,
+      quiet_end:$("followup-end").value
+    });
+    $("followup-status").textContent="Política salva · revisão "+result.revision+
+      " · "+result.reason+". Sem envio ou agendamento.";
+    notice("Preferências comerciais atualizadas para o contato.");
+  });
+});
 $("contact-form").addEventListener("submit", event => {
   event.preventDefault();
   guarded(async () => {
@@ -376,6 +418,25 @@ margin:10px 0;display:grid;gap:4px;overflow-wrap:anywhere}
 </section><section class="wide"><h2>Contatos cadastrados</h2>
 <div id="contacts"></div><small id="contact-more" class="subtle"></small></section>
 
+<section class="wide"><h2>F7 · Preferências de acompanhamento</h2>
+<p class="subtle">Opt-out e horários de silêncio por contato e canal.
+Sem política configurada, o envio automatizado é bloqueado. Esta etapa não envia mensagens.</p>
+<form id="followup-form">
+<label for="followup-contact">Contato</label><select id="followup-contact" required></select>
+<label for="followup-channel">Canal</label>
+<select id="followup-channel"><option value="whatsapp">WhatsApp</option>
+<option value="email">E-mail</option></select>
+<label for="followup-timezone">Fuso horário (IANA)</label>
+<input id="followup-timezone" value="America/Sao_Paulo" maxlength="64" required>
+<label for="followup-start">Início do silêncio</label>
+<input type="time" id="followup-start" value="22:00" required>
+<label for="followup-end">Fim do silêncio</label>
+<input type="time" id="followup-end" value="08:00" required>
+<label><input type="checkbox" id="followup-optout"> Não contatar (opt-out)</label>
+<p class="subtle">Após marcar opt-out, só um novo consentimento comprovado poderá reativar o contato.</p>
+<div class="actions"><button id="followup-load" type="button">Consultar preferência</button>
+<button class="primary" type="submit">Salvar preferência</button></div>
+</form><p id="followup-status" class="subtle" role="status"></p></section>
 <section class="wide"><h2>Relacionar conversa ao CRM</h2>
 <p class="subtle">Informe o identificador de uma conversa da sua unidade. O vínculo é auditado e pode ser revisado.</p>
 <form id="link-form"><label for="link-conversation">ID da conversa</label>
