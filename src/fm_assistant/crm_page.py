@@ -702,7 +702,7 @@ Sem política configurada, o envio automatizado é bloqueado. Esta etapa não en
 <div class="actions"><button id="followup-load" type="button">Consultar preferência</button>
 <button class="primary" type="submit">Salvar preferência</button></div>
 </form><p id="followup-status" class="subtle" role="status"></p></section>
-<section class="wide"><h2>F7 · Cadências comerciais</h2>
+<section class="wide" id="cadence-workspace"><h2>F7 · Cadências comerciais</h2>
 <p class="subtle">Regras versionadas e tarefas internas. Nenhuma mensagem é enviada automaticamente.</p>
 <form id="cadence-definition-form">
 <label for="cadence-name">Nome da cadência</label>
@@ -731,7 +731,7 @@ Sem política configurada, o envio automatizado é bloqueado. Esta etapa não en
 <div class="actions"><button id="cadence-reload" type="button">Atualizar execuções</button></div>
 <div id="cadence-runs" aria-live="polite"></div>
 <p id="cadence-more" class="subtle"></p></section>
-<section class="wide"><h2>F7 · Agenda e compromissos internos</h2>
+<section class="wide" id="agenda-workspace"><h2>F7 · Agenda e compromissos internos</h2>
 <p class="subtle">Horários por usuário, prevenção de conflitos e lembretes como tarefas privadas no CRM. Sem mensagem automática ao cliente.</p>
 <form id="agenda-form">
 <label for="agenda-contact">Contato</label><select id="agenda-contact" required></select>
