@@ -16,7 +16,7 @@ def render_human_inbox_page() -> str:
 :root{font:15px/1.5 system-ui,Arial;color:#1c2b36;background:#f5f7fa}
 *{box-sizing:border-box}body{margin:0}
 header{padding:22px clamp(18px,4vw,48px);background:#11283b;color:#fff}
-header h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:#d7e5f0}
+header h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:#d7e5f0}header a{color:#d9efff;display:inline-block;margin-top:8px}
 main{max-width:1300px;margin:26px auto;padding:0 18px;display:grid;
  grid-template-columns:minmax(270px,390px) 1fr;gap:18px}
 section{background:white;border:1px solid #dee5eb;border-radius:13px;
@@ -51,7 +51,7 @@ label{font-weight:600;font-size:13px}
 @media(max-width:790px){main{display:block}section{margin-bottom:18px}}
 </style></head>
 <body><header><h1>VendeAtendeIA · Atendimento humano</h1>
-<p>Conversas aguardando ou em atendimento • Unidade da sua sessão</p></header>
+<p>Conversas aguardando ou em atendimento • Unidade da sua sessão</p><a href="/app/knowledge">Gerenciar base de conhecimento</a></header>
 <main>
 <section aria-label="Fila de atendimento"><h2>Caixa de entrada</h2>
 <nav><button id="refresh" class="primary">Atualizar fila</button>

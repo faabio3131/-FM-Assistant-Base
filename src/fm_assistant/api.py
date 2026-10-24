@@ -11,11 +11,14 @@ from fastapi import (
     Cookie,
     Depends,
     FastAPI,
+    File,
+    Form,
     Header,
     HTTPException,
     Query,
     Request,
     Response,
+    UploadFile,
     status,
 )
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -60,7 +63,9 @@ from .identity_service import IdentityService
 from .integration import CredentialSource, IntegrationConnection
 from .integration_repository import IntegrationRepository
 from .integration_service import IntegrationService
+from .knowledge_management_page import render_knowledge_management_page
 from .knowledge_retrieval import BoundedKnowledgeRetrieval
+from .knowledge_sources import GovernedKnowledgeSources, SourceImportDenied
 from .knowledge_versioning import KnowledgeVersionDenied, VersionedKnowledgeIngestion
 from .license_security_hold import LicenseSecurityHoldDenied, SignedLicenseSecurityHold
 from .plan_consumption_dashboard import render_consumption_dashboard
@@ -83,6 +88,17 @@ from .service import AssistantService
 from .settings import Settings, load_settings
 from .whatsapp_repository import WhatsAppChannelRepository, WhatsAppInboundRepository
 from .whatsapp_runtime import WhatsAppRuntime
+
+
+def _deny_cross_origin_knowledge_mutation(request: Request) -> None:
+    """Reject browser cross-site cookie submissions before reading imports."""
+    site = request.headers.get("sec-fetch-site", "")
+    origin = request.headers.get("origin", "")
+    expected = str(request.base_url).rstrip("/")
+    if site not in ("", "none", "same-origin") or (
+        origin and origin.rstrip("/") != expected
+    ):
+        raise HTTPException(status_code=403, detail="knowledge_origin_denied")
 
 
 class ProvisionCredentialRequest(BaseModel):
@@ -142,6 +158,21 @@ class KnowledgeContextPreviewResponse(BaseModel):
     corpus_truncated: bool
     context: str
     evidence: list[KnowledgeContextPreviewEvidence]
+
+
+class KnowledgeURLImportRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    title: str = Field(min_length=1, max_length=255)
+    url: str = Field(min_length=12, max_length=512)
+
+
+class KnowledgeSourceImportResponse(BaseModel):
+    document_id: str
+    revision: int
+    chunks: int
+    content_sha256: str
+    source_kind: str
+    external_source_verified: bool
 
 
 class KnowledgeVersionRequest(BaseModel):
@@ -590,6 +621,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     knowledge = KnowledgeRepository(session_factory)
     knowledge_retrieval = BoundedKnowledgeRetrieval(session_factory)
     knowledge_versioning = VersionedKnowledgeIngestion(session_factory)
+    knowledge_sources = GovernedKnowledgeSources(session_factory)
     audit = SQLAuditSink(session_factory)
 
     audio_transcriber = None
@@ -758,6 +790,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge = knowledge
         app.state.knowledge_retrieval = knowledge_retrieval
         app.state.knowledge_versioning = knowledge_versioning
+        app.state.knowledge_sources = knowledge_sources
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
         app.state.human_inbox_operations = human_inbox_operations
@@ -1246,6 +1279,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             enabled=payload.enabled,
         )
         return _persona_response(persona)
+
+    @app.get("/app/knowledge", response_class=HTMLResponse)
+    def knowledge_workspace(
+        _principal: SessionPrincipal = Depends(human_permission(Permission.KNOWLEDGE_READ)),
+    ) -> HTMLResponse:
+        markup, csp = render_knowledge_management_page()
+        return HTMLResponse(markup, headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
+
+    @app.get("/v1/knowledge/sources")
+    def list_knowledge_sources(
+        request: Request,
+        page: int = Query(default=0, ge=0, le=200),
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_READ)),
+    ) -> dict:
+        return request.app.state.knowledge_sources.list_sources(context, page=page)
+
+    @app.post("/v1/knowledge/sources/file", response_model=KnowledgeSourceImportResponse,
+              status_code=201)
+    async def import_knowledge_file(
+        request: Request, title: str = Form(..., min_length=1, max_length=255),
+        file: UploadFile = File(...),
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_MANAGE)),
+    ) -> KnowledgeSourceImportResponse:
+        _deny_cross_origin_knowledge_mutation(request)
+        if os.environ.get("FM_ASSISTANT_KNOWLEDGE_SOURCES_ENABLED", "false").casefold() != "true":
+            raise HTTPException(status_code=503, detail="knowledge_import_disabled")
+        try:
+            data = await file.read(1_500_001)
+            result = request.app.state.knowledge_sources.import_file(
+                context, filename=file.filename or "",
+                media_type=(file.content_type or "").split(";")[0].lower(),
+                content=data, title=title,
+            )
+        except (SourceImportDenied, KnowledgeVersionDenied) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            await file.close()
+        return KnowledgeSourceImportResponse(**vars(result))
+
+    @app.post("/v1/knowledge/sources/url", response_model=KnowledgeSourceImportResponse,
+              status_code=201)
+    def import_knowledge_url(
+        payload: KnowledgeURLImportRequest, request: Request,
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_MANAGE)),
+    ) -> KnowledgeSourceImportResponse:
+        _deny_cross_origin_knowledge_mutation(request)
+        if os.environ.get("FM_ASSISTANT_KNOWLEDGE_SOURCES_ENABLED", "false").casefold() != "true":
+            raise HTTPException(status_code=503, detail="knowledge_import_disabled")
+        try:
+            result = request.app.state.knowledge_sources.import_url(
+                context, url=payload.url, title=payload.title,
+            )
+        except (SourceImportDenied, KnowledgeVersionDenied) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return KnowledgeSourceImportResponse(**vars(result))
 
     @app.post("/v1/knowledge", response_model=KnowledgeResponse)
     def add_knowledge(
