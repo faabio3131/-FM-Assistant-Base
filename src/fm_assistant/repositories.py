@@ -28,6 +28,7 @@ from .domain import (
     MessageRole,
     TenantContext,
 )
+from .knowledge_privacy import redact_knowledge_evidence
 from .security import Credential
 
 
@@ -453,7 +454,8 @@ class KnowledgeRepository:
         chunks: list[str] = []
         used = 0
         for row in rows:
-            chunk = f"## {row.title}\n{row.content.strip()}"
+            chunk = ("## " + redact_knowledge_evidence(row.title) + "\n" +
+                     redact_knowledge_evidence(row.content.strip()))
             if used + len(chunk) > max_chars:
                 break
             chunks.append(chunk)
