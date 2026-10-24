@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 
-from fm_assistant.db import KnowledgeDocumentORM
 from test_identity_rbac import _bootstrap, _login
 
 
