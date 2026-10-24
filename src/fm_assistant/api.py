@@ -204,7 +204,8 @@ class CRMContactCreateRequest(BaseModel):
 
 
 class CRMOpportunityCreateRequest(BaseModel):
-    model_config = {"extra": "forbid", "strict": True}
+    # JSON UUID strings are valid; strict Field still forbids boolean/float money.
+    model_config = {"extra": "forbid"}
     contact_id: UUID4
     title: str = Field(min_length=1, max_length=255)
     amount_cents: int = Field(ge=0, le=2_000_000_000, strict=True)
