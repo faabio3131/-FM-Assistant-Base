@@ -118,6 +118,7 @@ class VersionedKnowledgeIngestion:
     def index_text(
         self, context: TenantContext, *, document_id: str,
         expected_revision: int, title: str, content: str,
+        source_kind: str = "text", source_ref: str | None = None,
     ) -> KnowledgeVersionResult:
         if (
             not isinstance(document_id, str) or not re.fullmatch(r"[0-9a-f-]{36}", document_id)
@@ -126,6 +127,11 @@ class VersionedKnowledgeIngestion:
             or not isinstance(content, str) or not content.strip()
             or len(content) > _MAX_CONTENT
             or len(context.credential_id) > 64
+            or source_kind not in {"text", "file", "url"}
+            or (source_kind == "text" and source_ref is not None)
+            or (source_kind != "text" and (
+                not isinstance(source_ref, str) or not 1 <= len(source_ref) <= 512
+            ))
         ):
             raise KnowledgeVersionDenied("f4.index_invalid")
         title, content = title.strip(), content.strip()
@@ -151,6 +157,14 @@ class VersionedKnowledgeIngestion:
             current_revision = latest.revision if latest else 0
             if expected_revision != current_revision:
                 raise KnowledgeVersionDenied("f4.stale_revision")
+            # An imported URL/file can only advance with its original provenance.
+            # The legacy text endpoint must never relabel a governed source.
+            if latest is not None and (
+                latest.source_kind != source_kind or latest.source_ref != source_ref
+            ):
+                raise KnowledgeVersionDenied("f4.source_provenance_mismatch")
+            if latest is None and source_kind != "text":
+                raise KnowledgeVersionDenied("f4.source_missing")
             if latest is None and (
                 title != doc.title or content != doc.content.strip()
             ):
@@ -169,8 +183,8 @@ class VersionedKnowledgeIngestion:
             db.add(KnowledgeSourceVersionORM(
                 document_id=document_id, revision=version,
                 tenant_id=context.tenant_id, unit_id=context.unit_id,
-                title=title, content_sha256=sha, source_kind="text",
-                source_ref=None, actor_credential_id=context.credential_id,
+                title=title, content_sha256=sha, source_kind=source_kind,
+                source_ref=source_ref, actor_credential_id=context.credential_id,
                 created_at=now,
             ))
             for ordinal, (begin, end, chunk) in enumerate(chunks):
