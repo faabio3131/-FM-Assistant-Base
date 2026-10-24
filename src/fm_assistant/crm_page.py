@@ -260,6 +260,8 @@ async function showWorkflow(){
 }
 $("show-workflow").addEventListener("click",()=>guarded(showWorkflow));
 
+const initial = new URLSearchParams(window.location.search).get("conversation");
+if(initial && initial.length<=64)$("link-conversation").value=initial;
 guarded(refresh);
 })();
 """
