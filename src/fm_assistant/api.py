@@ -216,6 +216,7 @@ class CRMStageTransitionRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
     expected_revision: int = Field(ge=1, strict=True)
     stage: str = Field(pattern="^(qualified|proposal|won|lost)$")
+    outcome_reason: str | None = Field(default=None, min_length=1, max_length=500)
 
 
 class CRMConversationLinkRequest(BaseModel):
@@ -1366,6 +1367,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict:
         return request.app.state.crm.list_contacts(principal, page=page)
 
+    @app.get("/v1/crm/analytics")
+    def crm_funnel_analytics(
+        request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        return request.app.state.crm.analytics(principal)
+
     @app.post("/v1/crm/opportunities", status_code=201)
     def create_crm_opportunity(
         payload: CRMOpportunityCreateRequest, request: Request,
@@ -1405,6 +1413,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return request.app.state.crm.advance(
                 principal, opportunity_id=opportunity_id,
                 expected_revision=payload.expected_revision, stage=payload.stage,
+                outcome_reason=payload.outcome_reason,
             )
         except CRMNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
