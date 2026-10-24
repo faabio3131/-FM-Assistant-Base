@@ -139,3 +139,19 @@ def test_human_rbac_csrf_and_machine_denied(client):
         "contact_id": "00000000-0000-4000-8000-000000000001",
         "title": "Denied", "amount_cents": 10,
     }).status_code == 403
+
+
+def test_crm_workspace_is_session_only_and_exposes_no_inline_external_scripts(client):
+    assert client.get("/app/crm").status_code == 401
+    _bootstrap(client)
+    _login(client)
+    response = client.get("/app/crm")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "script-src 'sha256-" in response.headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert "no-store" == response.headers["cache-control"]
+    assert "Contatos" in response.text
+    assert "opportunities" in response.text
+    assert "/app/crm" in client.get("/app/knowledge").text
+    assert "/app/crm" in client.get("/app/inbox").text
