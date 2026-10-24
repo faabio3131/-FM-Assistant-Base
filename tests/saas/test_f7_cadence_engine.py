@@ -111,7 +111,8 @@ def test_quiet_hours_defer_and_live_opt_out_blocks(client):
         for job in db.scalars(select(CadenceJobORM).where(
             CadenceJobORM.run_id == run["run_id"],
         )).all():
-            job.due_at = midnight - timedelta(minutes=1)
+            job.due_at = (midnight - timedelta(minutes=1)
+                          + timedelta(days=job.step_index))
             job.available_at = job.due_at
     first = engine.claim(now=midnight)
     assert first
@@ -164,7 +165,10 @@ def test_expired_lease_recovery_backoff_and_dead_letter(client):
     assert dead["state"] == "dead"
     assert dead["attempt_count"] == 3
     assert dead["last_error"] == "internal_transient"
-    assert engine.claim(now=anchor + timedelta(days=1)) is not None  # 2nd step.
+    assert engine.claim(now=anchor + timedelta(days=1)) is None
+    later = client.get(f"/v1/followups/runs/{run['run_id']}").json()
+    assert later["status"] == "failed"
+    assert later["jobs"][1]["state"] == "blocked"
 
 
 def test_cancel_fences_lease_and_scoped_reads(client):
