@@ -39,6 +39,7 @@ from .core_client import CoreAIClient, CoreAudioTranscriber
 from .core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from .credential_vault import FernetCredentialVault
 from .crm import CRMConflict, CRMNotFound, CRMService
+from .crm_page import render_crm_page
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDenied
@@ -1371,6 +1372,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except CRMConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/app/crm", response_class=HTMLResponse)
+    def crm_workspace(
+        _principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> HTMLResponse:
+        markup, csp = render_crm_page()
+        return HTMLResponse(markup, headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
 
     @app.get("/app/knowledge", response_class=HTMLResponse)
     def knowledge_workspace(
