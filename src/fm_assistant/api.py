@@ -30,6 +30,7 @@ from .channels.evolution_events import EvolutionEventDenied, EvolutionEventVerif
 from .channels.whatsapp_evolution import EvolutionClient, EvolutionSettings, EvolutionUnavailable
 from .channels.whatsapp_meta import WhatsAppProviderError
 from .command_bridge_control_service import CommandBridgeControlService, CommandBridgeDenied
+from .commercial_shell import attach_navigation, render_home
 from .commercial_license_transition import (
     CommercialLicenseTransitionDenied,
     SignedCommercialLicenseTransition,
@@ -1295,7 +1296,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except PlanLimitDenied as exc:
             raise HTTPException(status_code=403, detail="plan_unavailable") from exc
         return HTMLResponse(
-            render_consumption_dashboard(data),
+            attach_navigation(render_consumption_dashboard(data), principal,
+                              "/v1/plan/consumption/dashboard"),
             headers={"Cache-Control": "no-store",
                      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
                      "X-Content-Type-Options": "nosniff"},
@@ -1872,11 +1874,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except CRMNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/app", response_class=HTMLResponse)
+    def commercial_home(
+        principal: SessionPrincipal = Depends(current_session),
+    ) -> HTMLResponse:
+        markup, csp = render_home(principal)
+        return HTMLResponse(markup, headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
+
     @app.get("/app/crm", response_class=HTMLResponse)
     def crm_workspace(
         _principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
     ) -> HTMLResponse:
         markup, csp = render_crm_page()
+        markup = attach_navigation(markup, _principal, "/app/crm")
         return HTMLResponse(markup, headers={
             "Cache-Control": "no-store", "Content-Security-Policy": csp,
             "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
@@ -1887,6 +1900,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _principal: SessionPrincipal = Depends(human_permission(Permission.KNOWLEDGE_READ)),
     ) -> HTMLResponse:
         markup, csp = render_knowledge_management_page()
+        markup = attach_navigation(markup, _principal, "/app/knowledge")
         return HTMLResponse(markup, headers={
             "Cache-Control": "no-store", "Content-Security-Policy": csp,
             "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
@@ -2200,7 +2214,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
     ) -> HTMLResponse:
         return HTMLResponse(
-            render_human_inbox_page(), headers={"Cache-Control": "no-store",
+            attach_navigation(render_human_inbox_page(), _principal, "/app/inbox"),
+            headers={"Cache-Control": "no-store",
                                                 "X-Content-Type-Options": "nosniff"},
         )
 
@@ -3083,6 +3098,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ),
     ) -> HTMLResponse:
         markup, csp = render_qr_page()
+        markup = attach_navigation(markup, _principal, "/v1/channels/whatsapp/qr/panel")
         return HTMLResponse(
             markup, headers={
                 "Content-Security-Policy": csp,
