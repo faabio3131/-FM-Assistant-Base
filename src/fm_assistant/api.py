@@ -34,6 +34,7 @@ from .commercial_license_transition import (
     CommercialLicenseTransitionDenied,
     SignedCommercialLicenseTransition,
 )
+from .commercial_login_page import render_login
 from .commercial_settings_page import render_settings
 from .commercial_shell import attach_navigation, render_home
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
@@ -1874,6 +1875,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except CRMNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/app/login", response_class=HTMLResponse)
+    def commercial_login() -> HTMLResponse:
+        markup, csp = render_login()
+        return HTMLResponse(markup, headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
 
     @app.get("/app", response_class=HTMLResponse)
     def commercial_home(
