@@ -1,9 +1,7 @@
 """P01 F3/F9: request-wide fallback cost diagnostics, never vendor billing proof."""
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import jwt
 import pytest
@@ -141,7 +139,7 @@ def test_request_never_hides_mismatch_unknowns_and_tenant_scope(example):
 
 
 def test_fm_only_endpoint_rejects_missing_or_forged_identity(example):
-    store, _sessions, engine = example
+    _store, _sessions, engine = example
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pub = private.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
