@@ -51,7 +51,7 @@ label{font-weight:600;font-size:13px}
 @media(max-width:790px){main{display:block}section{margin-bottom:18px}}
 </style></head>
 <body><header><h1>VendeAtendeIA · Atendimento humano</h1>
-<p>Conversas aguardando ou em atendimento • Unidade da sua sessão</p><a href="/app/knowledge">Gerenciar base de conhecimento</a></header>
+<p>Conversas aguardando ou em atendimento • Unidade da sua sessão</p><a href="/app/knowledge">Gerenciar base de conhecimento</a> <a href="/app/crm">CRM comercial</a></header>
 <main>
 <section aria-label="Fila de atendimento"><h2>Caixa de entrada</h2>
 <nav><button id="refresh" class="primary">Atualizar fila</button>

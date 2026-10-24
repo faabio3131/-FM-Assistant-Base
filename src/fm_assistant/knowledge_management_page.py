@@ -207,6 +207,7 @@ footer{padding:16px;text-align:center;color:#5d7080}
 <header><h1>VendeAtendeIA · Base de conhecimento</h1>
 <p>Fontes isoladas por empresa e unidade · controle de versões e evidências</p>
 <nav><a href="/app/inbox">Atendimento humano</a>
+<a href="/app/crm">CRM comercial</a>
 <a href="/v1/plan/consumption/dashboard">Consumo do plano</a></nav></header>
 <main>
 <section><h2>Importar arquivo</h2>

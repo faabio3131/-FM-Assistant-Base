@@ -38,6 +38,8 @@ from .core_bridge_service import CoreBridgeDenied, CoreBridgeService
 from .core_client import CoreAIClient, CoreAudioTranscriber
 from .core_plan_usage_reader import CoreQuotaUsageHTTPReader
 from .credential_vault import FernetCredentialVault
+from .crm import CRMConflict, CRMNotFound, CRMService
+from .crm_page import render_crm_page
 from .db import create_schema, create_session_factory
 from .domain import AssistantPersona, Channel, Conversation, Message, TenantContext
 from .evolution_native_ingress import EvolutionNativeIngress, NativeEvolutionDenied
@@ -193,6 +195,26 @@ class KnowledgeVersionResponse(BaseModel):
     content_sha256: str
     indexed: bool
     external_source_verified: bool
+
+
+class CRMContactCreateRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    name: str = Field(min_length=1, max_length=255)
+    email: str | None = Field(default=None, max_length=320)
+
+
+class CRMOpportunityCreateRequest(BaseModel):
+    # JSON UUID strings are valid; strict Field still forbids boolean/float money.
+    model_config = {"extra": "forbid"}
+    contact_id: UUID4
+    title: str = Field(min_length=1, max_length=255)
+    amount_cents: int = Field(ge=0, le=2_000_000_000, strict=True)
+
+
+class CRMStageTransitionRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    expected_revision: int = Field(ge=1, strict=True)
+    stage: str = Field(pattern="^(qualified|proposal|won|lost)$")
 
 
 class ConversationRequest(BaseModel):
@@ -668,6 +690,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     integration_repository = IntegrationRepository(session_factory)
     vault = FernetCredentialVault(cfg.channel_encryption_key)
+    crm = CRMService(session_factory, vault, pepper=cfg.credential_pepper)
     human_whatsapp_outbox = HumanWhatsAppOutbox(
         session_factory, vault, sender_pepper=cfg.credential_pepper,
     )
@@ -796,6 +819,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge_retrieval = knowledge_retrieval
         app.state.knowledge_versioning = knowledge_versioning
         app.state.knowledge_sources = knowledge_sources
+        app.state.crm = crm
         app.state.assistant_service = service
         app.state.human_inbox = human_inbox
         app.state.human_inbox_operations = human_inbox_operations
@@ -1284,6 +1308,81 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             enabled=payload.enabled,
         )
         return _persona_response(persona)
+
+    @app.post("/v1/crm/contacts", status_code=201)
+    def create_crm_contact(
+        payload: CRMContactCreateRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm.create_contact(
+                principal, name=payload.name, email=payload.email,
+            )
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/crm/contacts")
+    def list_crm_contacts(
+        request: Request, page: int = Query(default=0, ge=0, le=200),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        return request.app.state.crm.list_contacts(principal, page=page)
+
+    @app.post("/v1/crm/opportunities", status_code=201)
+    def create_crm_opportunity(
+        payload: CRMOpportunityCreateRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm.create_opportunity(
+                principal, contact_id=str(payload.contact_id),
+                title=payload.title, amount_cents=payload.amount_cents,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/crm/opportunities")
+    def list_crm_opportunities(
+        request: Request, page: int = Query(default=0, ge=0, le=200),
+        stage: str | None = Query(default=None),
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> dict:
+        try:
+            return request.app.state.crm.list_opportunities(
+                principal, page=page, stage=stage,
+            )
+        except CRMConflict as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/v1/crm/opportunities/{opportunity_id}/transition")
+    def transition_crm_opportunity(
+        opportunity_id: str, payload: CRMStageTransitionRequest, request: Request,
+        principal: SessionPrincipal = Depends(human_permission(Permission.CRM_MANAGE)),
+    ) -> dict:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            return request.app.state.crm.advance(
+                principal, opportunity_id=opportunity_id,
+                expected_revision=payload.expected_revision, stage=payload.stage,
+            )
+        except CRMNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CRMConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/app/crm", response_class=HTMLResponse)
+    def crm_workspace(
+        _principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
+    ) -> HTMLResponse:
+        markup, csp = render_crm_page()
+        return HTMLResponse(markup, headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
 
     @app.get("/app/knowledge", response_class=HTMLResponse)
     def knowledge_workspace(
