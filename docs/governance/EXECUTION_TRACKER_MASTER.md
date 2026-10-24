@@ -84,7 +84,7 @@
 
 ## F8 — Frontend Web Comercial
 
-**Status:** NOT_STARTED
+**Status:** IN_PROGRESS
 
 ## F9 — Billing / Plans / Quotas / Usage
 
@@ -1205,3 +1205,10 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Após integração da PR #38, construir agenda comercial por usuário com horários livres/ocupados, compromisso cifrado, conflito de reservas, remarcação CAS, cancelamento/conclusão, auditoria e UI do CRM.
 - Lembrete privado em atividade do CRM é atômico/idempotente por revisão da agenda; não envia WhatsApp, e-mail ou push ao cliente.
 - Migração aditiva `20261024_0029`, rollback em banco descartável, gates do novo HEAD obrigatórios antes de merge; nenhuma migração ou ativação em produção.
+
+## 2026-10-24 — F8/WP1 shell comercial (candidato)
+
+- Base main `712dcc2ec1add3781bcfe1c98d69b0442b9de71b` (F7 PR #39 integrada, 5 gates pós-merge verdes).
+- Entrada única autenticada `/app`, cards consultados pelas APIs reais e exibidos com estado parcial/indisponível, navegação unificada e filtrada por RBAC no servidor, links operacionais CRM/agenda/cadências/inbox/conhecimento/WhatsApp/consumo. Mantidas páginas e controladores existentes; sem segundo frontend ou domínio de negócio.
+- Testes de sessão, permissão, isolamento por unidade via APIs assinadas, XSS, script CSP, no-store e navegação. Nenhuma alteração no visual, Docker ou infraestrutura do FM Command; sem deploy nem homologação externa.
+- F8 global permanece `IN_PROGRESS`: interfaces comerciais de integração, equipe, persona e configurações, acessibilidade e E2E de jornada ainda precisam de avanço.
