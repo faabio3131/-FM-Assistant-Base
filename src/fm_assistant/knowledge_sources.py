@@ -197,6 +197,7 @@ class SourceImportResult:
     content_sha256: str
     source_kind: str
     external_source_verified: bool = False
+    indexed: bool = True
 
 
 class GovernedKnowledgeSources:
@@ -284,7 +285,8 @@ class GovernedKnowledgeSources:
             title=title, content=text, source_kind="file", source_ref=filename,
         )
         return SourceImportResult(result.document_id, result.revision,
-                                  result.chunks, result.content_sha256, "file")
+                                  result.chunks, result.content_sha256, "file",
+                                  indexed=result.indexed)
 
     def refresh_url(
         self, context: TenantContext, *, document_id: str,
@@ -310,7 +312,8 @@ class GovernedKnowledgeSources:
             title=title, content=text, source_kind="url", source_ref=url,
         )
         return SourceImportResult(result.document_id, result.revision,
-                                  result.chunks, result.content_sha256, "url")
+                                  result.chunks, result.content_sha256, "url",
+                                  indexed=result.indexed)
 
     def _store(
         self, context: TenantContext, *, title: str, content: str,
