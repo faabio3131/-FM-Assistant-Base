@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -11,7 +12,9 @@ from sqlalchemy import select
 from .db import (
     AuditEventORM,
     ConversationORM,
+    KnowledgeChunkORM,
     KnowledgeDocumentORM,
+    KnowledgeSourceVersionORM,
     MessageORM,
     PersonaORM,
     TenantCredentialORM,
@@ -25,6 +28,7 @@ from .domain import (
     MessageRole,
     TenantContext,
 )
+from .knowledge_privacy import redact_knowledge_evidence
 from .security import Credential
 
 
@@ -376,6 +380,66 @@ class KnowledgeRepository:
                 session.commit()
             return True
 
+    def reactivate(
+        self, context: TenantContext, document_id: str, *, expected_revision: int,
+    ) -> bool:
+        """Restore only a valid immutable source head; idempotent and tenant-safe."""
+        if (not isinstance(document_id, str) or not 1 <= len(document_id) <= 64
+                or type(expected_revision) is not int or expected_revision < 1):
+            return False
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(KnowledgeDocumentORM).where(
+                KnowledgeDocumentORM.document_id == document_id,
+                KnowledgeDocumentORM.tenant_id == context.tenant_id,
+                KnowledgeDocumentORM.unit_id == context.unit_id,
+            ).with_for_update())
+            if row is None:
+                return False
+            version = session.scalar(select(KnowledgeSourceVersionORM).where(
+                KnowledgeSourceVersionORM.document_id == document_id,
+                KnowledgeSourceVersionORM.tenant_id == context.tenant_id,
+                KnowledgeSourceVersionORM.unit_id == context.unit_id,
+            ).order_by(KnowledgeSourceVersionORM.revision.desc()).limit(1))
+            if version is None or version.revision != expected_revision:
+                raise ValueError("f4.restore_revision_conflict")
+            if (row.title != version.title
+                    or hashlib.sha256(row.content.encode("utf-8")).hexdigest()
+                    != version.content_sha256):
+                raise ValueError("f4.restore_integrity_denied")
+            chunks = session.scalars(select(KnowledgeChunkORM).where(
+                KnowledgeChunkORM.document_id == document_id,
+                KnowledgeChunkORM.tenant_id == context.tenant_id,
+                KnowledgeChunkORM.unit_id == context.unit_id,
+                KnowledgeChunkORM.revision == version.revision,
+            ).order_by(KnowledgeChunkORM.ordinal)).all()
+            if (not chunks or len(chunks) > 64
+                    or chunks[0].start_offset != 0
+                    or chunks[-1].end_offset != len(row.content)):
+                raise ValueError("f4.restore_integrity_denied")
+            for n, chunk in enumerate(chunks):
+                if (chunk.ordinal != n or chunk.start_offset < 0
+                        or chunk.end_offset > len(row.content)
+                        or chunk.end_offset <= chunk.start_offset
+                        or (n > 0 and chunk.start_offset > chunks[n-1].end_offset)
+                        or row.content[chunk.start_offset:chunk.end_offset] != chunk.content
+                        or hashlib.sha256(chunk.content.encode("utf-8")).hexdigest()
+                        != chunk.content_sha256):
+                    raise ValueError("f4.restore_integrity_denied")
+            if not row.active:
+                now = datetime.now(UTC)
+                row.active = True
+                row.updated_at = now
+                session.add(AuditEventORM(
+                    audit_id=str(uuid4()),
+                    tenant_id=context.tenant_id, unit_id=context.unit_id,
+                    credential_id=context.credential_id,
+                    action="assistant.knowledge.reactivate",
+                    resource_type="assistant_knowledge", resource_id=document_id,
+                    outcome="success", metadata_json="{}",
+                    created_at=now,
+                ))
+            return True
+
     def context(self, context: TenantContext, *, max_chars: int = 12000) -> str:
         with self._session_factory() as session:
             rows = session.scalars(
@@ -390,7 +454,8 @@ class KnowledgeRepository:
         chunks: list[str] = []
         used = 0
         for row in rows:
-            chunk = f"## {row.title}\n{row.content.strip()}"
+            chunk = ("## " + redact_knowledge_evidence(row.title) + "\n" +
+                     redact_knowledge_evidence(row.content.strip()))
             if used + len(chunk) > max_chars:
                 break
             chunks.append(chunk)

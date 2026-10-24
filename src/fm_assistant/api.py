@@ -1473,6 +1473,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             external_source_verified=result.external_source_verified,
         )
 
+    @app.post("/v1/knowledge/{document_id}/reactivate", status_code=204)
+    def reactivate_knowledge(
+        document_id: str, request: Request,
+        expected_revision: int = Query(ge=1, le=2_000_000_000),
+        context: TenantContext = Depends(tenant_with_permission(Permission.KNOWLEDGE_MANAGE)),
+    ) -> Response:
+        _deny_cross_origin_knowledge_mutation(request)
+        try:
+            reactivated = request.app.state.knowledge.reactivate(
+                context, document_id, expected_revision=expected_revision,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if not reactivated:
+            raise HTTPException(status_code=404, detail="knowledge_not_found")
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
     @app.delete("/v1/knowledge/{document_id}", status_code=204)
     def deactivate_knowledge(
         document_id: str,
