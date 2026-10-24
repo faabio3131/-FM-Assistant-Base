@@ -1,11 +1,10 @@
 """F4 governed source replacement remains CAS, scoped, immutable and auditable."""
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from test_identity_rbac import _bootstrap, _login
 
 from fm_assistant.db import (
     AuditEventORM,
@@ -18,7 +17,6 @@ from fm_assistant.domain import TenantContext
 from fm_assistant.knowledge_retrieval import BoundedKnowledgeRetrieval
 from fm_assistant.knowledge_sources import GovernedKnowledgeSources, SourceImportDenied
 from fm_assistant.knowledge_versioning import KnowledgeVersionDenied, VersionedKnowledgeIngestion
-from test_identity_rbac import _bootstrap, _login
 
 
 @pytest.fixture
