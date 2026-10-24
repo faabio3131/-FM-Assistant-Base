@@ -6,16 +6,17 @@ index; remote media is never executed or stored as HTML.
 """
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import os
 import re
 import socket
+import ssl
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from io import BytesIO
 from urllib.parse import urlsplit
 
-import httpx
 from sqlalchemy import select
 
 from .db import KnowledgeDocumentORM, KnowledgeSourceVersionORM
@@ -103,7 +104,7 @@ def _decode(data: bytes, suffix: str) -> str:
     return text
 
 
-def _checked_host(url: str, hosts: frozenset[str], resolver) -> str:
+def _checked_host(url: str, hosts: frozenset[str], resolver) -> tuple[str, tuple[str, ...]]:
     if not isinstance(url, str) or len(url) > 512 or not hosts:
         raise SourceImportDenied("f4.url_disabled")
     try:
@@ -120,7 +121,7 @@ def _checked_host(url: str, hosts: frozenset[str], resolver) -> str:
             raise SourceImportDenied("f4.url_dns_denied")
         if any(not ipaddress.ip_address(str(ip)).is_global for ip in addresses):
             raise SourceImportDenied("f4.url_dns_denied")
-        return host
+        return host, tuple(str(ip) for ip in addresses)
     except SourceImportDenied:
         raise
     except (ValueError, OSError) as exc:
@@ -133,30 +134,59 @@ def _resolve_public(host: str, port: int) -> list[str]:
     )})
 
 
-def _fetch_https(url: str) -> tuple[bytes, str]:
-    # HTTPS-only, no proxy credentials and no redirects. Hosts/IPs are
-    # additionally restricted by an outbound network egress policy in hosting.
-    try:
-        with httpx.Client(
-            timeout=httpx.Timeout(6.0, connect=3.0), follow_redirects=False,
-            trust_env=False,
-        ) as client, client.stream("GET", url, headers={
-            "Accept": "text/plain,text/markdown,text/csv,text/html,application/pdf",
-            "User-Agent": "VendeAtendeIA-Knowledge/1.0",
-        }) as response:
-            if response.status_code != 200 or response.is_redirect:
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """TLS hostname verified, TCP peer pinned to one prevalidated public IP."""
+
+    def __init__(self, hostname: str, ip: str) -> None:
+        super().__init__(hostname, port=443, timeout=5, context=ssl.create_default_context())
+        self._pinned_ip = ip
+
+    def connect(self) -> None:
+        raw = socket.create_connection((self._pinned_ip, 443), timeout=self.timeout)
+        try:
+            self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+        except Exception:
+            raw.close()
+            raise
+
+
+def _fetch_https(url: str, addresses: tuple[str, ...]) -> tuple[bytes, str]:
+    # Reuse exactly the DNS addresses validated by _checked_host. Never perform
+    # a second DNS lookup after approval: rebinding would defeat SSRF checks.
+    parts = urlsplit(url)
+    hostname = parts.hostname or ""
+    request_path = parts.path or "/"
+    for address in addresses:
+        conn = _PinnedHTTPSConnection(hostname, address)
+        try:
+            conn.request("GET", request_path, headers={
+                "Accept": "text/plain,text/markdown,text/csv,text/html,application/pdf",
+                "Accept-Encoding": "identity",
+                "User-Agent": "VendeAtendeIA-Knowledge/1.0",
+                "Connection": "close",
+            })
+            response = conn.getresponse()
+            if response.status != 200:
                 raise SourceImportDenied("f4.url_response_denied")
-            ctype = response.headers.get("content-type", "").split(";")[0].lower().strip()
-            body = bytearray()
-            for part in response.iter_bytes():
-                body.extend(part)
-                if len(body) > _MAX_UPLOAD:
-                    raise SourceImportDenied("f4.url_too_large")
-            return bytes(body), ctype
-    except SourceImportDenied:
-        raise
-    except (httpx.HTTPError, OSError) as exc:
-        raise SourceImportDenied("f4.url_unavailable") from exc
+            if response.getheader("content-encoding", "identity").lower() != "identity":
+                raise SourceImportDenied("f4.url_encoding_denied")
+            content_type = response.getheader("content-type", "").split(";")[0].lower().strip()
+            length = response.getheader("content-length")
+            if length is not None and (not length.isdecimal() or int(length) > _MAX_UPLOAD):
+                raise SourceImportDenied("f4.url_too_large")
+            body = response.read(_MAX_UPLOAD + 1)
+            if len(body) > _MAX_UPLOAD:
+                raise SourceImportDenied("f4.url_too_large")
+            return body, content_type
+        except SourceImportDenied:
+            raise
+        except (OSError, ssl.SSLError, http.client.HTTPException, ValueError):
+            # Another approved address may succeed; no alternate host, proxy
+            # or private IP fallback is ever used.
+            continue
+        finally:
+            conn.close()
+    raise SourceImportDenied("f4.url_unavailable")
 
 
 @dataclass(frozen=True)
@@ -196,8 +226,8 @@ class GovernedKnowledgeSources:
         hosts = frozenset(h.strip().lower() for h in configured.split(",") if h.strip())
         if not all(_HOST.fullmatch(h) for h in hosts):
             raise SourceImportDenied("f4.url_allowlist_invalid")
-        _checked_host(url, hosts, self._resolver)
-        data, content_type = self._fetcher(url)
+        _, addresses = _checked_host(url, hosts, self._resolver)
+        data, content_type = self._fetcher(url, addresses)
         ext = {
             "text/plain": ".txt", "text/markdown": ".md",
             "text/html": ".html", "text/csv": ".csv",
