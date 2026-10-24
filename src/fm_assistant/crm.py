@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
     select,
     update,
 )
@@ -226,10 +227,62 @@ class CRMService:
             return {"items": [self._opportunity_view(row) for row in rows[:50]],
                     "next_page": page + 1 if len(rows) > 50 else None}
 
+    def analytics(self, principal: SessionPrincipal) -> dict:
+        """Exact unit-scoped opportunity snapshot, not recognized revenue.
+
+        A single grouped read covers every opportunity, not just the 50
+        records currently loaded into the CRM workspace.
+        """
+        with self._sessions() as db:
+            contacts = db.scalar(select(func.count(CRMContactORM.contact_id)).where(
+                CRMContactORM.tenant_id == principal.tenant_id,
+                CRMContactORM.unit_id == principal.unit_id,
+            ))
+            rows = db.execute(select(
+                CRMOpportunityORM.stage,
+                func.count(CRMOpportunityORM.opportunity_id),
+                func.coalesce(func.sum(CRMOpportunityORM.amount_cents), 0),
+            ).where(
+                CRMOpportunityORM.tenant_id == principal.tenant_id,
+                CRMOpportunityORM.unit_id == principal.unit_id,
+            ).group_by(CRMOpportunityORM.stage)).all()
+        stages = {
+            stage: {"count": 0, "amount_cents": 0}
+            for stage in _TRANSITIONS
+        }
+        for stage, count, amount in rows:
+            if stage not in stages:
+                raise CRMConflict("crm.analytics_unknown_stage")
+            stages[stage] = {"count": int(count), "amount_cents": int(amount)}
+        total = sum(row["count"] for row in stages.values())
+        open_stages = ("new", "qualified", "proposal")
+        closed = stages["won"]["count"] + stages["lost"]["count"]
+        return {
+            "currency": "BRL", "contacts_total": int(contacts or 0),
+            "opportunities_total": total,
+            "open_opportunities": sum(stages[k]["count"] for k in open_stages),
+            "open_pipeline_cents": sum(stages[k]["amount_cents"] for k in open_stages),
+            "won_opportunities": stages["won"]["count"],
+            "won_opportunity_value_cents": stages["won"]["amount_cents"],
+            "lost_opportunities": stages["lost"]["count"],
+            "closed_opportunities": closed,
+            "win_rate_basis_points": (stages["won"]["count"] * 10_000 // closed)
+            if closed else None,
+            "revenue_recognized": False,
+            "stages": stages,
+        }
+
     def advance(self, principal: SessionPrincipal, *, opportunity_id: str,
-                expected_revision: int, stage: str) -> dict:
+                expected_revision: int, stage: str,
+                outcome_reason: str | None = None) -> dict:
         if stage not in _TRANSITIONS or type(expected_revision) is not int:
             raise CRMConflict("crm.transition_invalid")
+        if outcome_reason is not None and (
+            stage not in {"won", "lost"}
+            or type(outcome_reason) is not str
+            or not 1 <= len(outcome_reason.strip()) <= 500
+        ):
+            raise CRMConflict("crm.outcome_reason_invalid")
         with self._sessions.begin() as db:
             row = db.scalar(select(CRMOpportunityORM).where(
                 CRMOpportunityORM.opportunity_id == opportunity_id,
@@ -256,6 +309,17 @@ class CRMService:
                 raise CRMConflict("crm.transition_conflict")
             self._audit(db, principal, "opportunity", opportunity_id, "transition",
                         old=previous, new=stage)
+            if outcome_reason is not None:
+                # One transaction: stale CAS cannot leave a standalone reason.
+                # Keep sensitive commercial details encrypted like other CRM notes.
+                from .crm_workflow import CRMActivityORM
+                db.add(CRMActivityORM(
+                    activity_id=str(uuid4()), tenant_id=principal.tenant_id,
+                    unit_id=principal.unit_id, opportunity_id=opportunity_id,
+                    actor_id=principal.user_id, kind="outcome_" + stage,
+                    details_ciphertext=self._vault.encrypt(outcome_reason.strip()),
+                    related_id=None, created_at=now,
+                ))
             # Keep SQLAlchemy identity map in sync after the CAS update.
             db.refresh(row)
             return self._opportunity_view(row)
