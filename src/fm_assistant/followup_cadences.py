@@ -342,6 +342,27 @@ class CadenceEngine:
             "jobs": [_view_task(x) for x in jobs],
         }
 
+    def list_runs(self, principal: SessionPrincipal, *,
+                  status: str | None = None) -> dict:
+        """Bounded tenant/unit-scoped operational queue; no decrypted task text."""
+        allowed = {"active", "completed", "blocked", "failed", "cancelled"}
+        if status is not None and status not in allowed:
+            raise CRMConflict("cadence.status_invalid")
+        with self._sessions() as db:
+            query = select(CadenceRunORM).where(
+                CadenceRunORM.tenant_id == principal.tenant_id,
+                CadenceRunORM.unit_id == principal.unit_id,
+            )
+            if status:
+                query = query.where(CadenceRunORM.status == status)
+            rows = db.scalars(query.order_by(
+                CadenceRunORM.created_at.desc(), CadenceRunORM.run_id.desc(),
+            ).limit(51)).all()
+            return {
+                "items": [self._run_view(db, run) for run in rows[:50]],
+                "has_more": len(rows) > 50,
+            }
+
     def get_run(self, principal: SessionPrincipal, *, run_id: str) -> dict:
         with self._sessions() as db:
             run = self._scoped_run(db, principal, run_id)

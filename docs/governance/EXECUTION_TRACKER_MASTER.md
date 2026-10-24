@@ -80,7 +80,7 @@
 
 ## F7 — Follow-up / Cadences / Agenda
 
-**Status:** NOT_STARTED
+**Status:** IN_PROGRESS
 
 ## F8 — Frontend Web Comercial
 
@@ -1191,3 +1191,10 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - PR #33: link conversa→contato/oportunidade por escopo e revisão CAS; score determinístico 0–100 separado de estágio; propostas cifradas com valor imutável herdado e aprovação interna sem envio/cobrança; timeline de ações cifradas e API/UI integradas.
 - Migração `20261024_0026` aditiva, teste com base descartável, testes de segurança/tenant/revisão no SHA da PR; F6 global continua IN_PROGRESS.
 - Somente merge com 5/5 CI verde no HEAD exato, revisão de diff e ausência de STOP; deploy, migração produtiva, homologação e credenciais reais permanecem diferidos.
+
+
+## 2026-10-24 — F7 cadências persistentes e operação CRM
+
+- PR #37 integrada à main em `c1ee4162e29f141e561e2089881a68cc97aa11a5`: agendamento persistente, worker idempotente, lease/fencing, retry, DLQ, cancelamento e auditoria; 5/5 workflows pós-merge verdes.
+- PR #38 acrescenta leitura limitada e isolada de execuções e UI comercial para definir cadências, agendar tarefas, acompanhar, cancelar e auditar. Testes internos e CI obrigatórios antes de merge.
+- F7 permanece `IN_PROGRESS`: slots, compromissos e lembretes operacionais ainda devem ser construídos; nenhum envio externo, deploy ou homologação real foi executado.
