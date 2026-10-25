@@ -1,0 +1,41 @@
+name: F8 Commercial Browser E2E
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+    paths:
+      - 'src/fm_assistant/commercial_*.py'
+      - 'src/fm_assistant/crm_page.py'
+      - 'src/fm_assistant/knowledge_management_page.py'
+      - 'src/fm_assistant/human_inbox_page.py'
+      - 'tests/e2e/**'
+      - '.github/workflows/f8-browser-e2e.yml'
+  pull_request:
+    paths:
+      - 'src/fm_assistant/commercial_*.py'
+      - 'src/fm_assistant/crm_page.py'
+      - 'src/fm_assistant/knowledge_management_page.py'
+      - 'src/fm_assistant/human_inbox_page.py'
+      - 'tests/e2e/**'
+      - '.github/workflows/f8-browser-e2e.yml'
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install SaaS and browser test dependencies
+        run: pip install -e '.[dev]' 'playwright>=1.55,<2'
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Static checks
+        run: ruff check tests/e2e
+      - name: Real browser journeys against isolated local app
+        run: pytest tests/e2e/test_f8_commercial_browser.py -v
