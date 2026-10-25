@@ -11,6 +11,7 @@ on:
       - 'src/fm_assistant/knowledge_management_page.py'
       - 'src/fm_assistant/human_inbox_page.py'
       - 'tests/e2e/**'
+      - 'tests/saas/test_f8_*.py'
       - '.github/workflows/f8-browser-e2e.yml'
   pull_request:
     paths:
@@ -19,6 +20,7 @@ on:
       - 'src/fm_assistant/knowledge_management_page.py'
       - 'src/fm_assistant/human_inbox_page.py'
       - 'tests/e2e/**'
+      - 'tests/saas/test_f8_*.py'
       - '.github/workflows/f8-browser-e2e.yml'
 
 jobs:
