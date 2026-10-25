@@ -113,8 +113,11 @@ def test_browser_login_crm_and_navigation(browser, site):
         sign_in(page, site)
         expect(page.get_by_role("heading", name="Bom trabalho, Operador Browser")).to_be_visible()
         expect(page.locator("#fm-overview")).to_have_attribute("aria-busy", "false")
-        expect(page.get_by_role("link", name="CRM e pipeline")).to_be_visible()
-        page.get_by_role("link", name="CRM e pipeline").click()
+        crm_link = page.get_by_role(
+            "navigation", name="Navegação principal",
+        ).get_by_role("link", name="CRM e pipeline")
+        expect(crm_link).to_be_visible()
+        crm_link.click()
         page.wait_for_url(site + "/app/crm")
         expect(page.locator("#fm-main-content")).to_be_visible()
         expect(page.locator("#crm-funnel-summary")).not_to_be_empty()
