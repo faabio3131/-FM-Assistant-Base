@@ -23,6 +23,11 @@ def test_home_has_explicit_async_states_and_scope_navigation(client):
     assert 'href="/app/login"' in page.text
     assert "innerHTML" not in page.text
 
+    crm = client.get("/app/crm")
+    assert crm.status_code == 200
+    assert ': "/v1/crm/opportunities")' in crm.text
+    assert '"stage-filter").value' in crm.text
+
 
 def test_skip_link_and_mobile_layout_are_shared_without_modifying_page_scripts(client):
     _bootstrap(client)
