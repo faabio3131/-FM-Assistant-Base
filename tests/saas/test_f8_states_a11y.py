@@ -20,7 +20,7 @@ def test_home_has_explicit_async_states_and_scope_navigation(client):
     assert 'href="#fm-main-content"' in page.text
     assert 'id="fm-main-content"' in page.text
     assert 'aria-current="page"' in page.text
-    assert 'href="/app/login"' in page.text
+    assert 'loginLink.href = "/app/login"' in page.text
     assert "innerHTML" not in page.text
 
     crm = client.get("/app/crm")
