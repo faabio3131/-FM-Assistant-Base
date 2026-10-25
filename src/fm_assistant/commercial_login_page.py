@@ -86,7 +86,7 @@ form.addEventListener("submit",async event=>{
         'button:disabled{opacity:.6}'
         '#fm-login-status{min-height:24px;margin-top:18px;color:#315a74}'
         '.note{font-size:13px;color:#67778a;margin-top:12px}'
-        '</style></head><body><main>'
+        '</style></head><body><main id="fm-main-content">'
         '<div class="brand">VendeAtendeIA</div>'
         '<h1>Acesse sua operação</h1>'
         '<p>Entre com sua organização e conta cadastrada.</p>'
