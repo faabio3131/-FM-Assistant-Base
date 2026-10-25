@@ -29,6 +29,7 @@ _NAVIGATION = (
 _NAV_STYLE = """
 <style>
 #fm-shell{box-sizing:border-box;background:#101f38;color:#eef5ff;
+ grid-column:1/-1;justify-self:stretch;
  padding:12px max(18px,calc((100vw - 1340px)/2));width:100%;
  font:500 14px/1.5 system-ui,Arial,sans-serif;
  border-bottom:1px solid #334862}
@@ -38,13 +39,18 @@ _NAV_STYLE = """
 #fm-shell .fm-brand{color:#f5fbff;text-decoration:none;font-weight:800;
  letter-spacing:.015em;font-size:16px;white-space:nowrap}
 #fm-shell .fm-links{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
-#fm-shell a.fm-tab{display:inline-flex;text-decoration:none;color:#d6e5fb;
+#fm-shell a.fm-tab{display:inline-flex;align-items:center;min-height:44px;
+ text-decoration:none;color:#d6e5fb;
  padding:8px 10px;border:1px solid transparent;border-radius:9px}
 #fm-shell a.fm-tab[aria-current="page"]{background:#25516b;
  border-color:#3b7594;color:white}
 #fm-shell a.fm-tab:hover,#fm-shell a.fm-tab:focus-visible{
  background:#2d5472;color:white}
 #fm-shell a:focus-visible{outline:3px solid #a5ebdf;outline-offset:2px}
+.fm-skip{position:absolute;left:12px;top:0;z-index:9000;
+ padding:12px 18px;background:#fff;color:#092f45;font-weight:700;
+ transform:translateY(-160%);border-radius:8px}
+.fm-skip:focus{transform:translateY(8px)}
 #fm-shell .fm-scope{color:#a8c0d6;font-size:12px;
  overflow-wrap:anywhere;max-width:290px}
 @media(max-width:760px){
@@ -54,6 +60,7 @@ _NAV_STYLE = """
  #fm-shell .fm-tab{white-space:nowrap}
  #fm-shell .fm-scope{max-width:100%}
 }
+@media(max-width:380px){#fm-shell{padding:10px 8px}}
 </style>
 """
 
@@ -70,13 +77,14 @@ def navigation_markup(principal: SessionPrincipal, current: str) -> str:
     items = []
     for label, href in allowed_navigation(principal):
         base = href.split("#", 1)[0]
-        active = current == href or (base == current and base != "/app/crm")
+        active = current == href or (base == current and "#" not in href)
         state = ' aria-current="page"' if active else ""
         items.append(
             '<a class="fm-tab" href="' + escape(href, quote=True) + '"'
             + state + ">" + escape(label) + "</a>"
         )
     return (
+        '<a class="fm-skip" href="#fm-main-content">Pular para o conteúdo</a>'
         '<nav id="fm-shell" aria-label="Navegação principal">'
         '<div class="fm-nav-inner"><a class="fm-brand" href="/app">'
         'VendeAtendeIA</a><div class="fm-links">'
@@ -90,10 +98,12 @@ def attach_navigation(html: str, principal: SessionPrincipal, current: str) -> s
     """Inject static, escaped navigation without touching page JS/CSP hashes."""
     if 'id="fm-shell"' in html:
         raise ValueError("commercial_shell_already_attached")
-    if html.count("</head>") != 1 or html.count("<body>") != 1:
+    if (html.count("</head>") != 1 or html.count("<body>") != 1
+            or html.count("<main") != 1 or 'id="fm-main-content"' in html):
         raise ValueError("commercial_shell_document_invalid")
     return (html.replace("</head>", _NAV_STYLE + "</head>", 1)
-            .replace("<body>", "<body>" + navigation_markup(principal, current), 1))
+            .replace("<body>", "<body>" + navigation_markup(principal, current), 1)
+            .replace("<main", '<main id="fm-main-content"', 1))
 
 
 def render_home(principal: SessionPrincipal) -> tuple[str, str]:
@@ -150,53 +160,82 @@ async function load() {
   if (loading) return;
   loading = true;
   refresh.disabled = true;
+  root.setAttribute("aria-busy", "true");
   root.replaceChildren();
+  root.append(dom("p", "Carregando indicadores da unidade...", "fm-loading"));
   globalStatus.textContent = "Consultando as informações da unidade...";
   const now = new Date();
   const start = now.toISOString();
   const end = new Date(now.getTime() + 30 * 86400000).toISOString();
-  const results = await Promise.all(specs.map(async spec => {
-    const url = spec.key === "agenda" ?
-      spec.url + "?start_at=" + encodeURIComponent(start) +
-      "&end_at=" + encodeURIComponent(end) : spec.url;
-    try {
-      const response = await fetch(url, {credentials:"same-origin",
-        cache:"no-store", headers:{"Accept":"application/json"}});
-      if (!response.ok) return {spec, error: statusLabel(response.status)};
-      const json = await response.json();
-      const value = json[spec.field];
-      if (spec.field === "items" && Array.isArray(value)) {
-        const more = json.has_more === true || json.next_page !== null &&
-          json.next_page !== undefined;
-        return {spec, value: String(value.length) + (more ? "+" : "")};
+  try {
+    const results = await Promise.all(specs.map(async spec => {
+      const url = spec.key === "agenda" ?
+        spec.url + "?start_at=" + encodeURIComponent(start) +
+        "&end_at=" + encodeURIComponent(end) : spec.url;
+      try {
+        const response = await fetch(url, {credentials:"same-origin",
+          cache:"no-store", headers:{"Accept":"application/json"}});
+        if (!response.ok) {
+          return {spec, kind: response.status === 401 ? "unauthorized" :
+            response.status === 403 ? "forbidden" : "unavailable",
+            label: statusLabel(response.status)};
+        }
+        const json = await response.json();
+        const value = json[spec.field];
+        if (spec.field === "items" && Array.isArray(value)) {
+          const more = json.has_more === true ||
+            (json.next_page !== null && json.next_page !== undefined);
+          return {spec, kind: value.length === 0 && !more ? "empty" :
+            more ? "partial" : "success",
+            label: value.length === 0 && !more ? "Sem registros" :
+              String(value.length) + (more ? "+" : "")};
+        }
+        if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+          return {spec, kind: value === 0 ? "empty" : "success",
+            label: String(value)};
+        }
+        return {spec, kind:"unavailable", label:"Dados não verificados."};
+      } catch {
+        return {spec, kind:"unavailable", label:"Serviço não disponível."};
       }
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return {spec, value: String(value)};
+    }));
+    root.replaceChildren();
+    let failures = 0;
+    let unauthorized = 0;
+    for (const result of results) {
+      const card = dom("article", undefined, "fm-tile");
+      card.dataset.state = result.kind;
+      const heading = dom("h2", result.spec.label);
+      const value = dom("p", result.label,
+        result.kind === "unavailable" || result.kind === "forbidden" ||
+        result.kind === "unauthorized" ? "fm-unavailable" : "fm-value");
+      if (["unavailable", "forbidden", "unauthorized"].includes(result.kind)) failures++;
+      if (result.kind === "unauthorized") unauthorized++;
+      const link = dom("a", "Abrir módulo");
+      link.href = result.spec.href;
+      card.append(heading, value, link);
+      if (result.kind === "partial") {
+        card.append(dom("small", "Lista parcial; existem outros registros.",
+          "fm-note"));
       }
-      return {spec, error: "Dados não verificados."};
-    } catch {
-      return {spec, error: "Serviço não disponível."};
+      if (result.kind === "unauthorized") {
+        const loginLink = dom("a", "Entrar novamente");
+        loginLink.href = "/app/login";
+        card.append(loginLink);
+      }
+      root.append(card);
     }
-  }));
-  let failed = 0;
-  for (const result of results) {
-    const card = dom("article", undefined, "fm-tile");
-    const heading = dom("h2", result.spec.label);
-    const value = dom("p", result.error || result.value,
-      result.error ? "fm-unavailable" : "fm-value");
-    if (result.error) failed++;
-    const link = dom("a", "Abrir módulo");
-    link.href = result.spec.href;
-    card.append(heading, value, link);
-    root.append(card);
+    globalStatus.textContent = results.length === 0 ?
+      "Nenhum indicador disponível para este perfil." :
+      unauthorized > 0 ? "Sessão expirada. Entre novamente." :
+      failures === 0 ? "Indicadores consultados nesta unidade." :
+      failures === results.length ? "Os indicadores estão indisponíveis." :
+      "Consulta parcial. Alguns módulos estão indisponíveis.";
+  } finally {
+    root.setAttribute("aria-busy", "false");
+    refresh.disabled = false;
+    loading = false;
   }
-  globalStatus.textContent = results.length === 0 ?
-    "Nenhum indicador disponível para este perfil." :
-    failed === 0 ? "Indicadores consultados nesta unidade." :
-    failed === results.length ? "Os indicadores estão indisponíveis." :
-    "Consulta parcial. Alguns módulos estão indisponíveis.";
-  refresh.disabled = false;
-  loading = false;
 }
 refresh.addEventListener("click", load);
 logout.addEventListener("click", async () => {
@@ -248,6 +287,8 @@ load();
         'box-shadow:0 8px 24px #1429420a}'
         '.fm-value{font-size:32px;font-weight:800;margin:15px 0}'
         '.fm-unavailable{font-size:14px;color:#805233;min-height:40px}'
+        '.fm-note{display:block;color:#576679;margin-bottom:9px}'
+        '.fm-loading{grid-column:1/-1;color:#4a6277}'
         '.fm-action{display:inline-block;padding:12px 15px;'
         'background:#fff;border-radius:9px;border:1px solid #bacada;'
         'margin:6px;text-decoration:none;color:#184b65;font-weight:600}'

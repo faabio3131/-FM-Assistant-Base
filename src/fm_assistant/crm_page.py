@@ -156,7 +156,9 @@ function renderOpportunities() {
 async function refresh() {
   const results = await Promise.all([
     api("/v1/crm/contacts"),
-    api("/v1/crm/opportunities?stage="+encodeURIComponent($("stage-filter").value)),
+    api($("stage-filter").value
+      ? "/v1/crm/opportunities?stage="+encodeURIComponent($("stage-filter").value)
+      : "/v1/crm/opportunities"),
     api("/v1/crm/analytics")
   ]);
   contacts=results[0].items;
