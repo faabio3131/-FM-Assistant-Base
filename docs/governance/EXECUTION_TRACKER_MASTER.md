@@ -1224,3 +1224,10 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Tela pública `/app/login` com organização, e-mail, senha e unidade opcional, usando a sessão assinada `/v1/auth/login` já existente e cookie HttpOnly; sem backend paralelo e sem browser storage.
 - Saída em `/app` via `/v1/auth/logout`, com limpeza de sessão pelo serviço existente. JS protegido por CSP hash e sem injeção de HTML.
 - Smoke HTTP e regressão de cookie/401. Sem deploy, homologação externa ou alteração FM Command. F8 ainda IN_PROGRESS para jornadas E2E/UX/estados finais.
+
+## 2026-10-24 — F8/WP4 estados, acessibilidade e E2E Chromium (candidato)
+
+- Melhorias incrementais no `/app`: loading com aria-busy, empty, sucesso, lista parcial paginada, 401/403/503/dependência indisponível, aviso e ação de reautenticação; sem fabricar métricas.
+- Shell comercial compartilhado: skip link, landmark main, aria-current correto no CRM, alvos clicáveis móveis e foco visível; configurações adaptadas a viewport estreita.
+- Browser gate Playwright/Chromium rodando FastAPI+SQLite descartáveis, sem providers externos ou credenciais reais: login/logout, CRM (contato→oportunidade), módulos, erros parciais, RBAC, teclado, viewport 320/375/768/1280. Mais regressões HTTP dos contratos de navegação. Não substituir resultados do navegador por testes estáticos.
+- Gate desta entrega: 5 workflows históricos + F8 Commercial Browser E2E todos verdes no HEAD exato da PR; CI pós-merge. F8 global permanece IN_PROGRESS até levantamento completo de UX/jornadas e aprovação final; deploy/homologação externa continuam adiados. Nenhuma alteração no Command.
