@@ -305,7 +305,7 @@ loadUnits();
         'main{max-width:1100px;margin:24px auto;padding:0 20px 40px}'
         'h1{font-size:28px;margin:0 0 8px}h2{font-size:18px}'
         '.muted,p[role=status]{color:#5b6c7c}'
-        '.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}'
+        '.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:18px}'
         'section{background:white;border:1px solid #d5e0ed;'
         'border-radius:14px;padding:22px;min-width:0}'
         'label{display:block;font-size:14px;font-weight:600;margin:13px 0 5px}'
