@@ -143,7 +143,7 @@ def test_shell_escapes_user_content_and_rejects_double_attachment():
     assert "<svg" not in home
     assert "&lt;svg" in home
     assert "onload" in home  # inert escaped text, never a rendered element
-    document = '<!doctype html><html><head></head><body>Olá</body></html>'
+    document = '<!doctype html><html><head></head><body><main>Olá</main></body></html>'
     attached = attach_navigation(document, principal, "/app")
     assert 'id="fm-shell"' in attached
     assert '<svg onload=' not in attached
