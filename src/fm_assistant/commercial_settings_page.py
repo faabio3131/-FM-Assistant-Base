@@ -198,6 +198,8 @@ async function loadUnits(){
     info($("unit-status"),"A troca de unidade atualizará a sessão ativa.");
   }catch(err){info($("unit-status"),"Indisponível: "+err.message);}
 }
+if($("unit-reload"))$("unit-reload").addEventListener("click",
+  ()=>guarded(loadUnits,$("unit-status")));
 if($("unit-form"))$("unit-form").addEventListener("submit",event=>{
   event.preventDefault();
   guarded(async()=>{
@@ -240,6 +242,7 @@ loadUnits();
             '<form id="unit-form"><label for="unit-choice">Selecionar unidade</label>'
             '<select id="unit-choice" required></select>'
             '<button type="submit">Trocar de unidade</button></form>'
+            '<button id="unit-reload" type="button">Atualizar unidades</button>'
             '<p id="unit-status" role="status" aria-live="polite"></p></section>'
         )
     if persona:
