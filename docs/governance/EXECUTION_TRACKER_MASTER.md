@@ -1231,3 +1231,9 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Shell comercial compartilhado: skip link, landmark main, aria-current correto no CRM, alvos clicáveis móveis e foco visível; configurações adaptadas a viewport estreita.
 - Browser gate Playwright/Chromium rodando FastAPI+SQLite descartáveis, sem providers externos ou credenciais reais: login/logout, CRM (contato→oportunidade), módulos, erros parciais, RBAC, teclado, viewport 320/375/768/1280. Mais regressões HTTP dos contratos de navegação. Não substituir resultados do navegador por testes estáticos.
 - Gate desta entrega: 5 workflows históricos + F8 Commercial Browser E2E todos verdes no HEAD exato da PR; CI pós-merge. F8 global permanece IN_PROGRESS até levantamento completo de UX/jornadas e aprovação final; deploy/homologação externa continuam adiados. Nenhuma alteração no Command.
+
+## 2026-10-28 — F8/WP5 jornada comercial integral + resiliência (em certificação)
+
+- Implementação: CRM mantém funil/contatos e acesso a operações mesmo com agenda ou cadências indisponíveis, com avisos isolados e possibilidade de repetir consulta; sem omitir erros do pipeline. Configurações restauram o estado inicial de botões e apagam campos secretos inclusive em erro de integração.
+- Gate E2E Chromium ampliado no mesmo ambiente efêmero existente: persona, convites, troca de unidade sem vazamento, segredos em POST negado, fonte de conhecimento local, preview, inbox vazio, contato→oportunidade→cadência→agenda e indisponibilidade de dependências F7. Nenhuma credencial real, envio externo ou alteração no FM Command.
+- Exigir 6 workflows da PR no HEAD de revisão e 6/6 na main pós-merge. F8 global permanece IN_PROGRESS até revisão de requisitos residuais, sem antecipar homologação ou deploy.
