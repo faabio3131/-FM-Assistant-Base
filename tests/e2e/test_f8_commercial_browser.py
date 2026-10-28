@@ -31,7 +31,9 @@ def browser():
 
 
 @pytest.fixture
-def site(tmp_path):
+def site(tmp_path, monkeypatch):
+    # Explicit opt-in in disposable E2E only; production remains default-deny.
+    monkeypatch.setenv("FM_ASSISTANT_KNOWLEDGE_SOURCES_ENABLED", "true")
     settings = Settings(
         environment=Environment.TEST,
         database_url=f"sqlite:///{tmp_path / 'f8-browser.db'}",
@@ -274,6 +276,7 @@ def test_browser_persona_invitation_and_unit_isolation(browser, site):
             "unit_id": "unit-f8-second", "display_name": "Segunda Unidade",
         })
         assert created.status == 200, created.text()
+        page.locator("#unit-reload").click()
         expect(page.locator("#unit-choice")).to_contain_text("Segunda Unidade")
         page.locator("#unit-choice").select_option("unit-f8-second")
         page.locator("#unit-form button[type=submit]").click()
@@ -388,6 +391,10 @@ def test_browser_crm_cadence_and_agenda(browser, site):
         expect(page.locator("#cadence-definitions")).to_contain_text(
             "Cadência Interna E2E",
         )
+        # Cadence scheduling requires explicit, scoped contact preferences.
+        page.locator("#followup-contact").select_option(label="Contato Agenda E2E")
+        page.locator("#followup-form button[type=submit]").click()
+        expect(page.locator("#followup-status")).to_contain_text("Política salva")
         page.locator("#cadence-contact").select_option(label="Contato Agenda E2E")
         page.locator("#cadence-opportunity").select_option(
             label="Oportunidade Agenda E2E",
@@ -412,7 +419,7 @@ def test_browser_crm_cadence_and_agenda(browser, site):
         page.locator("#agenda-results").get_by_role(
             "button", name="Histórico",
         ).click()
-        expect(page.locator("#agenda-results")).to_contain_text("create")
+        expect(page.locator("#agenda-results")).to_contain_text("scheduled")
     finally:
         context.close()
 
