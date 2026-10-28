@@ -6,9 +6,9 @@ keyboard navigation and responsive layouts in a real browser.
 from __future__ import annotations
 
 import socket
-from datetime import datetime, timedelta
 import threading
 import time
+from datetime import datetime, timedelta
 
 import httpx
 import pytest
