@@ -166,8 +166,13 @@ async function refresh() {
   renderContacts();
   renderOpportunities();
   renderFunnel(results[2]);
-  await loadF7();
-  await loadAgenda();
+  const extras = await Promise.allSettled([loadF7(), loadAgenda()]);
+  if (extras[0].status === "rejected") {
+    $("cadence-more").textContent = "Cadências indisponíveis. Atualize este módulo para tentar novamente.";
+  }
+  if (extras[1].status === "rejected") {
+    $("agenda-more").textContent = "Agenda indisponível. Atualize este módulo para tentar novamente.";
+  }
   $("contact-more").textContent = results[0].next_page !== null ?
     "Mostrando 50 contatos; consulte as próximas páginas pela API." : "";
   $("opportunity-more").textContent = results[1].next_page !== null ?
