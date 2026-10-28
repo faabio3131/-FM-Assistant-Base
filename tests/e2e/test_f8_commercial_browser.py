@@ -34,6 +34,7 @@ def browser():
 def site(tmp_path, monkeypatch):
     # Explicit opt-in in disposable E2E only; production remains default-deny.
     monkeypatch.setenv("FM_ASSISTANT_KNOWLEDGE_SOURCES_ENABLED", "true")
+    monkeypatch.setenv("FM_ASSISTANT_KNOWLEDGE_CONTEXT_PACK_ENABLED", "true")
     settings = Settings(
         environment=Environment.TEST,
         database_url=f"sqlite:///{tmp_path / 'f8-browser.db'}",
