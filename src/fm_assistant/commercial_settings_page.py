@@ -54,12 +54,14 @@ let inFlight=false;
 async function guarded(fn, feedback) {
   if(inFlight) return;
   inFlight=true;
-  for(const button of document.querySelectorAll("button")) button.disabled=true;
+  const previous=new Map([...document.querySelectorAll("button")].map(
+    button=>[button,button.disabled]));
+  for(const button of previous.keys()) button.disabled=true;
   try {await fn();}
   catch(err) {info(feedback, "Não concluído: "+err.message);}
   finally {
     inFlight=false;
-    for(const button of document.querySelectorAll("button")) button.disabled=false;
+    for(const [button,disabled] of previous) button.disabled=disabled;
   }
 }
 async function loadPersona() {
@@ -162,11 +164,20 @@ if($("integration-form"))$("integration-form").addEventListener("submit",event=>
       if(field.dataset.secret && field.value)
         secrets[field.dataset.secret]=field.value;
     }
-    const result=await api("/v1/integrations","POST",{
-      provider_key:$("provider-key").value,config,secrets,source:"tenant_managed"
-    });
-    // Sensitive inputs are destroyed before any subsequent refresh.
-    for(const field of $("provider-fields").querySelectorAll("input"))field.value="";
+    let result;
+    try {
+      result=await api("/v1/integrations","POST",{
+        provider_key:$("provider-key").value,config,secrets,source:"tenant_managed"
+      });
+    } finally {
+      // Clear secrets even on 403, validation errors or failed connections.
+      for(const field of $("provider-fields").querySelectorAll("input")){
+        if(field.dataset.secret)field.value="";
+      }
+    }
+    for(const field of $("provider-fields").querySelectorAll("input")){
+      if(field.dataset.field)field.value="";
+    }
     info($("integration-status"),"Conexão "+result.status+
       ". Nenhuma credencial armazenada no navegador.");
     await loadIntegrations();
