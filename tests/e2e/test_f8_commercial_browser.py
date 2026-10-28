@@ -6,6 +6,7 @@ keyboard navigation and responsive layouts in a real browser.
 from __future__ import annotations
 
 import socket
+from datetime import datetime, timedelta
 import threading
 import time
 
@@ -242,5 +243,197 @@ def test_browser_viewer_has_no_integration_management(browser, site):
         expect(page.locator("#integration-form")).to_have_count(0)
         response = page.goto(site + "/v1/channels/whatsapp/qr/panel")
         assert response is not None and response.status == 403
+    finally:
+        context.close()
+
+
+
+def test_browser_persona_invitation_and_unit_isolation(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        sign_in(page, site)
+        page.goto(site + "/app/settings")
+        expect(page.locator("#persona-form")).to_be_visible()
+        page.locator("#persona-name").fill("Assistente Unidade Um")
+        page.locator("#persona-language").fill("pt-BR")
+        page.locator("#persona-tone").fill("acolhedor")
+        page.locator("#persona-instructions").fill("Atendimento de demonstração interna.")
+        page.locator("#persona-form button[type=submit]").click()
+        expect(page.locator("#persona-status")).to_contain_text("Persona salva")
+        page.locator("#persona-load").click()
+        expect(page.locator("#persona-name")).to_have_value("Assistente Unidade Um")
+
+        page.locator("#invite-email").fill("colaborador@browser.example")
+        page.locator("#invite-role").select_option("viewer")
+        page.locator("#team-form button[type=submit]").click()
+        expect(page.locator("#team-status")).to_contain_text("Convite criado")
+        expect(page.locator("#invite-token")).not_to_be_empty()
+
+        created = context.request.post(site + "/v1/units", data={
+            "unit_id": "unit-f8-second", "display_name": "Segunda Unidade",
+        })
+        assert created.status == 200, created.text()
+        expect(page.locator("#unit-choice")).to_contain_text("Segunda Unidade")
+        page.locator("#unit-choice").select_option("unit-f8-second")
+        page.locator("#unit-form button[type=submit]").click()
+        expect(page.locator("#unit-current")).to_have_attribute(
+            "data-unit", "unit-f8-second",
+        )
+        expect(page.locator("#persona-status")).to_contain_text(
+            "Sem configuração acessível",
+        )
+        expect(page.locator("#invite-token")).to_be_empty()
+        page.goto(site + "/app")
+        expect(page.locator("#fm-shell")).to_contain_text("unit-f8-second")
+    finally:
+        context.close()
+
+
+def test_browser_provider_secrets_cleared_even_on_rejection(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    submitted = []
+    def capture(route):
+        submitted.append(route.request.post_data_json)
+        route.fulfill(
+            status=403, content_type="application/json",
+            body='{"detail":"permission_required"}',
+        )
+    try:
+        sign_in(page, site)
+        page.route("**/v1/integrations/catalog", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=(
+                '[{"provider_key":"demo_stub","display_name":"Provedor simulado",'
+                '"config_fields":["endpoint"],"required_config_fields":["endpoint"],'
+                '"secret_fields":["api_key"]}]'
+            ),
+        ))
+        page.route("**/v1/integrations", lambda route: (
+            capture(route) if route.request.method == "POST" else route.fulfill(
+                status=200, content_type="application/json", body="[]",
+            )
+        ))
+        page.goto(site + "/app/settings")
+        expect(page.locator('#provider-fields input[data-secret="api_key"]')).to_be_visible()
+        page.locator('#provider-fields input[data-field="endpoint"]').fill(
+            "https://example.invalid",
+        )
+        page.locator('#provider-fields input[data-secret="api_key"]').fill(
+            "secret-browser-only",
+        )
+        page.locator("#integration-form button[type=submit]").click()
+        expect(page.locator("#integration-status")).to_contain_text("Permissão insuficiente")
+        assert submitted and submitted[0]["secrets"]["api_key"] == "secret-browser-only"
+        expect(page.locator('#provider-fields input[data-secret="api_key"]')).to_be_empty()
+        assert "secret-browser-only" not in page.content()
+    finally:
+        context.close()
+
+
+def test_browser_knowledge_file_and_empty_inbox(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        sign_in(page, site)
+        page.goto(site + "/app/knowledge")
+        expect(page.locator("#sources")).to_contain_text("Nenhuma fonte")
+        page.locator("#file-title").fill("Manual E2E Comercial")
+        page.locator("#file").set_input_files({
+            "name": "manual-comercial.txt",
+            "mimeType": "text/plain",
+            "buffer": "Atendimento em horário comercial e suporte remoto.".encode(),
+        })
+        page.locator("#file-form button[type=submit]").click()
+        expect(page.locator("#notice")).to_contain_text("Arquivo indexado")
+        expect(page.locator("#sources")).to_contain_text("Manual E2E Comercial")
+        page.locator("#question").fill("Qual é o horário do atendimento?")
+        page.locator("#preview-form button[type=submit]").click()
+        expect(page.locator("#evidence")).not_to_be_empty()
+
+        page.goto(site + "/app/inbox")
+        expect(page.locator("#queue")).to_contain_text("Nenhuma conversa aguardando")
+        expect(page.locator("#fm-main-content")).to_be_visible()
+        page.locator("#refresh").click()
+        expect(page.locator("#notice")).to_contain_text("0 conversa")
+        assert errors == [], errors
+    finally:
+        context.close()
+
+
+def test_browser_crm_cadence_and_agenda(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        sign_in(page, site)
+        page.goto(site + "/app/crm")
+        expect(page.locator("#crm-funnel-summary")).not_to_be_empty()
+        page.locator("#contact-name").fill("Contato Agenda E2E")
+        page.locator("#contact-form button[type=submit]").click()
+        expect(page.locator("#contacts")).to_contain_text("Contato Agenda E2E")
+        page.locator("#opportunity-contact").select_option(
+            label="Contato Agenda E2E",
+        )
+        page.locator("#opportunity-title").fill("Oportunidade Agenda E2E")
+        page.locator("#amount-cents").fill("12500")
+        page.locator("#opportunity-form button[type=submit]").click()
+        expect(page.locator("#opportunities")).to_contain_text("Oportunidade Agenda E2E")
+
+        page.locator("#cadence-name").fill("Cadência Interna E2E")
+        page.locator("#cadence-task1").fill("Registrar contato manual")
+        page.locator("#cadence-definition-form button[type=submit]").click()
+        expect(page.locator("#cadence-definitions")).to_contain_text(
+            "Cadência Interna E2E",
+        )
+        page.locator("#cadence-contact").select_option(label="Contato Agenda E2E")
+        page.locator("#cadence-opportunity").select_option(
+            label="Oportunidade Agenda E2E",
+        )
+        when = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+        page.locator("#cadence-start").fill(when)
+        page.locator("#cadence-run-form button[type=submit]").click()
+        expect(page.locator("#cadence-runs")).not_to_contain_text(
+            "Nenhuma execução encontrada",
+        )
+
+        page.locator("#agenda-contact").select_option(label="Contato Agenda E2E")
+        page.locator("#agenda-opportunity").select_option(
+            label="Oportunidade Agenda E2E",
+        )
+        page.locator("#agenda-title").fill("Reunião Interna E2E")
+        page.locator("#agenda-start").fill(when)
+        page.locator("#agenda-form button[type=submit]").click()
+        expect(page.locator("#agenda-results")).to_contain_text(
+            "Reunião Interna E2E",
+        )
+        page.locator("#agenda-results").get_by_role(
+            "button", name="Histórico",
+        ).click()
+        expect(page.locator("#agenda-results")).to_contain_text("create")
+    finally:
+        context.close()
+
+
+def test_browser_crm_survives_independent_agenda_and_cadence_outage(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        sign_in(page, site)
+        page.route("**/v1/followups/cadences*", lambda route: route.fulfill(
+            status=503, content_type="application/json", body='{"detail":"offline"}',
+        ))
+        page.route("**/v1/followups/agenda?*", lambda route: route.fulfill(
+            status=503, content_type="application/json", body='{"detail":"offline"}',
+        ))
+        page.goto(site + "/app/crm")
+        expect(page.locator("#crm-funnel-summary")).not_to_be_empty()
+        expect(page.locator("#cadence-more")).to_contain_text("Cadências indisponíveis")
+        expect(page.locator("#agenda-more")).to_contain_text("Agenda indisponível")
+        page.locator("#contact-name").fill("Contato Durante Falha E2E")
+        page.locator("#contact-form button[type=submit]").click()
+        expect(page.locator("#contacts")).to_contain_text("Contato Durante Falha E2E")
     finally:
         context.close()
