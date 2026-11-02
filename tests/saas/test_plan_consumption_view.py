@@ -285,3 +285,31 @@ def test_f9_customer_receives_all_quota_classes_without_private_costs(client):
     assert readings["integrations.active"]["scope"] == "unit"
     assert "cost_usd_microunits" not in response.text
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_f9_plan_customer_status_follows_live_trial_paid_and_expiry(client):
+    """The customer sees canonical subscription status, never a guessed renewal."""
+    _bootstrap(client)
+    _plan(client, "tenant-a", revision=1, cap=9000)
+    _login(client)
+    trial = client.get("/v1/plan/consumption")
+    assert trial.status_code == 200
+    assert trial.json()["license_status"] == "trial"
+    plan_html = client.get("/app/plan")
+    assert "Teste grátis ativo" in plan_html.text
+    assert "Assinatura ativa" in plan_html.text
+    engine = create_engine(client.app.state.settings.database_url)
+    with Session(engine) as db, db.begin():
+        license_row = db.get(TenantLicenseORM, "tenant-a")
+        license_row.status = "active"
+        license_row.period_started_at = NOW - timedelta(minutes=5)
+        license_row.period_ends_at = NOW + timedelta(days=20)
+    paid = client.get("/v1/plan/consumption")
+    assert paid.status_code == 200
+    assert paid.json()["license_status"] == "active"
+    with Session(engine) as db, db.begin():
+        db.get(TenantLicenseORM, "tenant-a").period_ends_at = NOW - timedelta(days=1)
+    expired = client.get("/v1/plan/consumption")
+    assert expired.status_code == 403
+    assert expired.json()["detail"] == "plan_unavailable"
+    engine.dispose()
