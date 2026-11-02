@@ -445,3 +445,84 @@ def test_browser_crm_survives_independent_agenda_and_cadence_outage(browser, sit
         expect(page.locator("#contacts")).to_contain_text("Contato Durante Falha E2E")
     finally:
         context.close()
+
+
+
+def test_browser_plan_hub_unknown_projection_and_verified_usage(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        sign_in(page, site)
+        response = page.goto(site + "/app/plan")
+        assert response is not None and response.status == 200
+        expect(page.locator("#fm-plan-status")).to_contain_text(
+            "Plano ou licença ainda não disponível",
+        )
+        expect(page.locator("#fm-plan-detail")).to_be_hidden()
+        expect(page.locator("#fm-plan-rows article")).to_have_count(0)
+
+        def plan_response(route):
+            route.fulfill(status=200, content_type="application/json", body=(
+                '{"plan_name":"Plano E2E","licensed_until":"2026-12-20",'
+                '"revision":2,"usage_verified":false,"consumption":['
+                '{"resource":"ai.requests","status":"observed",'
+                '"limit_units":100,"consumed_units":12,"reserved_units":8,'
+                '"remaining_units":80,"utilization_percent":20},'
+                '{"resource":"ai.total_tokens","status":"metering_unavailable",'
+                '"limit_units":500,"consumed_units":null,"reserved_units":null,'
+                '"remaining_units":null,"utilization_percent":null},'
+                '{"resource":"ai.cost_usd_microunits","status":"observed",'
+                '"limit_units":900,"consumed_units":200,"reserved_units":0,'
+                '"remaining_units":700,"utilization_percent":22}]}'
+            ))
+        page.route("**/v1/plan/consumption", plan_response)
+        page.route("**/v1/entitlements", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='[{"capability":"conversation.read","enabled":true,"limit_value":null}]',
+        ))
+        page.locator("#fm-plan-reload").click()
+        expect(page.locator("#fm-plan-summary")).to_contain_text("Plano E2E")
+        expect(page.locator("#fm-plan-rows article")).to_have_count(2)
+        expect(page.locator("#fm-plan-rows progress")).to_have_count(1)
+        expect(page.locator("#fm-plan-rows")).to_contain_text(
+            "Saldo não verificado",
+        )
+        expect(page.locator("#fm-plan-rows")).not_to_contain_text(
+            "ai.cost_usd_microunits",
+        )
+        expect(page.locator("#fm-plan-capabilities")).to_contain_text(
+            "conversation.read",
+        )
+        expect(page.locator("#fm-plan-detail")).to_be_visible()
+        expect(page.locator("#fm-plan-status")).to_contain_text(
+            "medições de consumo não estão verificadas",
+        )
+        assert errors == [], errors
+    finally:
+        context.close()
+
+
+def test_browser_inbox_csp_executes_only_hashed_controller(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        sign_in(page, site)
+        response = page.goto(site + "/app/inbox")
+        assert response is not None and response.status == 200
+        csp = response.headers["content-security-policy"]
+        assert "default-src 'none'" in csp
+        assert "script-src 'sha256-" in csp
+        assert "connect-src 'self'" in csp
+        assert "'unsafe-inline'" not in csp.split("script-src ")[1].split(";")[0]
+        expect(page.locator("#queue")).to_contain_text(
+            "Nenhuma conversa aguardando",
+        )
+        page.locator("#refresh").click()
+        expect(page.locator("#notice")).to_contain_text("0 conversa")
+        assert errors == [], errors
+    finally:
+        context.close()
