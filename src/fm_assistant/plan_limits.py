@@ -36,9 +36,10 @@ class ResolvedPlanLimit:
     limit_units: int
     window_seconds: int
     licensed_until: datetime
+    license_status: str
 
     def __post_init__(self) -> None:
-        if self.scope not in {"unit", "tenant"}:
+        if self.scope not in {"unit", "tenant"} or self.license_status not in {"trial", "active"}:
             raise ValueError("plan.limit_scope_invalid")
         if self.revision <= 0 or self.limit_units <= 0 or self.window_seconds <= 0:
             raise ValueError("plan.limit_invalid")
@@ -102,5 +103,5 @@ class PlanLimitResolver:
                 resource=resource, scope=item.scope,
                 limit_units=item.limit_units,
                 window_seconds=item.window_seconds,
-                licensed_until=cutoff,
+                licensed_until=cutoff, license_status=license_row.status,
             )
