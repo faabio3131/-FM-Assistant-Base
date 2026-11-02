@@ -10,7 +10,7 @@ PAGE = """<!doctype html>
 <title>Conectar WhatsApp | VendeAtendeIA</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#0b1120;color:#eff6ff}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:28px}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;padding:28px}
 main{width:min(100%,590px);background:#111c30;border:1px solid #30415a;border-radius:20px;padding:36px;box-shadow:0 16px 60px #0005}
 header{display:flex;align-items:center;gap:12px} .logo{background:#1d5365;border-radius:12px;padding:12px;font-size:24px}
 h1{font-size:24px;margin:26px 0 10px}p{line-height:1.6;color:#bbcde2}
