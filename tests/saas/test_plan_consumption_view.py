@@ -295,6 +295,7 @@ def test_f9_plan_customer_status_follows_live_trial_paid_and_expiry(client):
     trial = client.get("/v1/plan/consumption")
     assert trial.status_code == 200
     assert trial.json()["license_status"] == "trial"
+    assert "Teste grátis ativo" in client.get("/v1/plan/consumption/dashboard").text
     plan_html = client.get("/app/plan")
     assert "Teste grátis ativo" in plan_html.text
     assert "Assinatura ativa" in plan_html.text
@@ -307,6 +308,7 @@ def test_f9_plan_customer_status_follows_live_trial_paid_and_expiry(client):
     paid = client.get("/v1/plan/consumption")
     assert paid.status_code == 200
     assert paid.json()["license_status"] == "active"
+    assert "Assinatura ativa" in client.get("/v1/plan/consumption/dashboard").text
     with Session(engine) as db, db.begin():
         db.get(TenantLicenseORM, "tenant-a").period_ends_at = NOW - timedelta(days=1)
     expired = client.get("/v1/plan/consumption")
