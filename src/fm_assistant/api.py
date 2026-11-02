@@ -35,6 +35,7 @@ from .commercial_license_transition import (
     SignedCommercialLicenseTransition,
 )
 from .commercial_login_page import render_login
+from .commercial_plan_page import render_plan_page
 from .commercial_settings_page import render_settings
 from .commercial_shell import attach_navigation, render_home
 from .core_bridge_models import CoreBridgeAccessORM  # noqa: F401 - ORM registration
@@ -1904,6 +1905,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
         })
 
+    @app.get("/app/plan", response_class=HTMLResponse)
+    def commercial_plan(
+        principal: SessionPrincipal = Depends(human_permission(Permission.BILLING_READ)),
+    ) -> HTMLResponse:
+        markup, csp = render_plan_page(principal)
+        return HTMLResponse(markup, headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+        })
+
     @app.get("/app/crm", response_class=HTMLResponse)
     def crm_workspace(
         _principal: SessionPrincipal = Depends(human_permission(Permission.CRM_READ)),
@@ -2233,10 +2244,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def human_inbox_page(
         _principal: SessionPrincipal = Depends(human_permission(Permission.CONVERSATION_READ)),
     ) -> HTMLResponse:
+        markup, csp = render_human_inbox_page()
         return HTMLResponse(
-            attach_navigation(render_human_inbox_page(), _principal, "/app/inbox"),
-            headers={"Cache-Control": "no-store",
-                                                "X-Content-Type-Options": "nosniff"},
+            attach_navigation(markup, _principal, "/app/inbox"),
+            headers={
+                "Cache-Control": "no-store", "Content-Security-Policy": csp,
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+            },
         )
 
     @app.get("/v1/inbox/policy")

@@ -5,9 +5,12 @@ No tenant IDs in URLs, no HTML injection from conversation content.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 
-def render_human_inbox_page() -> str:
-    return """<!doctype html>
+
+def render_human_inbox_page() -> tuple[str, str]:
+    markup = """<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
@@ -337,3 +340,13 @@ setInterval(()=>api("/v1/inbox/presence","POST").catch(()=>{}),60000);
 })();
 </script>
 </body></html>"""
+    # Bind exactly this inline controller to a restrictive CSP. Shared
+    # navigation adds no script and therefore cannot invalidate this digest.
+    script = markup.split("<script>", 1)[1].split("</script>", 1)[0]
+    signature = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    csp = (
+        "default-src 'none'; script-src 'sha256-" + signature + "'; "
+        "style-src 'unsafe-inline'; connect-src 'self'; "
+        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    )
+    return markup, csp

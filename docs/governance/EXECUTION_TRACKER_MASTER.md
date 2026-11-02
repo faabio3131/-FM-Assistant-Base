@@ -1237,3 +1237,10 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Implementação: CRM mantém funil/contatos e acesso a operações mesmo com agenda ou cadências indisponíveis, com avisos isolados e possibilidade de repetir consulta; sem omitir erros do pipeline. Configurações restauram o estado inicial de botões e apagam campos secretos inclusive em erro de integração.
 - Gate E2E Chromium ampliado no mesmo ambiente efêmero existente: persona, convites, troca de unidade sem vazamento, segredos em POST negado, fonte de conhecimento local, preview, inbox vazio, contato→oportunidade→cadência→agenda e indisponibilidade de dependências F7. Nenhuma credencial real, envio externo ou alteração no FM Command.
 - Exigir 6 workflows da PR no HEAD de revisão e 6/6 na main pós-merge. F8 global permanece IN_PROGRESS até revisão de requisitos residuais, sem antecipar homologação ou deploy.
+
+## 2026-11-01 — F8/WP6 customer plan hub + Inbox CSP (CI candidate)
+
+- UI comercial `/app/plan` sob BILLING_READ: consulta exclusivamente APIs same-origin escopadas pela sessão, sem aceitar tenant/unidade da URL, distinguindo plano indisponível (403), sessão expirada, dependência indisponível, medição verificada e saldo desconhecido. Capabilities lidas sem mutações. Não expor custos internos da FM; nenhuma telemetria ausente é convertida em zero.
+- Navegação comercial passa pelo hub, mantendo dashboard de franquias existente acessível quando a projeção válida está disponível.
+- Inbox HTTP adota CSP SHA-256 do controlador inline, connect-src restrito à origem, no-store, nosniff e no-referrer, preservando scripts existentes sem `unsafe-inline` para JS.
+- Regressões HTTP de RBAC, XSS/CSP e licença; E2E Chromium valida fallback sem projeção, visualização segura de leituras verificadas/desconhecidas e funcionamento da inbox sob CSP. Merge somente com os seis workflows verdes no HEAD e pós-merge; sem deploy, providência externa ou intervenção no FM Command.

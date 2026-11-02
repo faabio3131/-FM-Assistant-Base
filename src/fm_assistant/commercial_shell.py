@@ -23,7 +23,7 @@ _NAVIGATION = (
     ("Cadências", "/app/crm#cadence-workspace", Permission.CRM_READ),
     ("Conhecimento", "/app/knowledge", Permission.KNOWLEDGE_READ),
     ("WhatsApp", "/v1/channels/whatsapp/qr/panel", Permission.INTEGRATION_READ),
-    ("Plano e consumo", "/v1/plan/consumption/dashboard", Permission.BILLING_READ),
+    ("Plano e consumo", "/app/plan", Permission.BILLING_READ),
 )
 
 _NAV_STYLE = """
