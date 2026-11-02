@@ -10,7 +10,7 @@ import hashlib
 from html import escape
 
 from .commercial_shell import attach_navigation
-from .identity import Permission, permissions_for_role
+from .identity import Permission, Role, can_assign_role, permissions_for_role
 from .identity_repository import SessionPrincipal
 
 
@@ -208,6 +208,42 @@ if($("unit-form"))$("unit-form").addEventListener("submit",event=>{
     window.location.assign("/app/settings");
   },$("unit-status"));
 });
+let teamPage=0, teamNext=null, teamLoading=false;
+async function loadTeam(page=0){
+  if(!$("team-members") || teamLoading)return;
+  teamLoading=true;
+  $("team-reload").disabled=true;
+  $("team-previous").disabled=true;
+  $("team-next").disabled=true;
+  info($("team-list-status"),"Consultando equipe da unidade...");
+  try {
+    const result=await api("/v1/users?page="+page);
+    if(!result || !Array.isArray(result.items))throw Error("Lista não verificada.");
+    const area=$("team-members");area.replaceChildren();
+    if(!result.items.length)area.append(el("p","Nenhum usuário ativo nesta página.","muted"));
+    for(const member of result.items){
+      const item=el("article",undefined,"entry");
+      item.append(el("strong",member.display_name || "Usuário"),
+        el("small","Papel: "+(member.role || "não informado"),"muted"));
+      area.append(item);
+    }
+    teamPage=page;
+    teamNext=Number.isInteger(result.next_page)?result.next_page:null;
+    info($("team-list-status"),"Usuários ativos da unidade · página "+(page+1)+".");
+  }catch(err){
+    info($("team-list-status"),"Equipe indisponível: "+err.message);
+  }finally{
+    teamLoading=false;
+    $("team-reload").disabled=false;
+    $("team-previous").disabled=teamPage===0;
+    $("team-next").disabled=teamNext===null;
+  }
+}
+if($("team-reload"))$("team-reload").addEventListener("click",()=>loadTeam(0));
+if($("team-previous"))$("team-previous").addEventListener("click",
+  ()=>loadTeam(Math.max(0,teamPage-1)));
+if($("team-next"))$("team-next").addEventListener("click",
+  ()=>{if(teamNext!==null)loadTeam(teamNext);});
 if($("team-form"))$("team-form").addEventListener("submit",event=>{
   event.preventDefault();
   guarded(async()=>{
@@ -225,6 +261,7 @@ if($("team-form"))$("team-form").addEventListener("submit",event=>{
 loadPersona();
 loadIntegrations();
 loadUnits();
+loadTeam();
 })();
 """
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
@@ -288,23 +325,37 @@ loadUnits();
             '<div id="integration-list" aria-live="polite"></div></section>'
         )
     if team:
+        assignable_roles = "".join(
+            '<option value="' + role.value + '">' + label + '</option>'
+            for role, label in (
+                (Role.MANAGER, "Gerente"),
+                (Role.SALES_AGENT, "Comercial"),
+                (Role.SUPPORT_AGENT, "Atendimento"),
+                (Role.VIEWER, "Leitura"),
+            )
+            if can_assign_role(principal.role, role)
+        )
         parts.append(
             '<section><h2>Equipe</h2><p>Convites específicos por unidade '
             'e papel, sujeitos à permissão validada pelo servidor.</p>'
             '<form id="team-form"><label for="invite-email">E-mail do colaborador</label>'
             '<input id="invite-email" type="email" maxlength="320" required>'
             '<label for="invite-role">Papel</label>'
-            '<select id="invite-role"><option value="manager">Gerente</option>'
-            '<option value="sales_agent">Comercial</option>'
-            '<option value="support_agent">Atendimento</option>'
-            '<option value="viewer">Leitura</option></select>'
+            '<select id="invite-role">' + assignable_roles + '</select>'
             '<label for="invite-unit">Identificador da unidade</label>'
             '<input id="invite-unit" maxlength="128" value="'
             + escape(principal.unit_id, quote=True) + '" required>'
             '<button type="submit">Gerar convite interno</button></form>'
             '<label for="invite-token">Token do convite (exibido uma vez)</label>'
             '<textarea id="invite-token" readonly autocomplete="off"></textarea>'
-            '<p id="team-status" role="status" aria-live="polite"></p></section>'
+            '<p id="team-status" role="status" aria-live="polite"></p>'
+            '<h3>Usuários ativos na unidade</h3>'
+            '<p class="muted">A lista inclui convites aceitos e não divulga e-mails.</p>'
+            '<div id="team-members" aria-live="polite"></div>'
+            '<button id="team-reload" type="button">Atualizar equipe</button>'
+            '<button id="team-previous" type="button" disabled>Anterior</button>'
+            '<button id="team-next" type="button" disabled>Próxima</button>'
+            '<p id="team-list-status" role="status" aria-live="polite"></p></section>'
         )
     if not parts:
         parts.append('<section><p>Sem configurações disponíveis para este perfil.</p></section>')

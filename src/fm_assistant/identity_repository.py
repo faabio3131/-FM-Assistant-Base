@@ -407,6 +407,44 @@ class IdentityRepository:
             ).all()
             return tuple((row[0], row[1]) for row in rows)
 
+    def list_team(
+        self, *, tenant_id: str, unit_id: str, page: int = 0,
+    ) -> dict:
+        """Bounded, tenant-and-unit-scoped roster of active team members.
+
+        No email, password hash, session or invitation token is projected.
+        Caller authorization is enforced by the API permission dependency.
+        """
+        limit = 50
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(UserORM.user_id, UserORM.display_name, MembershipORM.role)
+                .select_from(MembershipORM)
+                .join(UserORM, UserORM.user_id == MembershipORM.user_id)
+                .join(
+                    MembershipUnitORM,
+                    (MembershipUnitORM.membership_id == MembershipORM.membership_id)
+                    & (MembershipUnitORM.tenant_id == MembershipORM.tenant_id),
+                )
+                .where(
+                    MembershipORM.tenant_id == tenant_id,
+                    MembershipUnitORM.tenant_id == tenant_id,
+                    MembershipUnitORM.unit_id == unit_id,
+                    MembershipORM.active.is_(True),
+                    UserORM.active.is_(True),
+                )
+                .order_by(UserORM.display_name, UserORM.user_id)
+                .offset(page * limit)
+                .limit(limit + 1)
+            ).all()
+        return {
+            "items": [
+                {"user_id": user_id, "display_name": name, "role": role}
+                for user_id, name, role in rows[:limit]
+            ],
+            "next_page": page + 1 if len(rows) > limit else None,
+        }
+
     def tenant_summary(self, *, tenant_id: str) -> tuple[str, str] | None:
         with self._session_factory() as session:
             tenant = session.get(TenantORM, tenant_id)

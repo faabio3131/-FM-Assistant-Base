@@ -1244,3 +1244,10 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Navegação comercial passa pelo hub, mantendo dashboard de franquias existente acessível quando a projeção válida está disponível.
 - Inbox HTTP adota CSP SHA-256 do controlador inline, connect-src restrito à origem, no-store, nosniff e no-referrer, preservando scripts existentes sem `unsafe-inline` para JS.
 - Regressões HTTP de RBAC, XSS/CSP e licença; E2E Chromium valida fallback sem projeção, visualização segura de leituras verificadas/desconhecidas e funcionamento da inbox sob CSP. Merge somente com os seis workflows verdes no HEAD e pós-merge; sem deploy, providência externa ou intervenção no FM Command.
+
+## 2026-11-01 — F8/WP7 equipe e acesso por unidade (candidato)
+
+- Novo GET `/v1/users?page=N` com USER_READ humano, 50 registros por página, projeção mínima de usuário ativo, papel e identificador, sem e-mail/token/segredo. A consulta cruza membership, membership-unit e usuário com tenant e unidade derivados exclusivamente da sessão assinada; headers de escopo não têm autoridade.
+- Configurações comerciais: lista real de usuários ativos por unidade, atualização e paginação, atualização após trocar de unidade e seleção de cargos limitados pela política can_assign_role do servidor. Convites continuam dependentes de USER_INVITE e aprovação existente.
+- Regressões HTTP negativas por perfil, tenant, unidade, paginação e ausência de segredo, além de Playwright com convite aceito, refresh e alternância de unidade. Sem mutação administrativa de usuários nesta frente, sem Command, deploy ou homologação externa.
+- Gate: seis workflows verdes no HEAD da PR e main pós-merge; F8 ainda IN_PROGRESS até reconciliação dos requisitos e certificação final agregada.
