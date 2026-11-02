@@ -208,6 +208,42 @@ if($("unit-form"))$("unit-form").addEventListener("submit",event=>{
     window.location.assign("/app/settings");
   },$("unit-status"));
 });
+let teamPage=0, teamNext=null, teamLoading=false;
+async function loadTeam(page=0){
+  if(!$("team-members") || teamLoading)return;
+  teamLoading=true;
+  $("team-reload").disabled=true;
+  $("team-previous").disabled=true;
+  $("team-next").disabled=true;
+  info($("team-list-status"),"Consultando equipe da unidade...");
+  try {
+    const result=await api("/v1/users?page="+page);
+    if(!result || !Array.isArray(result.items))throw Error("Lista não verificada.");
+    const area=$("team-members");area.replaceChildren();
+    if(!result.items.length)area.append(el("p","Nenhum usuário ativo nesta página.","muted"));
+    for(const member of result.items){
+      const item=el("article",undefined,"entry");
+      item.append(el("strong",member.display_name || "Usuário"),
+        el("small","Papel: "+(member.role || "não informado"),"muted"));
+      area.append(item);
+    }
+    teamPage=page;
+    teamNext=Number.isInteger(result.next_page)?result.next_page:null;
+    info($("team-list-status"),"Usuários ativos da unidade · página "+(page+1)+".");
+  }catch(err){
+    info($("team-list-status"),"Equipe indisponível: "+err.message);
+  }finally{
+    teamLoading=false;
+    $("team-reload").disabled=false;
+    $("team-previous").disabled=teamPage===0;
+    $("team-next").disabled=teamNext===null;
+  }
+}
+if($("team-reload"))$("team-reload").addEventListener("click",()=>loadTeam(0));
+if($("team-previous"))$("team-previous").addEventListener("click",
+  ()=>loadTeam(Math.max(0,teamPage-1)));
+if($("team-next"))$("team-next").addEventListener("click",
+  ()=>{if(teamNext!==null)loadTeam(teamNext);});
 if($("team-form"))$("team-form").addEventListener("submit",event=>{
   event.preventDefault();
   guarded(async()=>{
@@ -225,6 +261,7 @@ if($("team-form"))$("team-form").addEventListener("submit",event=>{
 loadPersona();
 loadIntegrations();
 loadUnits();
+loadTeam();
 })();
 """
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
@@ -304,7 +341,14 @@ loadUnits();
             '<button type="submit">Gerar convite interno</button></form>'
             '<label for="invite-token">Token do convite (exibido uma vez)</label>'
             '<textarea id="invite-token" readonly autocomplete="off"></textarea>'
-            '<p id="team-status" role="status" aria-live="polite"></p></section>'
+            '<p id="team-status" role="status" aria-live="polite"></p>'
+            '<h3>Usuários ativos na unidade</h3>'
+            '<p class="muted">A lista inclui convites aceitos e não divulga e-mails.</p>'
+            '<div id="team-members" aria-live="polite"></div>'
+            '<button id="team-reload" type="button">Atualizar equipe</button>'
+            '<button id="team-previous" type="button" disabled>Anterior</button>'
+            '<button id="team-next" type="button" disabled>Próxima</button>'
+            '<p id="team-list-status" role="status" aria-live="polite"></p></section>'
         )
     if not parts:
         parts.append('<section><p>Sem configurações disponíveis para este perfil.</p></section>')
