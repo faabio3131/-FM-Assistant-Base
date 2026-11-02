@@ -31,7 +31,7 @@ button:hover{background:#eef4f8}button:disabled{opacity:.55;cursor:default}
 button.primary{background:#155b74;border-color:#155b74;color:white}
 button.primary:hover{background:#10485d}
 button.critical{color:#8a361c;border-color:#d7b7a8}
-nav{display:flex;gap:8px;margin-bottom:15px}
+main nav{display:flex;gap:8px;margin-bottom:15px;flex-wrap:wrap}
 input,textarea{display:block;width:100%;font:inherit;padding:11px;
  border:1px solid #bccbd5;border-radius:8px;margin:6px 0 12px}
 textarea{resize:vertical;min-height:82px}

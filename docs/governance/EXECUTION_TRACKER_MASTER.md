@@ -1251,3 +1251,11 @@ Construção interna sobre o WP1 integrado no Assistant: schema aditivo 0020 com
 - Configurações comerciais: lista real de usuários ativos por unidade, atualização e paginação, atualização após trocar de unidade e seleção de cargos limitados pela política can_assign_role do servidor. Convites continuam dependentes de USER_INVITE e aprovação existente.
 - Regressões HTTP negativas por perfil, tenant, unidade, paginação e ausência de segredo, além de Playwright com convite aceito, refresh e alternância de unidade. Sem mutação administrativa de usuários nesta frente, sem Command, deploy ou homologação externa.
 - Gate: seis workflows verdes no HEAD da PR e main pós-merge; F8 ainda IN_PROGRESS até reconciliação dos requisitos e certificação final agregada.
+
+
+## 2026-11-02 — F8 fechamento da matriz responsiva (PR #48)
+
+- Base main `363fa4ce347e73948c4ab9b006dba65976f8612a`, após PR #47 (6/6 pós-merge verdes).
+- Auditoria do navegador F8 ampliada: sete telas `/app`, `/app/settings`, `/app/plan`, `/app/crm` (inclui agenda/cadências), `/app/knowledge`, `/app/inbox` e painel QR/WhatsApp; viewports 320, 375, 768 e 1280 px com sessão assinada; verifica HTTP 200, landmark principal e ausência de overflow horizontal.
+- Problemas reproduzidos na CI Chromium: inbox com 1029 px em viewport 320 px por seletor `nav` global colidindo com a navegação compartilhada; QR/WhatsApp com 1065 px por trilha de grade intrínseca. Corrigidos por escopo de toolbar e grid minmax(0,1fr), sem mudanças de autoridade, provedores ou envio externo.
+- 12 cenários comerciais Chromium previamente existentes permanecem na mesma suíte; novo cenário mede responsividade transversal. CI completa obrigatória no HEAD definitivo antes de merge, seguida dos seis gates pós-merge. Ainda não equivale a homologação externa, visual review humana nem deploy. Sem mudanças no FM Command.

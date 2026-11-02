@@ -597,3 +597,32 @@ def test_browser_team_roster_updates_and_obeys_unit_scope(browser, site):
         assert errors == [], errors
     finally:
         context.close()
+
+
+def test_browser_all_commercial_modules_responsive(browser, site):
+    """Every customer-facing module must fit phone, tablet and desktop viewports."""
+    context = browser.new_context(viewport={"width": 320, "height": 740})
+    page = context.new_page()
+    paths = (
+        "/app", "/app/settings", "/app/plan", "/app/crm",
+        "/app/knowledge", "/app/inbox", "/v1/channels/whatsapp/qr/panel",
+    )
+    try:
+        sign_in(page, site)
+        for width in (320, 375, 768, 1280):
+            page.set_viewport_size({"width": width, "height": 850})
+            for path in paths:
+                response = page.goto(site + path)
+                assert response is not None and response.status == 200, (path, width)
+                expect(page.locator("#fm-main-content")).to_be_visible()
+                page.locator("#fm-main-content").scroll_into_view_if_needed()
+                page.wait_for_load_state("domcontentloaded")
+                dimensions = page.evaluate("""() => ({
+                    width: innerWidth,
+                    document: document.documentElement.scrollWidth,
+                    body: document.body.scrollWidth
+                })""")
+                assert dimensions["document"] <= width + 1, (path, width, dimensions)
+                assert dimensions["body"] <= width + 1, (path, width, dimensions)
+    finally:
+        context.close()
