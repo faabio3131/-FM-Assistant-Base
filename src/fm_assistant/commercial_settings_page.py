@@ -10,7 +10,7 @@ import hashlib
 from html import escape
 
 from .commercial_shell import attach_navigation
-from .identity import Permission, permissions_for_role
+from .identity import Permission, Role, can_assign_role, permissions_for_role
 from .identity_repository import SessionPrincipal
 
 
@@ -325,16 +325,23 @@ loadTeam();
             '<div id="integration-list" aria-live="polite"></div></section>'
         )
     if team:
+        assignable_roles = "".join(
+            '<option value="' + role.value + '">' + label + '</option>'
+            for role, label in (
+                (Role.MANAGER, "Gerente"),
+                (Role.SALES_AGENT, "Comercial"),
+                (Role.SUPPORT_AGENT, "Atendimento"),
+                (Role.VIEWER, "Leitura"),
+            )
+            if can_assign_role(principal.role, role)
+        )
         parts.append(
             '<section><h2>Equipe</h2><p>Convites específicos por unidade '
             'e papel, sujeitos à permissão validada pelo servidor.</p>'
             '<form id="team-form"><label for="invite-email">E-mail do colaborador</label>'
             '<input id="invite-email" type="email" maxlength="320" required>'
             '<label for="invite-role">Papel</label>'
-            '<select id="invite-role"><option value="manager">Gerente</option>'
-            '<option value="sales_agent">Comercial</option>'
-            '<option value="support_agent">Atendimento</option>'
-            '<option value="viewer">Leitura</option></select>'
+            '<select id="invite-role">' + assignable_roles + '</select>'
             '<label for="invite-unit">Identificador da unidade</label>'
             '<input id="invite-unit" maxlength="128" value="'
             + escape(principal.unit_id, quote=True) + '" required>'
