@@ -183,6 +183,7 @@ load();
         '#fm-plan-status{min-height:24px;color:#375c73}'
         '.fm-action{display:inline-flex;padding:12px 16px;background:white;'
         'border:1px solid #a8c2d1;border-radius:9px;text-decoration:none;'
+        '.fm-action[hidden]{display:none}'
         'color:#104f70;margin:12px 0}'
         'button{font:inherit;background:#175c78;color:white;'
         'border:0;border-radius:8px;padding:10px 18px;cursor:pointer}'
