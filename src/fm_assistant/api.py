@@ -1162,6 +1162,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return [UnitResponse(unit_id=unit_id, display_name=name) for unit_id, name in rows]
 
+    @app.get("/v1/users")
+    def list_team_members(
+        request: Request,
+        page: int = Query(default=0, ge=0, le=200),
+        principal: SessionPrincipal = Depends(human_permission(Permission.USER_READ)),
+    ) -> dict:
+        return request.app.state.identity_repository.list_team(
+            tenant_id=principal.tenant_id,
+            unit_id=principal.unit_id,
+            page=page,
+        )
+
     @app.post("/v1/units", response_model=UnitResponse)
     def create_unit(
         payload: UnitCreateRequest,
