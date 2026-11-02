@@ -1,7 +1,8 @@
 """F8 scoped team roster read model; no identity or secret duplication."""
 from __future__ import annotations
 
-from test_identity_rbac import _bootstrap, _login
+from test_f8_commercial_settings import _invite_role
+from test_identity_rbac import MANAGER_PASSWORD, _bootstrap, _login
 
 
 def _invite_and_accept(client, *, email, name, unit_id="unit-a", role="viewer"):
@@ -109,3 +110,19 @@ def test_team_settings_ui_renders_non_secret_roster_controls(client):
     assert 'member.display_name' in page.text
     assert "member.email" not in page.text
     assert "innerHTML" not in page.text
+
+
+def test_manager_invitation_choices_respect_role_assignment_policy(client):
+    _bootstrap(client)
+    _login(client)
+    owner = client.get("/app/settings")
+    assert '<option value="manager">Gerente</option>' in owner.text
+    _invite_role(
+        client, "roster-manager@example.com", "manager", MANAGER_PASSWORD,
+    )
+    manager = client.get("/app/settings")
+    assert manager.status_code == 200
+    assert 'id="team-form"' in manager.text
+    assert '<option value="manager">Gerente</option>' not in manager.text
+    assert '<option value="sales_agent">Comercial</option>' in manager.text
+    assert '<option value="viewer">Leitura</option>' in manager.text
