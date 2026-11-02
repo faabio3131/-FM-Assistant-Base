@@ -8,6 +8,10 @@ def render_consumption_dashboard(data: dict) -> str:
     def safely(value: object) -> str:
         return escape(str(value), quote=True)
 
+    status_label = {
+        "trial": "Teste grátis ativo",
+        "active": "Assinatura ativa",
+    }.get(data.get("license_status"), "Situação comercial não verificada")
     cards = []
     for row in data["consumption"]:
         verified = row["status"] == "observed"
@@ -63,6 +67,7 @@ def render_consumption_dashboard(data: dict) -> str:
         '</style></head><body><main>'
         '<div class="eyebrow">VendeAtendeIA · Consumo e franquias</div>'
         '<h1>' + safely(data["plan_name"]) + '</h1>'
+        '<p class="quiet">' + safely(status_label) + '</p>'
         '<p class="subtitle">Todas as funcionalidades estão disponíveis em todos os planos.'
         ' O que varia é a franquia de consumo. Vigência até '
         + safely(data["licensed_until"]) + '.</p>'
