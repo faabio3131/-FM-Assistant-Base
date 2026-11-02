@@ -247,3 +247,71 @@ def test_meter_snapshot_rejects_forged_version_types_or_inconsistent_balances(ta
     )
     with pytest.raises(ValueError, match="plan.meter_reading_invalid"):
         replace(valid, **tamper)
+
+
+def test_f9_customer_receives_all_quota_classes_without_private_costs(client):
+    """Unknown metering is never recast as free allowance across resource types."""
+    _bootstrap(client)
+    _plan(client, "tenant-a", revision=1, cap=9000)
+    resources = (
+        "whatsapp.messages", "audio.seconds", "storage.bytes",
+        "users.seats", "integrations.active", "automation.executions",
+    )
+    engine = create_engine(client.app.state.settings.database_url)
+    with Session(engine) as db, db.begin():
+        for index, resource in enumerate(resources, 1):
+            db.add(PlanLimitORM(
+                plan_code="trial", revision=1, resource=resource,
+                scope="unit" if resource == "integrations.active" else "tenant",
+                limit_units=index * 100, window_seconds=86400,
+            ))
+    engine.dispose()
+    _login(client)
+    response = client.get("/v1/plan/consumption")
+    assert response.status_code == 200
+    payload = response.json()
+    readings = {row["resource"]: row for row in payload["consumption"]}
+    assert set(resources).issubset(readings)
+    assert "ai.cost_usd_microunits" not in readings
+    assert payload["usage_verified"] is False
+    for resource in resources:
+        reading = readings[resource]
+        assert reading["status"] == "metering_unavailable"
+        assert reading["remaining_units"] is None
+        assert reading["consumed_units"] is None
+        assert reading["reserved_units"] is None
+        assert reading["utilization_percent"] is None
+        assert reading["warning_level"] == "unknown"
+    assert readings["integrations.active"]["scope"] == "unit"
+    assert "cost_usd_microunits" not in response.text
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_f9_plan_customer_status_follows_live_trial_paid_and_expiry(client):
+    """The customer sees canonical subscription status, never a guessed renewal."""
+    _bootstrap(client)
+    _plan(client, "tenant-a", revision=1, cap=9000)
+    _login(client)
+    trial = client.get("/v1/plan/consumption")
+    assert trial.status_code == 200
+    assert trial.json()["license_status"] == "trial"
+    assert "Teste grátis ativo" in client.get("/v1/plan/consumption/dashboard").text
+    plan_html = client.get("/app/plan")
+    assert "Teste grátis ativo" in plan_html.text
+    assert "Assinatura ativa" in plan_html.text
+    engine = create_engine(client.app.state.settings.database_url)
+    with Session(engine) as db, db.begin():
+        license_row = db.get(TenantLicenseORM, "tenant-a")
+        license_row.status = "active"
+        license_row.period_started_at = NOW - timedelta(minutes=5)
+        license_row.period_ends_at = NOW + timedelta(days=20)
+    paid = client.get("/v1/plan/consumption")
+    assert paid.status_code == 200
+    assert paid.json()["license_status"] == "active"
+    assert "Assinatura ativa" in client.get("/v1/plan/consumption/dashboard").text
+    with Session(engine) as db, db.begin():
+        db.get(TenantLicenseORM, "tenant-a").period_ends_at = NOW - timedelta(days=1)
+    expired = client.get("/v1/plan/consumption")
+    assert expired.status_code == 403
+    assert expired.json()["detail"] == "plan_unavailable"
+    engine.dispose()

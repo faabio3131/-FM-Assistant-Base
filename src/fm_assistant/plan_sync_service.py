@@ -25,6 +25,7 @@ METRICS = frozenset({
     "ai.output_tokens", "ai.cached_tokens", "ai.cost_usd_microunits",
     "audio.seconds", "whatsapp.messages", "automation.executions",
     "storage.bytes", "crm.leads", "users.seats", "units.active",
+    "integrations.active",
 })
 
 

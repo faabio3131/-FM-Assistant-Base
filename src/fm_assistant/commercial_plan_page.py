@@ -50,8 +50,12 @@ function showPlan(data) {
     reset("A resposta do plano não pôde ser validada.");
     return false;
   }
+  const licenseLabel = data.license_status === "trial" ? "Teste grátis ativo" :
+    data.license_status === "active" ? "Assinatura ativa" :
+    "Situação comercial não verificada";
   summary.append(
     node("h2", data.plan_name),
+    node("p", "Situação: " + licenseLabel),
     node("p", "Vigência informada: " +
       (typeof data.licensed_until === "string" ? data.licensed_until : "não disponível")),
     node("p", "Os recursos do SaaS são oferecidos em todos os planos; "+

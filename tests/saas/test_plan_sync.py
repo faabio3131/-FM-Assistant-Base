@@ -125,3 +125,52 @@ def test_missing_token_quota_never_becomes_unlimited(catalog):
     doc["allowances"].pop()
     with pytest.raises(PlanSyncDenied):
         service.apply(**signed(doc))
+
+
+def test_f9_signed_catalog_supports_all_contractual_quota_classes(catalog):
+    """Command owns quota figures; Assistant persists only its signed version."""
+    service, sessions = catalog
+    doc = document()
+    customer_resources = (
+        "whatsapp.messages", "audio.seconds", "storage.bytes",
+        "users.seats", "integrations.active", "automation.executions",
+    )
+    for idx, resource in enumerate(customer_resources, 1):
+        doc["allowances"].append({
+            "resource": resource,
+            "scope": "unit" if resource == "integrations.active" else "tenant",
+            "limitUnits": idx * 100,
+            "windowSeconds": 86400,
+        })
+    # The confidential operational cost allowance remains separate from
+    # customer-facing quotas even if its governed policy is projected.
+    doc["allowances"].append({
+        "resource": "ai.cost_usd_microunits", "scope": "tenant",
+        "limitUnits": 123456, "windowSeconds": 86400,
+    })
+    assert service.apply(**signed(doc)) == "projected"
+    with sessions() as db:
+        saved = db.scalars(select(PlanLimitORM)).all()
+        by_resource = {record.resource: record for record in saved}
+        assert set(customer_resources).issubset(by_resource)
+        assert by_resource["integrations.active"].scope == "unit"
+        assert by_resource["users.seats"].limit_units == 400
+        assert by_resource["ai.cost_usd_microunits"].limit_units == 123456
+    assert service.apply(**signed(doc)) == "already_projected"
+
+
+def test_f9_quota_projection_rejects_unapproved_or_negative_capacity(catalog):
+    service, sessions = catalog
+    for resource, amount in (
+        ("billing.private_profit", 100), ("integrations.active", 0),
+        ("integrations.active", -1), ("integrations.active", True),
+    ):
+        doc = document()
+        doc["allowances"].append({
+            "resource": resource, "scope": "unit",
+            "limitUnits": amount, "windowSeconds": 86400,
+        })
+        with pytest.raises(PlanSyncDenied):
+            service.apply(**signed(doc))
+    with sessions() as db:
+        assert db.scalars(select(PlanVersionORM)).all() == []

@@ -465,7 +465,8 @@ def test_browser_plan_hub_unknown_projection_and_verified_usage(browser, site):
 
         def plan_response(route):
             route.fulfill(status=200, content_type="application/json", body=(
-                '{"plan_name":"Plano E2E","licensed_until":"2026-12-20",'
+                '{"plan_name":"Plano E2E","license_status":"trial",'
+                '"licensed_until":"2026-12-20",'
                 '"revision":2,"usage_verified":false,"consumption":['
                 '{"resource":"ai.requests","status":"observed",'
                 '"limit_units":100,"consumed_units":12,"reserved_units":8,'
@@ -484,6 +485,7 @@ def test_browser_plan_hub_unknown_projection_and_verified_usage(browser, site):
         ))
         page.locator("#fm-plan-reload").click()
         expect(page.locator("#fm-plan-summary")).to_contain_text("Plano E2E")
+        expect(page.locator("#fm-plan-summary")).to_contain_text("Teste grátis ativo")
         expect(page.locator("#fm-plan-rows article")).to_have_count(2)
         expect(page.locator("#fm-plan-rows progress")).to_have_count(1)
         expect(page.locator("#fm-plan-rows")).to_contain_text(

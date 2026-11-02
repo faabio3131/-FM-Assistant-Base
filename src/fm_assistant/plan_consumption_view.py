@@ -85,8 +85,10 @@ class PlanConsumptionView:
             tenant_id=tenant_id, unit_id=unit_id,
             resource="ai.total_tokens", now=now,
         )
-        if (token_ref.plan_code, token_ref.revision) != (
+        if (token_ref.plan_code, token_ref.revision,
+            token_ref.licensed_until, token_ref.license_status) != (
             ref.plan_code, ref.revision,
+            ref.licensed_until, ref.license_status,
         ):
             raise ValueError("plan.mixed_revision")
         with self._sessions() as session:
@@ -147,6 +149,7 @@ class PlanConsumptionView:
             "plan_code": ref.plan_code, "revision": ref.revision,
             "plan_name": version.label if version else ref.plan_code,
             "licensed_until": ref.licensed_until.isoformat(),
+            "license_status": ref.license_status,
             "all_features_included": True,
             "consumption": counters,
             "usage_verified": bool(counters) and all(
