@@ -8,7 +8,7 @@ from __future__ import annotations
 import socket
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -400,7 +400,7 @@ def test_browser_crm_cadence_and_agenda(browser, site):
         page.locator("#cadence-opportunity").select_option(
             label="Oportunidade Agenda E2E",
         )
-        when = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+        when = (datetime.now(UTC) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
         page.locator("#cadence-start").fill(when)
         page.locator("#cadence-run-form button[type=submit]").click()
         expect(page.locator("#cadence-runs")).not_to_contain_text(
