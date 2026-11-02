@@ -247,3 +247,41 @@ def test_meter_snapshot_rejects_forged_version_types_or_inconsistent_balances(ta
     )
     with pytest.raises(ValueError, match="plan.meter_reading_invalid"):
         replace(valid, **tamper)
+
+
+def test_f9_customer_receives_all_quota_classes_without_private_costs(client):
+    """Unknown metering is never recast as free allowance across resource types."""
+    _bootstrap(client)
+    _plan(client, "tenant-a", revision=1, cap=9000)
+    resources = (
+        "whatsapp.messages", "audio.seconds", "storage.bytes",
+        "users.seats", "integrations.active", "automation.executions",
+    )
+    engine = create_engine(client.app.state.settings.database_url)
+    with Session(engine) as db, db.begin():
+        for index, resource in enumerate(resources, 1):
+            db.add(PlanLimitORM(
+                plan_code="trial", revision=1, resource=resource,
+                scope="unit" if resource == "integrations.active" else "tenant",
+                limit_units=index * 100, window_seconds=86400,
+            ))
+    engine.dispose()
+    _login(client)
+    response = client.get("/v1/plan/consumption")
+    assert response.status_code == 200
+    payload = response.json()
+    readings = {row["resource"]: row for row in payload["consumption"]}
+    assert set(resources).issubset(readings)
+    assert "ai.cost_usd_microunits" not in readings
+    assert payload["usage_verified"] is False
+    for resource in resources:
+        reading = readings[resource]
+        assert reading["status"] == "metering_unavailable"
+        assert reading["remaining_units"] is None
+        assert reading["consumed_units"] is None
+        assert reading["reserved_units"] is None
+        assert reading["utilization_percent"] is None
+        assert reading["warning_level"] == "unknown"
+    assert readings["integrations.active"]["scope"] == "unit"
+    assert "cost_usd_microunits" not in response.text
+    assert response.headers["cache-control"] == "no-store"
