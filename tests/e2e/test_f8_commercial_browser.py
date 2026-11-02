@@ -526,3 +526,74 @@ def test_browser_inbox_csp_executes_only_hashed_controller(browser, site):
         assert errors == [], errors
     finally:
         context.close()
+
+
+
+def test_browser_team_roster_updates_and_obeys_unit_scope(browser, site):
+    context = browser.new_context()
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        sign_in(page, site)
+        page.goto(site + "/app/settings")
+        expect(page.locator("#team-members")).to_contain_text("Operador Browser")
+
+        page.locator("#invite-email").fill("team-first@browser.example")
+        page.locator("#invite-role").select_option("viewer")
+        page.locator("#team-form button[type=submit]").click()
+        expect(page.locator("#team-status")).to_contain_text("Convite criado")
+        token = page.locator("#invite-token").input_value()
+        with httpx.Client(base_url=site, timeout=15) as api:
+            accepted = api.post("/v1/auth/accept-invitation", json={
+                "invitation_token": token,
+                "display_name": "Equipe Primeira Unidade",
+                "password": "TeamMemberPassword!123",
+            })
+            assert accepted.status_code == 200, accepted.text
+
+        page.locator("#team-reload").click()
+        expect(page.locator("#team-members")).to_contain_text(
+            "Equipe Primeira Unidade",
+        )
+        expect(page.locator("#team-members")).not_to_contain_text(
+            "team-first@browser.example",
+        )
+
+        created = context.request.post(site + "/v1/units", data={
+            "unit_id": "team-unit-second",
+            "display_name": "Segunda Unidade Equipe",
+        })
+        assert created.status == 200, created.text()
+        invited = context.request.post(site + "/v1/users/invitations", data={
+            "email": "team-second@browser.example", "role": "viewer",
+            "unit_id": "team-unit-second",
+        })
+        assert invited.status == 200, invited.text()
+        with httpx.Client(base_url=site, timeout=15) as api:
+            accepted = api.post("/v1/auth/accept-invitation", json={
+                "invitation_token": invited.json()["invitation_token"],
+                "display_name": "Equipe Segunda Unidade",
+                "password": "TeamMemberPassword!123",
+            })
+            assert accepted.status_code == 200, accepted.text
+
+        page.locator("#team-reload").click()
+        expect(page.locator("#team-members")).not_to_contain_text(
+            "Equipe Segunda Unidade",
+        )
+        page.locator("#unit-reload").click()
+        page.locator("#unit-choice").select_option("team-unit-second")
+        page.locator("#unit-form button[type=submit]").click()
+        expect(page.locator("#unit-current")).to_have_attribute(
+            "data-unit", "team-unit-second",
+        )
+        expect(page.locator("#team-members")).to_contain_text(
+            "Equipe Segunda Unidade",
+        )
+        expect(page.locator("#team-members")).not_to_contain_text(
+            "Equipe Primeira Unidade",
+        )
+        assert errors == [], errors
+    finally:
+        context.close()
